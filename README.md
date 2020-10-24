@@ -133,3 +133,14 @@ A simple full-attention transformer, but also complete with a set of promising e
     primaryClass = {eess.AS}
 }
 ```
+
+```bibtex
+@misc{ke2020rethinking,
+      title     = {Rethinking Positional Encoding in Language Pre-training},
+      author    = {Guolin Ke and Di He and Tie-Yan Liu},
+      year      = {2020},
+      eprint    = {2006.15595},
+      archivePrefix = {arXiv},
+      primaryClass = {cs.CL}
+}
+```
