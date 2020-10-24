@@ -70,66 +70,66 @@ A simple full-attention transformer, but also complete with a set of promising e
 
 ```bibtex
 @misc{burtsev2020memory,
-	title 	= {Memory Transformer}, 
-	author 	= {Mikhail S. Burtsev and Grigory V. Sapunov},
-	year 		= {2020},
-	eprint 	= {2006.11527},
-	archivePrefix = {arXiv},
-	primaryClass = {cs.CL}
+    title   = {Memory Transformer}, 
+    author  = {Mikhail S. Burtsev and Grigory V. Sapunov},
+    year        = {2020},
+    eprint  = {2006.11527},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
 
 ```bibtex
 @misc{correia2019adaptively,
-	title 	= {Adaptively Sparse Transformers}, 
-	author 	= {Gonçalo M. Correia and Vlad Niculae and André F. T. Martins},
-	year 		= {2019},
-	eprint 	= {1909.00015},
-	archivePrefix = {arXiv},
-	primaryClass = {cs.CL}
+    title   = {Adaptively Sparse Transformers}, 
+    author  = {Gonçalo M. Correia and Vlad Niculae and André F. T. Martins},
+    year        = {2019},
+    eprint  = {1909.00015},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
 
 ```bibtex
 @misc{shazeer2020talkingheads,
-	title 	= {Talking-Heads Attention}, 
-	author 	= {Noam Shazeer and Zhenzhong Lan and Youlong Cheng and Nan Ding and Le Hou},
-	year 		= {2020},
-	eprint 	= {2003.02436},
-	archivePrefix = {arXiv},
-	primaryClass = {cs.LG}
+    title   = {Talking-Heads Attention}, 
+    author  = {Noam Shazeer and Zhenzhong Lan and Youlong Cheng and Nan Ding and Le Hou},
+    year        = {2020},
+    eprint  = {2003.02436},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
 ```bibtex
 @misc{press2020improving,
-	title 	= {Improving Transformer Models by Reordering their Sublayers}, 
-	author 	= {Ofir Press and Noah A. Smith and Omer Levy},
-	year 	= {2020},
-	eprint 	= {1911.03864},
-	archivePrefix = {arXiv},
-	primaryClass = {cs.CL}
+    title   = {Improving Transformer Models by Reordering their Sublayers}, 
+    author  = {Ofir Press and Noah A. Smith and Omer Levy},
+    year    = {2020},
+    eprint  = {1911.03864},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
 
 ```bibtex
 @misc{lu2019understanding,
-	title 	= {Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View}, 
-	author 	= {Yiping Lu and Zhuohan Li and Di He and Zhiqing Sun and Bin Dong and Tao Qin and Liwei Wang and Tie-Yan Liu},
-	year 	= {2019},
-	eprint 	= {1906.02762},
-	archivePrefix = {arXiv},
-	primaryClass = {cs.LG}
+    title   = {Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View}, 
+    author  = {Yiping Lu and Zhuohan Li and Di He and Zhiqing Sun and Bin Dong and Tao Qin and Liwei Wang and Tie-Yan Liu},
+    year    = {2019},
+    eprint  = {1906.02762},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
 ```bibtex
 @misc{zhang2020selfattention,
-	title 	= {When Can Self-Attention Be Replaced by Feed Forward Layers?}, 
-	author 	= {Shucong Zhang and Erfan Loweimi and Peter Bell and Steve Renals},
-	year 	= {2020},
-	eprint 	= {2005.13895},
-	archivePrefix = {arXiv},
-	primaryClass = {eess.AS}
+    title   = {When Can Self-Attention Be Replaced by Feed Forward Layers?}, 
+    author  = {Shucong Zhang and Erfan Loweimi and Peter Bell and Steve Renals},
+    year    = {2020},
+    eprint  = {2005.13895},
+    archivePrefix = {arXiv},
+    primaryClass = {eess.AS}
 }
 ```
