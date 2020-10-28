@@ -4,6 +4,30 @@ X stands for **ex**perimental
 
 A simple full-attention transformer, but also complete with a set of promising experimental features from various papers.
 
+## Install
+
+```bash
+$ pip install x-transformers
+```
+
+## Usage
+
+```python
+import torch
+from x_transformers import XTransformer
+
+model = XTransformer(
+    num_tokens = 256,
+    dim = 512,
+    depth = 6,
+    heads = 8,
+    max_seq_len = 1024
+)
+src = torch.randint(0, 256, (1, 1024))
+tgt = torch.randint(0, 256, (1, 1024))
+model(src, tgt) # (1, 1024, 512)
+```
+
 ## Citations
 
 ```bibtex
