@@ -113,6 +113,7 @@ class TransformerWrapper(nn.Module):
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.pos_emb = nn.Embedding(max_seq_len, dim)
         self.layer_blocks = layer_blocks
+        self.norm = nn.LayerNorm(dim)
         self.to_logits = nn.Linear(dim, num_tokens) if return_logits else nn.Identity()
 
     def forward(self, x, **kwargs):
@@ -120,6 +121,7 @@ class TransformerWrapper(nn.Module):
         x = self.token_emb(x)
         x += self.pos_emb(torch.arange(n, device = device))
         x = self.layer_blocks(x, **kwargs)
+        x = self.norm(x)
         return self.to_logits(x)
 
 class XTransformer(nn.Module):
