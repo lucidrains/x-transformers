@@ -1,6 +1,7 @@
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
+from inspect import isfunction
 from einops import rearrange, repeat
 
 # helpers
@@ -9,7 +10,9 @@ def exists(val):
     return val is not None
 
 def default(val, d):
-    return val if exists(val) else d
+    if exists(val):
+        return val
+    return d() if isfunction(d) else d
 
 # classes
 
@@ -56,8 +59,8 @@ class Attention(nn.Module):
         self.to_kv = nn.Linear(dim, dim * 2, bias = False)
         self.to_out = nn.Linear(dim, dim)
 
-    def forward(self, x, context = None, mask = None):
-        _, n, _, h, device = *x.shape, self.heads, x.device
+    def forward(self, x, context = None, mask = None, context_mask = None):
+        b, n, _, h, device = *x.shape, self.heads, x.device
         kv_input = default(context, x)
 
         q = self.to_q(x)
@@ -66,9 +69,19 @@ class Attention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, *kv))
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
+        if any(map(exists, (mask, context_mask))):
+            q_mask = default(mask, lambda: torch.ones((b, dots.shape[-2]), device = device).bool())
+            k_mask = default(context_mask, lambda: torch.ones((b, dots.shape[-1]), device = device).bool())
+            q_mask = rearrange(q_mask, 'b i -> b () i ()')
+            k_mask = rearrange(k_mask, 'b j -> b () () j')
+            mask = q_mask * k_mask
+            dots.masked_fill_(mask, float('-inf'))
+            del mask
+
         if self.causal:
             mask = torch.ones((n, n), device = device).triu_(1).bool()
             dots.masked_fill_(mask, float('-inf'))
+            del mask
 
         attn = dots.softmax(dim = -1)
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
@@ -84,9 +97,9 @@ class Encoder(nn.Module):
                 Residual(PreNorm(dim, Attention(dim, heads = heads))),
                 Residual(PreNorm(dim, FeedForward(dim)))
             ]))
-    def forward(self, x, context = None):
+    def forward(self, x, context = None, mask = None):
         for (self_attn, ff) in self.layers:
-            x = self_attn(x)
+            x = self_attn(x, mask = mask)
             x = ff(x)
         return x
 
@@ -100,10 +113,10 @@ class Decoder(nn.Module):
                 Residual(PreNorm(dim, Attention(dim, heads = heads))),
                 Residual(PreNorm(dim, FeedForward(dim))),
             ]))
-    def forward(self, x, context = None):
+    def forward(self, x, context = None, mask = None, context_mask = None):
         for (self_attn, cross_attn, ff) in self.layers:
             x = self_attn(x)
-            x = cross_attn(x, context = context)
+            x = cross_attn(x, context = context, mask = mask, context_mask = context_mask)
             x = ff(x)
         return x
 
@@ -144,7 +157,7 @@ class XTransformer(nn.Module):
             return_logits = True
         )
 
-    def forward(self, src, tgt, mems = None):
-        enc = self.encoder(src)
-        out = self.decoder(tgt, context = enc)
+    def forward(self, src, tgt, src_mask = None, tgt_mask = None):
+        enc = self.encoder(src, mask = src_mask)
+        out = self.decoder(tgt, context = enc, mask = tgt_mask, context_mask = src_mask)
         return out

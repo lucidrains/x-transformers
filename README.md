@@ -23,9 +23,13 @@ model = XTransformer(
     heads = 8,
     max_seq_len = 1024
 )
+
 src = torch.randint(0, 256, (1, 1024))
+src_mask = torch.ones_like(src).bool()
 tgt = torch.randint(0, 256, (1, 1024))
-model(src, tgt) # (1, 1024, 512)
+tgt_mask = torch.ones_like(tgt).bool()
+
+model(src, tgt, src_mask = src_mask, tgt_mask = tgt_mask) # (1, 1024, 512)
 ```
 
 ## Citations
