@@ -56,6 +56,23 @@ x = torch.randint(0, 256, (1, 1024)).cuda()
 model(x) # (1, 1024, 20000)
 ```
 
+GPT3 would be approximately the following (but you wouldn't be able to run it anyways)
+
+```python
+
+gpt3 = TransformerWrapper(
+    num_tokens = 50000,
+    max_seq_len = 2048,
+    layer_blocks = Decoder(
+        dim = 12288,
+        dim_head = 128,
+        depth = 96,
+        heads = 96
+    ),
+    return_logits = True
+).cuda()
+```
+
 Encoder-only (BERT-like)
 
 ```python

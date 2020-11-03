@@ -91,13 +91,13 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Encoder(nn.Module):
-    def __init__(self, dim, depth, heads = 8):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, Attention(dim, heads = heads))),
+                Residual(PreNorm(dim, Attention(dim, dim_head = dim_head, heads = heads))),
                 Residual(PreNorm(dim, FeedForward(dim)))
             ]))
     def forward(self, x, context = None, mask = None):
@@ -107,14 +107,14 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, dim, depth, heads = 8, cross_attend = False):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8, cross_attend = False):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, Attention(dim, heads = heads, causal = True))),
-                Residual(PreNorm(dim, Attention(dim, heads = heads))) if cross_attend else None,
+                Residual(PreNorm(dim, Attention(dim, dim_head = dim_head, heads = heads, causal = True))),
+                Residual(PreNorm(dim, Attention(dim, dim_head = dim_head, heads = heads))) if cross_attend else None,
                 Residual(PreNorm(dim, FeedForward(dim))),
             ]))
     def forward(self, x, context = None, mask = None, context_mask = None):
