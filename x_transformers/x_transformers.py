@@ -49,17 +49,17 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 8, causal = False, mask = None):
+    def __init__(self, dim, dim_head = 64, heads = 8, causal = False, mask = None):
         super().__init__()
-        assert (dim % heads) == 0, 'dimension must be divisible by number of heads'
-        self.scale = (dim // heads) ** -0.5
+        self.scale = dim_head ** -0.5
         self.heads = heads
         self.causal = causal
         self.mask = mask
 
-        self.to_q = nn.Linear(dim, dim, bias = False)
-        self.to_kv = nn.Linear(dim, dim * 2, bias = False)
-        self.to_out = nn.Linear(dim, dim)
+        inner_dim = dim_head * heads
+        self.to_q = nn.Linear(dim, inner_dim, bias = False)
+        self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
+        self.to_out = nn.Linear(inner_dim, dim)
 
     def forward(self, x, context = None, mask = None, context_mask = None):
         b, n, _, h, device = *x.shape, self.heads, x.device

@@ -82,7 +82,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     model.train()
 
     for __ in range(GRADIENT_ACCUMULATE_EVERY):
-        loss = model(next(train_loader), return_loss = True)
+        loss = model(next(train_loader))
         loss.backward()
 
     print(f'training loss: {loss.item()}')
@@ -93,7 +93,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     if i % VALIDATE_EVERY == 0:
         model.eval()
         with torch.no_grad():
-            loss = model(next(val_loader), return_loss = True)
+            loss = model(next(val_loader))
             print(f'validation loss: {loss.item()}')
 
     if i % GENERATE_EVERY == 0:
