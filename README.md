@@ -1,4 +1,4 @@
-## x-transformers (wip)
+## x-transformers
 
 X stands for **ex**perimental
 
