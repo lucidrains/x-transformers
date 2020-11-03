@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from inspect import isfunction
 from einops import rearrange, repeat
 
+from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+
 # helpers
 
 def exists(val):
@@ -143,7 +145,7 @@ class TransformerWrapper(nn.Module):
         return self.to_logits(x)
 
 class XTransformer(nn.Module):
-    def __init__(self, *, num_tokens, dim, depth, max_seq_len, heads = 8):
+    def __init__(self, *, num_tokens, dim, depth, max_seq_len, heads = 8, return_tgt_loss = False):
         super().__init__()
 
         self.encoder = TransformerWrapper(
@@ -159,6 +161,9 @@ class XTransformer(nn.Module):
             layer_blocks = Decoder(dim, depth, heads, cross_attend = True),
             return_logits = True
         )
+
+        if return_tgt_loss:
+            self.decoder = AutoregressiveWrapper(self.decoder)
 
     def forward(self, src, tgt, src_mask = None, tgt_mask = None):
         enc = self.encoder(src, mask = src_mask)
