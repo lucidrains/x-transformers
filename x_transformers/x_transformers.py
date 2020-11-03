@@ -164,7 +164,13 @@ class TransformerWrapper(nn.Module):
         self.pos_emb = nn.Embedding(max_seq_len, dim)
         self.layer_blocks = layer_blocks
         self.norm = nn.LayerNorm(dim)
-        self.to_logits = nn.Linear(dim, num_tokens) if return_logits else nn.Identity()
+
+        self.init_()
+        self.to_logits = lambda t: t @ self.token_emb.weight.t() if return_logits else nn.Identity()
+
+    def init_(self):
+        nn.init.normal_(self.token_emb.weight, std = 0.02)
+        nn.init.normal_(self.pos_emb.weight, std = 0.02)
 
     def forward(self, x, **kwargs):
         _, n, device = *x.shape, x.device
