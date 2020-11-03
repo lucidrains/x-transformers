@@ -91,6 +91,7 @@ class Attention(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, dim, depth, heads = 8):
         super().__init__()
+        self.dim = dim
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
@@ -104,25 +105,29 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, dim, depth, heads = 8):
+    def __init__(self, dim, depth, heads = 8, cross_attend = False):
         super().__init__()
+        self.dim = dim
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 Residual(PreNorm(dim, Attention(dim, heads = heads, causal = True))),
-                Residual(PreNorm(dim, Attention(dim, heads = heads))),
+                Residual(PreNorm(dim, Attention(dim, heads = heads))) if cross_attend else None,
                 Residual(PreNorm(dim, FeedForward(dim))),
             ]))
     def forward(self, x, context = None, mask = None, context_mask = None):
         for (self_attn, cross_attn, ff) in self.layers:
             x = self_attn(x)
-            x = cross_attn(x, context = context, mask = mask, context_mask = context_mask)
+            if exists(cross_attn):
+                x = cross_attn(x, context = context, mask = mask, context_mask = context_mask)
             x = ff(x)
         return x
 
 class TransformerWrapper(nn.Module):
-    def __init__(self, *, num_tokens, max_seq_len, dim, layer_blocks, heads = 8, return_logits = True):
+    def __init__(self, *, num_tokens, max_seq_len, layer_blocks, heads = 8, return_logits = True):
         super().__init__()
+        dim = layer_blocks.dim
+        self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.pos_emb = nn.Embedding(max_seq_len, dim)
         self.layer_blocks = layer_blocks
@@ -143,7 +148,6 @@ class XTransformer(nn.Module):
 
         self.encoder = TransformerWrapper(
             num_tokens = num_tokens,
-            dim = dim,
             max_seq_len = max_seq_len,
             layer_blocks = Encoder(dim, depth, heads),
             return_logits = False
@@ -151,9 +155,8 @@ class XTransformer(nn.Module):
 
         self.decoder = TransformerWrapper(
             num_tokens = num_tokens,
-            dim = dim,
             max_seq_len = max_seq_len,
-            layer_blocks = Decoder(dim, depth, heads),
+            layer_blocks = Decoder(dim, depth, heads, cross_attend = True),
             return_logits = True
         )
 

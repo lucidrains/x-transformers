@@ -12,6 +12,8 @@ $ pip install x-transformers
 
 ## Usage
 
+Full encoder / decoder
+
 ```python
 import torch
 from x_transformers import XTransformer
@@ -30,6 +32,51 @@ tgt = torch.randint(0, 256, (1, 1024))
 tgt_mask = torch.ones_like(tgt).bool()
 
 model(src, tgt, src_mask = src_mask, tgt_mask = tgt_mask) # (1, 1024, 512)
+```
+
+Decoder-only (GPT-like)
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    layer_blocks = Decoder(
+        dim = 512,
+        depth = 12,
+        heads = 8
+    ),
+    return_logits = True
+).cuda()
+
+x = torch.randint(0, 256, (1, 1024)).cuda()
+
+model(x) # (1, 1024, 20000)
+```
+
+Encoder-only (BERT-like)
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    layer_blocks = Encoder(
+        dim = 512,
+        depth = 12,
+        heads = 8
+    ),
+    return_logits = True
+).cuda()
+
+x = torch.randint(0, 256, (1, 1024)).cuda()
+mask = torch.ones_like(x).bool()
+
+model(x, mask = mask) # (1, 1024, 20000)
 ```
 
 ## Citations
