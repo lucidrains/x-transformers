@@ -1,6 +1,7 @@
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
+from functools import partial
 from inspect import isfunction
 from einops import rearrange, repeat
 
@@ -18,30 +19,45 @@ def default(val, d):
 
 # classes
 
-class Residual(nn.Module):
-    def __init__(self, fn):
+class ScaleNorm(nn.Module):
+    def __init__(self, dim, eps = 1e-5):
         super().__init__()
-        self.fn = fn
+        self.eps = eps
+        self.g = nn.Parameter(torch.ones(1))
 
     def forward(self, x, **kwargs):
-        return self.fn(x, **kwargs) + x
+        n = torch.norm(x, dim = -1, keepdim = True).clamp(min = self.eps)
+        return x / n * self.g
 
 class PreNorm(nn.Module):
-    def __init__(self, dim, fn):
+    def __init__(self, dim, fn, norm_class = nn.LayerNorm):
         super().__init__()
         self.fn = fn
-        self.norm = nn.LayerNorm(dim)
+        self.norm = norm_class(dim)
 
     def forward(self, x, **kwargs):
         x = self.norm(x)
         return self.fn(x, **kwargs)
 
-class FeedForward(nn.Module):
-    def __init__(self, dim, mult = 4):
+class GEGLU(nn.Module):
+    def __init__(self, dim_in, dim_out):
         super().__init__()
-        self.net = nn.Sequential(
+        self.proj = nn.Linear(dim_in, dim_out * 2)
+
+    def forward(self, x):
+        x, gate = self.proj(x).chunk(2, dim = -1)
+        return x * F.gelu(x)
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, mult = 4, glu = False):
+        super().__init__()
+        project_in = nn.Sequential(
             nn.Linear(dim, dim * mult),
-            nn.GELU(),
+            nn.GELU()
+        ) if not glu else GEGLU(dim, dim * mult)
+
+        self.net = nn.Sequential(
+            project_in,
             nn.Linear(dim * mult, dim)
         )
 
@@ -91,42 +107,56 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Encoder(nn.Module):
-    def __init__(self, dim, depth, dim_head = 64, heads = 8):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8, use_scalenorm = False, ff_glu = False):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
+        norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
+        prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
+
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, Attention(dim, dim_head = dim_head, heads = heads))),
-                Residual(PreNorm(dim, FeedForward(dim)))
+                prenorm_fn(Attention(dim, dim_head = dim_head, heads = heads)),
+                prenorm_fn(FeedForward(dim, glu = ff_glu))
             ]))
     def forward(self, x, context = None, mask = None):
         for (self_attn, ff) in self.layers:
-            x = self_attn(x, mask = mask)
-            x = ff(x)
+            x = self_attn(x, mask = mask) + x
+            x = ff(x) + x
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, dim, depth, dim_head = 64, heads = 8, cross_attend = False):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8, cross_attend = False, use_scalenorm = False, ff_glu = False):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
+        norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
+        prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
+
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, Attention(dim, dim_head = dim_head, heads = heads, causal = True))),
-                Residual(PreNorm(dim, Attention(dim, dim_head = dim_head, heads = heads))) if cross_attend else None,
-                Residual(PreNorm(dim, FeedForward(dim))),
+                prenorm_fn(Attention(dim, dim_head = dim_head, heads = heads, causal = True)),
+                prenorm_fn(Attention(dim, dim_head = dim_head, heads = heads)) if cross_attend else None,
+                prenorm_fn(FeedForward(dim, glu = ff_glu)),
             ]))
     def forward(self, x, context = None, mask = None, context_mask = None):
         for (self_attn, cross_attn, ff) in self.layers:
-            x = self_attn(x)
+            x = self_attn(x) + x
             if exists(cross_attn):
-                x = cross_attn(x, context = context, mask = mask, context_mask = context_mask)
-            x = ff(x)
+                x = cross_attn(x, context = context, mask = mask, context_mask = context_mask) + x
+            x = ff(x) + x
         return x
 
 class TransformerWrapper(nn.Module):
-    def __init__(self, *, num_tokens, max_seq_len, layer_blocks, heads = 8, return_logits = True):
+    def __init__(
+        self,
+        *,
+        num_tokens,
+        max_seq_len,
+        layer_blocks,
+        heads = 8,
+        return_logits = True
+    ):
         super().__init__()
         dim = layer_blocks.dim
         self.max_seq_len = max_seq_len
@@ -145,7 +175,16 @@ class TransformerWrapper(nn.Module):
         return self.to_logits(x)
 
 class XTransformer(nn.Module):
-    def __init__(self, *, num_tokens, dim, depth, max_seq_len, heads = 8, return_tgt_loss = False):
+    def __init__(
+        self,
+        *,
+        num_tokens,
+        dim,
+        depth,
+        max_seq_len,
+        heads = 8,
+        return_tgt_loss = False
+    ):
         super().__init__()
 
         self.encoder = TransformerWrapper(
