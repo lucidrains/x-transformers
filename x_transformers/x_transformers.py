@@ -49,8 +49,9 @@ class GEGLU(nn.Module):
         return x * F.gelu(x)
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, mult = 4, glu = False):
+    def __init__(self, dim, dim_out = None, mult = 4, glu = False, dropout = 0.):
         super().__init__()
+        dim_out = default(dim_out, dim)
         project_in = nn.Sequential(
             nn.Linear(dim, dim * mult),
             nn.GELU()
@@ -58,7 +59,8 @@ class FeedForward(nn.Module):
 
         self.net = nn.Sequential(
             project_in,
-            nn.Linear(dim * mult, dim)
+            nn.Dropout(dropout),
+            nn.Linear(dim * mult, dim_out)
         )
 
     def forward(self, x):
@@ -146,6 +148,54 @@ class Decoder(nn.Module):
                 x = cross_attn(x, context = context, mask = mask, context_mask = context_mask) + x
             x = ff(x) + x
         return x
+
+class ViTransformerWrapper(nn.Module):
+    def __init__(
+        self,
+        *,
+        image_size,
+        patch_size,
+        layer_blocks,
+        num_classes = None,
+        dropout = 0.,
+        emb_dropout = 0.
+    ):
+        super().__init__()
+        assert image_size % patch_size == 0, 'image dimensions must be divisible by the patch size'
+        dim = layer_blocks.dim
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = 3 * patch_size ** 2
+
+        self.patch_size = patch_size
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.patch_to_embedding = nn.Linear(patch_dim, dim)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        self.dropout = nn.Dropout(emb_dropout)
+
+        self.layer_blocks = layer_blocks
+        self.norm = nn.LayerNorm(dim)
+        self.mlp_head = FeedForward(dim, dim_out = num_classes, dropout = dropout) if exists(num_classes) else None
+
+    def forward(self, img):
+        p = self.patch_size
+
+        x = rearrange(img, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
+        x = self.patch_to_embedding(x)
+        b, n, _ = x.shape
+
+        cls_tokens = repeat(self.cls_token, '() n d -> b n d', b = b)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n + 1)]
+        x = self.dropout(x)
+
+        x = self.layer_blocks(x)
+        x = self.norm(x)
+
+        if not exists(self.mlp_head):
+            return x
+
+        return self.mlp_head(x[:, 0])
 
 class TransformerWrapper(nn.Module):
     def __init__(

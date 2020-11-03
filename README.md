@@ -96,6 +96,61 @@ mask = torch.ones_like(x).bool()
 model(x, mask = mask) # (1, 1024, 20000)
 ```
 
+State of the art image classification
+
+```python
+import torch
+from x_transformers import ViTransformerWrapper, Encoder
+
+model = ViTransformerWrapper(
+    image_size = 256,
+    patch_size = 32,
+    num_classes = 1000,
+    layer_blocks = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+    )
+)
+
+img = torch.randn(1, 3, 256, 256)
+model(img) # (1, 1000)
+```
+
+Image -> caption
+
+```python
+import torch
+from x_transformers import ViTransformerWrapper, TransformerWrapper, Encoder, Decoder
+
+encoder = ViTransformerWrapper(
+    image_size = 256,
+    patch_size = 32,
+    layer_blocks = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8
+    )
+)
+
+decoder = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    layer_blocks = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        cross_attend = True
+    ),
+    return_logits = True
+)
+
+img = torch.randn(1, 3, 256, 256)
+caption = torch.randint(0, 20000, (1, 1024))
+
+encoded = encoder(img)
+decoder(caption, context = encoded) # (1, 1024, 20000)
+```
 ## Citations
 
 ```bibtex
@@ -256,5 +311,16 @@ model(x, mask = mask) # (1, 1024, 20000)
     eprint  = {2006.03236},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{dosovitskiy2020image,
+    title   = {An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale},
+    author  = {Alexey Dosovitskiy and Lucas Beyer and Alexander Kolesnikov and Dirk Weissenborn and Xiaohua Zhai and Thomas Unterthiner and Mostafa Dehghani and Matthias Minderer and Georg Heigold and Sylvain Gelly and Jakob Uszkoreit and Neil Houlsby},
+    year    = {2020},
+    eprint  = {2010.11929},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
 }
 ```
