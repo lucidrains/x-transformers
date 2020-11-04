@@ -18,6 +18,25 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
+def group_dict_by_key(cond, d):
+    return_val = [dict(),dict()]
+    for key in d.keys():
+        match = bool(cond(key))
+        ind = int(not match)
+        return_val[ind][key] = d[key]
+    return (*return_val,)
+
+def string_begins_with(prefix, str):
+    return str.startswith(prefix)
+
+def group_by_key_prefix(prefix, d):
+    return group_dict_by_key(partial(string_begins_with, prefix), d)
+
+def group_by_key_prefix_and_trim(prefix, d):
+    kwargs_with_prefix, kwargs = group_dict_by_key(partial(string_begins_with, prefix), d)
+    kwargs_without_prefix = dict(map(lambda x: (x[0][len(prefix):], x[1]), tuple(kwargs_with_prefix.items())))
+    return kwargs_without_prefix, kwargs
+
 # positional embeddings
 
 class RelativePositionBias(nn.Module):
@@ -285,25 +304,36 @@ class XTransformer(nn.Module):
     def __init__(
         self,
         *,
-        num_tokens,
         dim,
-        depth,
-        max_seq_len,
-        heads = 8,
-        return_tgt_loss = False
+        return_tgt_loss = False,
+        **kwargs
     ):
         super().__init__()
+        enc_kwargs, kwargs = group_by_key_prefix_and_trim('enc_', kwargs)
+        dec_kwargs, kwargs = group_by_key_prefix_and_trim('dec_', kwargs)
+
+        assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
+
+        enc_kwargs['dim'] = dim
+        dec_kwargs['dim'] = dim
+        dec_kwargs['cross_attend'] = True
+
+        enc_num_tokens = enc_kwargs.pop('num_tokens')
+        dec_num_tokens = dec_kwargs.pop('num_tokens')
+
+        enc_max_seq_len = enc_kwargs.pop('max_seq_len')
+        dec_max_seq_len = dec_kwargs.pop('max_seq_len')
 
         self.encoder = TransformerWrapper(
-            num_tokens = num_tokens,
-            max_seq_len = max_seq_len,
-            attn_layers = Encoder(dim, depth, heads)
+            num_tokens = enc_num_tokens,
+            max_seq_len = enc_max_seq_len,
+            attn_layers = Encoder(**enc_kwargs)
         )
 
         self.decoder = TransformerWrapper(
-            num_tokens = num_tokens,
-            max_seq_len = max_seq_len,
-            attn_layers = Decoder(dim, depth, heads, cross_attend = True)
+            num_tokens = dec_num_tokens,
+            max_seq_len = dec_max_seq_len,
+            attn_layers = Decoder(**dec_kwargs)
         )
 
         if return_tgt_loss:

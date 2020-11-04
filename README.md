@@ -1,8 +1,12 @@
 ## x-transformers
 
+[![PyPI version](https://badge.fury.io/py/x-transformers.svg)](https://badge.fury.io/py/x-transformers)
+
 X stands for **ex**perimental
 
 A simple full-attention transformer, but also complete with a set of promising experimental features from various papers.
+
+Until the library hits `0.1.0`, expect a lot of breaking changes as I try to fit all the features under a concise interface.
 
 ## Install
 
@@ -19,11 +23,15 @@ import torch
 from x_transformers import XTransformer
 
 model = XTransformer(
-    num_tokens = 256,
     dim = 512,
-    depth = 6,
-    heads = 8,
-    max_seq_len = 1024
+    enc_num_tokens = 256,
+    enc_depth = 6,
+    enc_heads = 8,
+    enc_max_seq_len = 1024,
+    dec_num_tokens = 256,
+    dec_depth = 6,
+    dec_heads = 8,
+    dec_max_seq_len = 1024
 )
 
 src = torch.randint(0, 256, (1, 1024))
