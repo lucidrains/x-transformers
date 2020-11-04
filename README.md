@@ -127,8 +127,7 @@ encoder = ViTransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8
-    ),
-    return_logits = False
+    )
 )
 
 decoder = TransformerWrapper(
@@ -145,7 +144,7 @@ decoder = TransformerWrapper(
 img = torch.randn(1, 3, 256, 256)
 caption = torch.randint(0, 20000, (1, 1024))
 
-encoded = encoder(img)
+encoded = encoder(img, return_embeddings = True)
 decoder(caption, context = encoded) # (1, 1024, 20000)
 ```
 ## Citations

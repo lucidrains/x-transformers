@@ -222,12 +222,15 @@ class TransformerWrapper(nn.Module):
         nn.init.normal_(self.token_emb.weight, std = 0.02)
         nn.init.normal_(self.pos_emb.weight, std = 0.02)
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, return_embeddings = False, **kwargs):
         _, n, device = *x.shape, x.device
         x = self.token_emb(x)
         x += self.pos_emb(torch.arange(n, device = device))
         x = self.attn_layers(x, **kwargs)
         x = self.norm(x)
+
+        if return_embeddings:
+            return x
         return self.to_logits(x)
 
 class XTransformer(nn.Module):
