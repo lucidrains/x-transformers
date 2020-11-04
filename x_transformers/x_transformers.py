@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
@@ -16,6 +17,48 @@ def default(val, d):
     if exists(val):
         return val
     return d() if isfunction(d) else d
+
+# positional embeddings
+
+class RelativePositionBias(nn.Module):
+    def __init__(self, causal = False, num_buckets = 32, max_distance = 128, heads = 8):
+        super().__init__()
+        self.causal = causal
+        self.num_buckets = num_buckets
+        self.max_distance = max_distance
+        self.relative_attention_bias = nn.Embedding(num_buckets, heads)
+
+    @staticmethod
+    def _relative_position_bucket(relative_position, causal = True, num_buckets = 32, max_distance = 128):
+        ret = 0
+        n = -relative_position
+        if causal:
+            num_buckets //= 2
+            ret += (n < 0).long() * num_buckets
+            n = torch.abs(n)
+        else:
+            n = torch.max(n, torch.zeros_like(n))
+
+        max_exact = num_buckets // 2
+        is_small = n < max_exact
+
+        val_if_large = max_exact + (
+            torch.log(n.float() / max_exact) / math.log(max_distance / max_exact) * (num_buckets - max_exact)
+        ).long()
+        val_if_large = torch.min(val_if_large, torch.full_like(val_if_large, num_buckets - 1))
+
+        ret += torch.where(is_small, n, val_if_large)
+        return ret
+
+    def forward(self, qk_dots):
+        i, j, device = *qk_dots.shape[-2:], qk_dots.device
+        q_pos = torch.arange(i, dtype = torch.long, device = device)
+        k_pos = torch.arange(j, dtype = torch.long, device = device)
+        rel_pos = k_pos[None, :] - q_pos[:, None]
+        rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets)
+        values = self.relative_attention_bias(rp_bucket)
+        bias = rearrange(values, 'i j h -> () h i j')
+        return qk_dots + bias
 
 # classes
 
@@ -79,7 +122,7 @@ class Attention(nn.Module):
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
-    def forward(self, x, context = None, mask = None, context_mask = None):
+    def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None):
         b, n, _, h, device = *x.shape, self.heads, x.device
         kv_input = default(context, x)
 
@@ -88,6 +131,9 @@ class Attention(nn.Module):
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, *kv))
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+
+        if exists(rel_pos):
+            dots = rel_pos(dots)
 
         if any(map(exists, (mask, context_mask))):
             q_mask = default(mask, lambda: torch.ones((b, dots.shape[-2]), device = device).bool())
@@ -109,10 +155,12 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Encoder(nn.Module):
-    def __init__(self, dim, depth, dim_head = 64, heads = 8, use_scalenorm = False, ff_glu = False):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8, use_scalenorm = False, ff_glu = False, rel_pos_bias = False):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
+        self.rel_pos = RelativePositionBias(causal = True) if rel_pos_bias else None
+
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
 
@@ -123,15 +171,17 @@ class Encoder(nn.Module):
             ]))
     def forward(self, x, context = None, mask = None):
         for (self_attn, ff) in self.layers:
-            x = self_attn(x, mask = mask) + x
+            x = self_attn(x, mask = mask, rel_pos = self.rel_pos) + x
             x = ff(x) + x
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, dim, depth, dim_head = 64, heads = 8, cross_attend = False, use_scalenorm = False, ff_glu = False):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8, cross_attend = False, use_scalenorm = False, ff_glu = False, rel_pos_bias = False):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
+        self.rel_pos = RelativePositionBias(causal = True) if rel_pos_bias else None
+
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
 
@@ -143,7 +193,7 @@ class Decoder(nn.Module):
             ]))
     def forward(self, x, context = None, mask = None, context_mask = None):
         for (self_attn, cross_attn, ff) in self.layers:
-            x = self_attn(x) + x
+            x = self_attn(x, rel_pos = self.rel_pos) + x
             if exists(cross_attn):
                 x = cross_attn(x, context = context, mask = mask, context_mask = context_mask) + x
             x = ff(x) + x
@@ -203,9 +253,7 @@ class TransformerWrapper(nn.Module):
         *,
         num_tokens,
         max_seq_len,
-        attn_layers,
-        heads = 8,
-        return_logits = True
+        attn_layers
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -216,7 +264,7 @@ class TransformerWrapper(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
         self.init_()
-        self.to_logits = lambda t: t @ self.token_emb.weight.t() if return_logits else nn.Identity()
+        self.to_logits = lambda t: t @ self.token_emb.weight.t()
 
     def init_(self):
         nn.init.normal_(self.token_emb.weight, std = 0.02)
@@ -249,21 +297,19 @@ class XTransformer(nn.Module):
         self.encoder = TransformerWrapper(
             num_tokens = num_tokens,
             max_seq_len = max_seq_len,
-            attn_layers = Encoder(dim, depth, heads),
-            return_logits = False
+            attn_layers = Encoder(dim, depth, heads)
         )
 
         self.decoder = TransformerWrapper(
             num_tokens = num_tokens,
             max_seq_len = max_seq_len,
-            attn_layers = Decoder(dim, depth, heads, cross_attend = True),
-            return_logits = True
+            attn_layers = Decoder(dim, depth, heads, cross_attend = True)
         )
 
         if return_tgt_loss:
             self.decoder = AutoregressiveWrapper(self.decoder)
 
     def forward(self, src, tgt, src_mask = None, tgt_mask = None):
-        enc = self.encoder(src, mask = src_mask)
+        enc = self.encoder(src, mask = src_mask, return_embeddings = True)
         out = self.decoder(tgt, context = enc, mask = tgt_mask, context_mask = src_mask)
         return out
