@@ -47,8 +47,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 12,
         heads = 8
-    ),
-    return_logits = True
+    )
 ).cuda()
 
 x = torch.randint(0, 256, (1, 1024)).cuda()
@@ -68,8 +67,7 @@ gpt3 = TransformerWrapper(
         dim_head = 128,
         depth = 96,
         heads = 96
-    ),
-    return_logits = True
+    )
 ).cuda()
 ```
 
@@ -86,8 +84,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 12,
         heads = 8
-    ),
-    return_logits = True
+    )
 ).cuda()
 
 x = torch.randint(0, 256, (1, 1024)).cuda()
@@ -130,7 +127,8 @@ encoder = ViTransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8
-    )
+    ),
+    return_logits = False
 )
 
 decoder = TransformerWrapper(
@@ -141,8 +139,7 @@ decoder = TransformerWrapper(
         depth = 6,
         heads = 8,
         cross_attend = True
-    ),
-    return_logits = True
+    )
 )
 
 img = torch.randn(1, 3, 256, 256)
