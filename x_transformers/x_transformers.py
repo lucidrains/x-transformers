@@ -18,6 +18,12 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
+# keyword argument helpers
+
+def pick_and_pop(keys, d):
+    values = list(map(lambda key: d.pop(key), keys))
+    return dict(zip(keys, values))
+
 def group_dict_by_key(cond, d):
     return_val = [dict(),dict()]
     for key in d.keys():
@@ -313,27 +319,17 @@ class XTransformer(nn.Module):
         dec_kwargs, kwargs = group_by_key_prefix_and_trim('dec_', kwargs)
 
         assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
-
-        enc_kwargs['dim'] = dim
-        dec_kwargs['dim'] = dim
-        dec_kwargs['cross_attend'] = True
-
-        enc_num_tokens = enc_kwargs.pop('num_tokens')
-        dec_num_tokens = dec_kwargs.pop('num_tokens')
-
-        enc_max_seq_len = enc_kwargs.pop('max_seq_len')
-        dec_max_seq_len = dec_kwargs.pop('max_seq_len')
+        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], enc_kwargs)
+        dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
 
         self.encoder = TransformerWrapper(
-            num_tokens = enc_num_tokens,
-            max_seq_len = enc_max_seq_len,
-            attn_layers = Encoder(**enc_kwargs)
+            **enc_transformer_kwargs,
+            attn_layers = Encoder(dim = dim, **enc_kwargs)
         )
 
         self.decoder = TransformerWrapper(
-            num_tokens = dec_num_tokens,
-            max_seq_len = dec_max_seq_len,
-            attn_layers = Decoder(**dec_kwargs)
+            **dec_transformer_kwargs,
+            attn_layers = Decoder(dim = dim, cross_attend = True, **dec_kwargs)
         )
 
         if return_tgt_loss:
