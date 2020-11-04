@@ -155,14 +155,14 @@ class ViTransformerWrapper(nn.Module):
         *,
         image_size,
         patch_size,
-        layer_blocks,
+        attn_layers,
         num_classes = None,
         dropout = 0.,
         emb_dropout = 0.
     ):
         super().__init__()
         assert image_size % patch_size == 0, 'image dimensions must be divisible by the patch size'
-        dim = layer_blocks.dim
+        dim = attn_layers.dim
         num_patches = (image_size // patch_size) ** 2
         patch_dim = 3 * patch_size ** 2
 
@@ -173,7 +173,7 @@ class ViTransformerWrapper(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.layer_blocks = layer_blocks
+        self.attn_layers = attn_layers
         self.norm = nn.LayerNorm(dim)
         self.mlp_head = FeedForward(dim, dim_out = num_classes, dropout = dropout) if exists(num_classes) else None
 
@@ -189,7 +189,7 @@ class ViTransformerWrapper(nn.Module):
         x += self.pos_embedding[:, :(n + 1)]
         x = self.dropout(x)
 
-        x = self.layer_blocks(x)
+        x = self.attn_layers(x)
         x = self.norm(x)
 
         if not exists(self.mlp_head):
@@ -203,16 +203,16 @@ class TransformerWrapper(nn.Module):
         *,
         num_tokens,
         max_seq_len,
-        layer_blocks,
+        attn_layers,
         heads = 8,
         return_logits = True
     ):
         super().__init__()
-        dim = layer_blocks.dim
+        dim = attn_layers.dim
         self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.pos_emb = nn.Embedding(max_seq_len, dim)
-        self.layer_blocks = layer_blocks
+        self.attn_layers = attn_layers
         self.norm = nn.LayerNorm(dim)
 
         self.init_()
@@ -226,7 +226,7 @@ class TransformerWrapper(nn.Module):
         _, n, device = *x.shape, x.device
         x = self.token_emb(x)
         x += self.pos_emb(torch.arange(n, device = device))
-        x = self.layer_blocks(x, **kwargs)
+        x = self.attn_layers(x, **kwargs)
         x = self.norm(x)
         return self.to_logits(x)
 
@@ -246,14 +246,14 @@ class XTransformer(nn.Module):
         self.encoder = TransformerWrapper(
             num_tokens = num_tokens,
             max_seq_len = max_seq_len,
-            layer_blocks = Encoder(dim, depth, heads),
+            attn_layers = Encoder(dim, depth, heads),
             return_logits = False
         )
 
         self.decoder = TransformerWrapper(
             num_tokens = num_tokens,
             max_seq_len = max_seq_len,
-            layer_blocks = Decoder(dim, depth, heads, cross_attend = True),
+            attn_layers = Decoder(dim, depth, heads, cross_attend = True),
             return_logits = True
         )
 
