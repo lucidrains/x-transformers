@@ -234,12 +234,12 @@ decoder(caption, context = encoded) # (1, 1024, 20000)
 }
 ```
 
-```bibtex
-@misc{correia2019adaptively,
-    title   = {Adaptively Sparse Transformers}, 
-    author  = {Gonçalo M. Correia and Vlad Niculae and André F. T. Martins},
-    year        = {2019},
-    eprint  = {1909.00015},
+```
+@misc{zhao2019explicit,
+    title   = {Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection}, 
+    author  = {Guangxiang Zhao and Junyang Lin and Zhiyuan Zhang and Xuancheng Ren and Qi Su and Xu Sun},
+    year    = {2019},
+    eprint  = {1912.11637},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
 }
