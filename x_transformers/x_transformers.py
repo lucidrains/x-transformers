@@ -6,6 +6,8 @@ from functools import partial
 from inspect import isfunction
 from einops import rearrange, repeat
 
+from entmax import entmax15
+
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # helpers
@@ -135,7 +137,7 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, dim_head = 64, heads = 8, causal = False, mask = None, talking_heads = False, sparse_topk = None):
+    def __init__(self, dim, dim_head = 64, heads = 8, causal = False, mask = None, talking_heads = False, sparse_topk = None, use_entmax15 = False):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
@@ -155,6 +157,9 @@ class Attention(nn.Module):
 
         # explicit topk sparse attention
         self.sparse_topk = sparse_topk
+
+        # entmax
+        self.attn_fn = entmax15 if use_entmax15 else F.softmax
 
     def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
@@ -193,7 +198,7 @@ class Attention(nn.Module):
             dots.masked_fill_(mask, float('-inf'))
             del mask
 
-        attn = dots.softmax(dim = -1)
+        attn = self.attn_fn(dots, dim = -1)
 
         if talking_heads:
             dots = einsum('b h i j, h k -> b k i j', dots, self.post_softmax_proj)
