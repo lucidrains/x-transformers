@@ -336,7 +336,8 @@ class TransformerWrapper(nn.Module):
         *,
         num_tokens,
         max_seq_len,
-        attn_layers
+        attn_layers,
+        num_memory_tokens = 0
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -349,19 +350,36 @@ class TransformerWrapper(nn.Module):
         self.init_()
         self.to_logits = lambda t: t @ self.token_emb.weight.t()
 
+        # memory tokens (like [cls]) from Memory Transformers paper
+        self.num_memory_tokens = num_memory_tokens
+        if num_memory_tokens > 0:
+            self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
+
     def init_(self):
         nn.init.normal_(self.token_emb.weight, std = 0.02)
         nn.init.normal_(self.pos_emb.weight, std = 0.02)
 
-    def forward(self, x, return_embeddings = False, **kwargs):
-        _, n, device = *x.shape, x.device
+    def forward(self, x, return_embeddings = False, mask = None, **kwargs):
+        b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
         x = self.token_emb(x)
         x += self.pos_emb(torch.arange(n, device = device))
-        x = self.attn_layers(x, **kwargs)
+
+        if num_mem > 0:
+            mem = repeat(self.memory_tokens, 'n d -> b n d', b = b)
+            x = torch.cat((mem, x), dim = 1)
+
+            # auto-handle masking after appending memory tokens
+            if exists(mask):
+                mask = F.pad(mask, (num_mem, 0), value = True)
+
+        x = self.attn_layers(x, mask = mask, **kwargs)
         x = self.norm(x)
+
+        mem, x = x[:, :num_mem], x[:, num_mem:]
 
         if return_embeddings:
             return x
+
         return self.to_logits(x)
 
 class XTransformer(nn.Module):
@@ -377,7 +395,7 @@ class XTransformer(nn.Module):
         dec_kwargs, kwargs = group_by_key_prefix_and_trim('dec_', kwargs)
 
         assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
-        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], enc_kwargs)
+        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len', 'num_memory_tokens'], enc_kwargs)
         dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
 
         self.encoder = TransformerWrapper(
