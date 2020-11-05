@@ -147,7 +147,8 @@ class Attention(nn.Module):
         talking_heads = False,
         sparse_topk = None,
         use_entmax15 = False,
-        num_mem_kv = 0
+        num_mem_kv = 0,
+        dropout = 0.
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -159,6 +160,7 @@ class Attention(nn.Module):
         self.to_q = nn.Linear(dim, inner_dim, bias = False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
+        self.dropout = nn.Dropout(dropout)
 
         # talking heads
         self.talking_heads = talking_heads
@@ -223,6 +225,7 @@ class Attention(nn.Module):
             del mask
 
         attn = self.attn_fn(dots, dim = -1)
+        attn = self.dropout(attn)
 
         if talking_heads:
             dots = einsum('b h i j, h k -> b k i j', dots, self.post_softmax_proj)
@@ -337,6 +340,7 @@ class TransformerWrapper(nn.Module):
         num_tokens,
         max_seq_len,
         attn_layers,
+        emb_dropout = 0.,
         num_memory_tokens = 0
     ):
         super().__init__()
@@ -344,6 +348,8 @@ class TransformerWrapper(nn.Module):
         self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(num_tokens, dim)
         self.pos_emb = nn.Embedding(max_seq_len, dim)
+        self.emb_dropout = nn.Dropout(emb_dropout)
+
         self.attn_layers = attn_layers
         self.norm = nn.LayerNorm(dim)
 
@@ -363,6 +369,7 @@ class TransformerWrapper(nn.Module):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
         x = self.token_emb(x)
         x += self.pos_emb(torch.arange(n, device = device))
+        x = self.emb_dropout(x)
 
         if num_mem > 0:
             mem = repeat(self.memory_tokens, 'n d -> b n d', b = b)
