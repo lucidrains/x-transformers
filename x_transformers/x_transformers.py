@@ -135,7 +135,7 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, dim_head = 64, heads = 8, causal = False, mask = None, talking_heads = False):
+    def __init__(self, dim, dim_head = 64, heads = 8, causal = False, mask = None, talking_heads = False, sparse_topk = None):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
@@ -147,10 +147,14 @@ class Attention(nn.Module):
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias = False)
         self.to_out = nn.Linear(inner_dim, dim)
 
+        # talking heads
         self.talking_heads = talking_heads
         if talking_heads:
             self.pre_softmax_proj = nn.Parameter(torch.randn(heads, heads))
             self.post_softmax_proj = nn.Parameter(torch.randn(heads, heads))
+
+        # explicit topk sparse attention
+        self.sparse_topk = sparse_topk
 
     def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
@@ -179,6 +183,13 @@ class Attention(nn.Module):
 
         if self.causal:
             mask = torch.ones((n, n), device = device).triu_(1).bool()
+            dots.masked_fill_(mask, float('-inf'))
+            del mask
+
+        if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
+            v, _ = dots.topk(dim = -1)
+            vk = v[..., -1].unsqueeze(-1).expand_as(dots)
+            mask = dots < vk
             dots.masked_fill_(mask, float('-inf'))
             del mask
 
