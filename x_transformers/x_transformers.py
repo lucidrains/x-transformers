@@ -239,7 +239,7 @@ class Encoder(nn.Module):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
-        self.rel_pos = RelativePositionBias(causal = True) if rel_pos_bias else None
+        self.rel_pos = RelativePositionBias() if rel_pos_bias else None
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
