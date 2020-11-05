@@ -4,8 +4,8 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from functools import partial
 from inspect import isfunction
-from einops import rearrange, repeat
 
+from einops import rearrange, repeat
 from entmax import entmax15
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
@@ -137,7 +137,18 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, dim_head = 64, heads = 8, causal = False, mask = None, talking_heads = False, sparse_topk = None, use_entmax15 = False):
+    def __init__(
+        self,
+        dim,
+        dim_head = 64,
+        heads = 8,
+        causal = False,
+        mask = None,
+        talking_heads = False,
+        sparse_topk = None,
+        use_entmax15 = False,
+        num_mem_kv = 0
+    ):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
@@ -161,6 +172,12 @@ class Attention(nn.Module):
         # entmax
         self.attn_fn = entmax15 if use_entmax15 else F.softmax
 
+        # add memory key / values
+        self.num_mem_kv = num_mem_kv
+        if num_mem_kv > 0:
+            self.mem_k = nn.Parameter(torch.randn(heads, num_mem_kv, dim_head))
+            self.mem_v = nn.Parameter(torch.randn(heads, num_mem_kv, dim_head))
+
     def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
         kv_input = default(context, x)
@@ -169,6 +186,12 @@ class Attention(nn.Module):
         kv = self.to_kv(kv_input).chunk(2, dim = -1)
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, *kv))
+
+        if self.num_mem_kv > 0:
+            mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
+            k = torch.cat((mem_k, k), dim = -2)
+            v = torch.cat((mem_v, v), dim = -2)
+
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
         if talking_heads:
@@ -187,7 +210,8 @@ class Attention(nn.Module):
             del mask
 
         if self.causal:
-            mask = torch.ones((n, n), device = device).triu_(1).bool()
+            i, j = dots.shape[-2:]
+            mask = torch.ones((i, j), device = device).triu_(j - i + 1).bool()
             dots.masked_fill_(mask, float('-inf'))
             del mask
 
