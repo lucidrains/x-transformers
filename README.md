@@ -155,6 +155,28 @@ caption = torch.randint(0, 20000, (1, 1024))
 encoded = encoder(img, return_embeddings = True)
 decoder(caption, context = encoded) # (1, 1024, 20000)
 ```
+
+Funnel Transformer for Encoder
+
+```python
+import torch
+from x_transformers import TransformerWrapper, FunnelEncoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    num_memory_tokens = 10,
+    attn_layers = FunnelEncoder(
+        dim = 512,
+        heads = 8,
+        depths = (4, 4, 4)
+    )
+)
+
+x = torch.randint(1, 20000, (1, 1024))
+model(x) # (1, 1024, 20000)
+```
+
 ## Citations
 
 ```bibtex

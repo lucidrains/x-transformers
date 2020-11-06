@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from functools import partial
 from inspect import isfunction
 
-from einops import rearrange, repeat
+from einops import rearrange, repeat, reduce
 from entmax import entmax15
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
@@ -19,6 +19,11 @@ def default(val, d):
     if exists(val):
         return val
     return d() if isfunction(d) else d
+
+def residualize(f):
+    def fn(x, *args, **kwargs):
+        return f(x, *args, **kwargs) + x
+    return fn
 
 # keyword argument helpers
 
@@ -234,8 +239,19 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
+class AttentionWithDownsample(Attention):
+    def forward(self, x, num_memory_tokens = 0, downsample = False, **kwargs):
+        if downsample:
+            b, n, *_ = x.shape
+            mem, x       = x[:, :num_memory_tokens], x[:, num_memory_tokens:]
+            x, remainder = (x[:, :-1], x[:, -1:]) if (n % 2) == 1 else (x[:, :], x[:, 0:0])
+            x = reduce(x, 'b (n c) d -> b n d', 'mean', c = 2)
+            x = torch.cat((mem, x, remainder), dim = 1)
+
+        return super().forward(x, **kwargs)
+
 class Encoder(nn.Module):
-    def __init__(self, dim, depth, dim_head = 64, heads = 8, use_scalenorm = False, rel_pos_bias = False, **kwargs):
+    def __init__(self, dim, depth, heads = 8, use_scalenorm = False, rel_pos_bias = False, **kwargs):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
@@ -249,7 +265,7 @@ class Encoder(nn.Module):
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                prenorm_fn(Attention(dim, dim_head = dim_head, heads = heads, **attn_kwargs)),
+                prenorm_fn(Attention(dim, heads = heads, **attn_kwargs)),
                 prenorm_fn(FeedForward(dim, **ff_kwargs))
             ]))
     def forward(self, x, context = None, mask = None):
@@ -257,6 +273,57 @@ class Encoder(nn.Module):
             x = self_attn(x, mask = mask, rel_pos = self.rel_pos) + x
             x = ff(x) + x
         return x
+
+class FunnelEncoder(nn.Module):
+    def __init__(self, dim, depths, heads = 8, use_scalenorm = False, rel_pos_bias = False, num_memory_tokens = None, **kwargs):
+        super().__init__()
+        assert isinstance(depths, tuple), 'depths must be a tuple, where each element specifies the number of layers before the next bottleneck'
+        assert len(depths) > 1, 'there must be at least 1 bottleneck'
+
+        self.dim = dim
+        self.num_memory_tokens = num_memory_tokens
+        self.rel_pos = RelativePositionBias() if rel_pos_bias else None
+        self.bottlenecks = nn.ModuleList([])
+
+        norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
+        prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
+
+        ff_kwargs, kwargs = group_by_key_prefix_and_trim('ff_', kwargs)
+        attn_kwargs, _ = group_by_key_prefix_and_trim('attn_', kwargs)
+
+        for depth in depths:
+            layers = nn.ModuleList([])
+            for _ in range(depth):
+                layers.append(nn.ModuleList([
+                    prenorm_fn(AttentionWithDownsample(dim, heads = heads, **attn_kwargs)),
+                    prenorm_fn(FeedForward(dim, **ff_kwargs))
+                ]))
+            self.bottlenecks.append(layers)
+
+    def forward(self, x, context = None, mask = None):
+        n = x.shape[1]
+        num_mem = self.num_memory_tokens
+        num_downsamples = len(self.bottlenecks)
+
+        for layer_ind, layers in enumerate(self.bottlenecks):
+            if layer_ind == 1:
+                res = x
+
+            for ind, (self_attn, ff) in enumerate(layers):
+                downsample = layer_ind != 0 and ind == 0
+                self_attn = residualize(self_attn) if not downsample else self_attn
+
+                x = self_attn(x, mask = mask, rel_pos = self.rel_pos, downsample = downsample, num_memory_tokens = num_mem)
+                x = ff(x) + x
+
+        mem, x = x[:, :num_mem], x[:, num_mem:]
+        # upsample by repeating tokens as specified in paper
+        x = repeat(x, 'b n d -> b (n m) d', m = 2 ** (num_downsamples - 1))
+        # curtail any excessive tokens
+        x = x[:, :(n - num_mem)]
+        x = torch.cat((mem, x), dim = 1)
+        # add to residual before start of first downsample
+        return x + res
 
 class Decoder(nn.Module):
     def __init__(self, dim, depth, dim_head = 64, heads = 8, cross_attend = False, use_scalenorm = False, rel_pos_bias = False, **kwargs):
@@ -360,6 +427,10 @@ class TransformerWrapper(nn.Module):
         self.num_memory_tokens = num_memory_tokens
         if num_memory_tokens > 0:
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
+
+            # let funnel encoder know number of memory tokens, if specified
+            if isinstance(attn_layers, FunnelEncoder):
+                attn_layers.num_memory_tokens = num_memory_tokens
 
     def init_(self):
         nn.init.normal_(self.token_emb.weight, std = 0.02)
