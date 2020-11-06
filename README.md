@@ -174,7 +174,8 @@ model = TransformerWrapper(
 )
 
 x = torch.randint(1, 20000, (1, 1024))
-model(x) # (1, 1024, 20000)
+mask = torch.ones_like(x).bool()
+model(x, mask = mask) # (1, 1024, 20000)
 ```
 
 ## Citations

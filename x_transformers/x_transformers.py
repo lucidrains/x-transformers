@@ -22,7 +22,8 @@ def default(val, d):
 
 def residualize(f):
     def fn(x, *args, **kwargs):
-        return f(x, *args, **kwargs) + x
+        out, *rest = f(x, *args, **kwargs)
+        return (out + x, *rest)
     return fn
 
 # keyword argument helpers
@@ -241,14 +242,26 @@ class Attention(nn.Module):
 
 class AttentionWithDownsample(Attention):
     def forward(self, x, num_memory_tokens = 0, downsample = False, **kwargs):
+        mask = None
+
         if downsample:
             b, n, *_ = x.shape
+            is_odd = (n % 2) == 1
+
             mem, x       = x[:, :num_memory_tokens], x[:, num_memory_tokens:]
-            x, remainder = (x[:, :-1], x[:, -1:]) if (n % 2) == 1 else (x[:, :], x[:, 0:0])
+            x, remainder = (x[:, :-1], x[:, -1:]) if is_odd else (x[:, :], x[:, 0:0])
             x = reduce(x, 'b (n c) d -> b n d', 'mean', c = 2)
             x = torch.cat((mem, x, remainder), dim = 1)
 
-        return super().forward(x, **kwargs)
+            mask = kwargs.pop('mask', None)
+            if exists(mask):
+                mask = mask[:, num_memory_tokens:]
+                mask = F.pad(mask, (0, 1), value = False) if is_odd else mask
+                mask = mask.reshape(b, -1, 2).any(dim = -1)
+                mask = F.pad(mask, (num_memory_tokens, 0), value = True)
+                kwargs.update(mask = mask)
+
+        return super().forward(x, **kwargs), mask
 
 class Encoder(nn.Module):
     def __init__(self, dim, depth, heads = 8, use_scalenorm = False, rel_pos_bias = False, **kwargs):
@@ -300,10 +313,7 @@ class FunnelEncoder(nn.Module):
                     prenorm_fn(FeedForward(dim, **ff_kwargs))
                 ]))
 
-            self.bottlenecks.append(nn.ModuleList([
-                rel_pos,
-                layers
-            ]))
+            self.bottlenecks.append(nn.ModuleList([rel_pos, layers]))
 
     def forward(self, x, context = None, mask = None):
         n = x.shape[1]
@@ -318,8 +328,11 @@ class FunnelEncoder(nn.Module):
                 downsample = layer_ind != 0 and ind == 0
                 self_attn = residualize(self_attn) if not downsample else self_attn
 
-                x = self_attn(x, mask = mask, rel_pos = rel_pos, downsample = downsample, num_memory_tokens = num_mem)
+                x, new_mask = self_attn(x, mask = mask, rel_pos = rel_pos, downsample = downsample, num_memory_tokens = num_mem)
                 x = ff(x) + x
+
+                if exists(new_mask):
+                    mask = new_mask
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
         # upsample by repeating tokens as specified in paper
