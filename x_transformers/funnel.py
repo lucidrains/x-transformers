@@ -21,10 +21,8 @@ def residualize(f):
 
 class AttentionWithDownsample(Attention):
     def forward(self, x, num_memory_tokens = 0, downsample = False, **kwargs):
-        mask = None
-
         if downsample:
-            b, n, *_ = x.shape
+            b, n, *_, orig_x = *x.shape, x
             is_odd = (n % 2) == 1
 
             mem, x       = x[:, :num_memory_tokens], x[:, num_memory_tokens:]
@@ -33,14 +31,23 @@ class AttentionWithDownsample(Attention):
             x = torch.cat((mem, x, remainder), dim = 1)
 
             mask = kwargs.pop('mask', None)
+            orig_mask = mask
+
             if exists(mask):
                 mask = mask[:, num_memory_tokens:]
                 mask = F.pad(mask, (0, 1), value = False) if is_odd else mask
                 mask = mask.reshape(b, -1, 2).any(dim = -1)
                 mask = F.pad(mask, (num_memory_tokens, 0), value = True)
-                kwargs.update(mask = mask)
 
-        return super().forward(x, **kwargs), mask
+            return super().forward(
+                x,
+                mask = mask,
+                context = orig_x,
+                context_mask = orig_mask,
+                **kwargs
+            ), mask
+
+        return super().forward(x, **kwargs), None
 
 class FunnelEncoder(nn.Module):
     def __init__(self, dim, depths, heads = 8, use_scalenorm = False, rel_pos_bias = False, num_memory_tokens = 0, **kwargs):
