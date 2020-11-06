@@ -282,7 +282,6 @@ class FunnelEncoder(nn.Module):
 
         self.dim = dim
         self.num_memory_tokens = num_memory_tokens
-        self.rel_pos = RelativePositionBias() if rel_pos_bias else None
         self.bottlenecks = nn.ModuleList([])
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
@@ -293,19 +292,25 @@ class FunnelEncoder(nn.Module):
 
         for depth in depths:
             layers = nn.ModuleList([])
+            rel_pos = RelativePositionBias() if rel_pos_bias else None
+
             for _ in range(depth):
                 layers.append(nn.ModuleList([
                     prenorm_fn(AttentionWithDownsample(dim, heads = heads, **attn_kwargs)),
                     prenorm_fn(FeedForward(dim, **ff_kwargs))
                 ]))
-            self.bottlenecks.append(layers)
+
+            self.bottlenecks.append(nn.ModuleList([
+                rel_pos,
+                layers
+            ]))
 
     def forward(self, x, context = None, mask = None):
         n = x.shape[1]
         num_mem = self.num_memory_tokens
         num_downsamples = len(self.bottlenecks)
 
-        for layer_ind, layers in enumerate(self.bottlenecks):
+        for layer_ind, (rel_pos, layers) in enumerate(self.bottlenecks):
             if layer_ind == 1:
                 res = x
 
@@ -313,7 +318,7 @@ class FunnelEncoder(nn.Module):
                 downsample = layer_ind != 0 and ind == 0
                 self_attn = residualize(self_attn) if not downsample else self_attn
 
-                x = self_attn(x, mask = mask, rel_pos = self.rel_pos, downsample = downsample, num_memory_tokens = num_mem)
+                x = self_attn(x, mask = mask, rel_pos = rel_pos, downsample = downsample, num_memory_tokens = num_mem)
                 x = ff(x) + x
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
