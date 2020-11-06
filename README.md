@@ -72,9 +72,9 @@ gpt3 = TransformerWrapper(
     max_seq_len = 2048,
     attn_layers = Decoder(
         dim = 12288,
-        dim_head = 128,
         depth = 96,
-        heads = 96
+        heads = 96,
+        attn_dim_head = 128
     )
 ).cuda()
 ```
@@ -161,6 +161,10 @@ Funnel Transformer for Encoder
 ```python
 import torch
 from x_transformers import TransformerWrapper, FunnelEncoder
+
+# 4 blocks
+# followed by downsample, 4 blocks
+# then final downsample and yet another 4
 
 model = TransformerWrapper(
     num_tokens = 20000,
