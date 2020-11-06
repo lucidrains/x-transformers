@@ -235,7 +235,7 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Encoder(nn.Module):
-    def __init__(self, dim, depth, dim_head = 64, heads = 8, use_scalenorm = False, ff_glu = False, rel_pos_bias = False, **kwargs):
+    def __init__(self, dim, depth, dim_head = 64, heads = 8, use_scalenorm = False, rel_pos_bias = False, **kwargs):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
