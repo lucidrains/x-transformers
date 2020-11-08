@@ -366,3 +366,14 @@ model(x, mask = mask) # (1, 1024, 20000)
     primaryClass = {cs.CV}
 }
 ```
+
+```bibtex
+@misc{huang2019attention,
+    title   = {Attention on Attention for Image Captioning},
+    author  = {Lun Huang and Wenmin Wang and Jie Chen and Xiao-Yong Wei},
+    year    = {2019},
+    eprint  = {1908.06954},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```
