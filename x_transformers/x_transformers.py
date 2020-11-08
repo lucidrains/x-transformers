@@ -193,10 +193,21 @@ class Attention(nn.Module):
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q_, *kv))
 
+        input_mask = None
+        if any(map(exists, (mask, context_mask))):
+            q_mask = default(mask, lambda: torch.ones((b, n), device = device).bool())
+            k_mask = q_mask if not exists(context) else context_mask
+            k_mask = default(k_mask, lambda: torch.ones((b, k.shape[-2]), device = device).bool())
+            q_mask = rearrange(q_mask, 'b i -> b () i ()')
+            k_mask = rearrange(k_mask, 'b j -> b () () j')
+            input_mask = q_mask * k_mask
+
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
             k = torch.cat((mem_k, k), dim = -2)
             v = torch.cat((mem_v, v), dim = -2)
+            if exists(input_mask):
+                input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
 
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
@@ -206,14 +217,9 @@ class Attention(nn.Module):
         if exists(rel_pos):
             dots = rel_pos(dots)
 
-        if any(map(exists, (mask, context_mask))):
-            q_mask = default(mask, lambda: torch.ones((b, dots.shape[-2]), device = device).bool())
-            k_mask = default(context_mask, lambda: torch.ones((b, dots.shape[-1]), device = device).bool())
-            q_mask = rearrange(q_mask, 'b i -> b () i ()')
-            k_mask = rearrange(k_mask, 'b j -> b () () j')
-            mask = q_mask * k_mask
-            dots.masked_fill_(mask, float('-inf'))
-            del mask
+        if exists(input_mask):
+            dots.masked_fill_(input_mask, float('-inf'))
+            del input_mask
 
         if self.causal:
             i, j = dots.shape[-2:]
