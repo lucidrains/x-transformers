@@ -2,11 +2,7 @@
 
 [![PyPI version](https://badge.fury.io/py/x-transformers.svg)](https://badge.fury.io/py/x-transformers)
 
-X stands for **ex**perimental
-
-A simple full-attention transformer, but also complete with a set of promising experimental features from various papers.
-
-Until the library hits `0.1.0`, expect a lot of breaking changes as I try to fit all the features under a concise interface.
+A concise but fully-featured transformer, complete with a set of promising e**x**perimental features from various papers.
 
 ## Install
 
