@@ -89,6 +89,15 @@ class RelativePositionBias(nn.Module):
 
 # classes
 
+class Scale(nn.Module):
+    def __init__(self, value, fn):
+        super().__init__()
+        self.value = value
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) * self.value
+
 class Rezero(nn.Module):
     def __init__(self, fn):
         super().__init__()
@@ -270,6 +279,7 @@ class AttentionLayers(nn.Module):
         rel_pos_bias = False,
         custom_layers = None,
         sandwich_coef = None,
+        macaron = False,
         **kwargs
     ):
         super().__init__()
@@ -284,7 +294,13 @@ class AttentionLayers(nn.Module):
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
-        default_block = ('a', 'f') if not cross_attend else ('a', 'c', 'f')
+        if cross_attend:
+            default_block = ('a', 'c', 'f')
+        else:
+            default_block = ('a', 'f')
+
+        if macaron:
+            default_block = ('f',) + default_block
 
         if exists(custom_layers):
             layer_types = custom_layers
@@ -303,6 +319,7 @@ class AttentionLayers(nn.Module):
                 layer = Attention(dim, heads = heads, **attn_kwargs)
             elif layer_type == 'f':
                 layer = FeedForward(dim, **ff_kwargs)
+                layer = layer if not macaron else Scale(0.5, layer)
             else:
                 raise Exception(f'invalid layer type {layer_type}')
 

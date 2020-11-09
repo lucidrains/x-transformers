@@ -190,17 +190,17 @@ To be explained and documented
 - [x] memory tokens - Memory Transformers
 - [x] scale normalization - Transformers Without Tears
 - [x] feedforward gated linear variant - Noam's GLU Variants
-- [x] no normalization with zero gating - Rezero is all you need
+- [x] rezero - Rezero is all you need
 - [x] topk attention - Explicit Sparse Attention
 - [x] entmax15 instead of softmax - Adaptively Sparse Transformers
 - [x] mixing head information - Noam's Talking Heads
 - [x] gating multi-head attention output -  Attention on Attention
 - [x] simplified relative positional encoding bias - T5
 - [x] sandwich transformer - Reordering Sublayers
-- [x] encoder with downsampling - Funnel Transformer
+- [x] encoder with downsampling and unet-like residual - Funnel Transformer
 - [x] wrapper for processing images - Vision Transformer
+- [x] macaron layers - 'Multi-particle Dynamic System' paper
 - [ ] reversibility - Reformer
-- [ ] macaron layers - Multi-Particle Dynamic System POV paper
 
 ## Citations
 
