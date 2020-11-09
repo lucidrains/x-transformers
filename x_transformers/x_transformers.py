@@ -4,11 +4,16 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from functools import partial
 from inspect import isfunction
+from enum import Enum
 
 from einops import rearrange, repeat, reduce
 from entmax import entmax15
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+
+# constants
+
+LAYER_TYPE = Enum('LAYER_TYPE', ['ff', 'attn', 'cross_attn'])
 
 # helpers
 
@@ -40,7 +45,7 @@ def string_begins_with(prefix, str):
 def group_by_key_prefix(prefix, d):
     return group_dict_by_key(partial(string_begins_with, prefix), d)
 
-def group_by_key_prefix_and_trim(prefix, d):
+def groupby_prefix_and_trim(prefix, d):
     kwargs_with_prefix, kwargs = group_dict_by_key(partial(string_begins_with, prefix), d)
     kwargs_without_prefix = dict(map(lambda x: (x[0][len(prefix):], x[1]), tuple(kwargs_with_prefix.items())))
     return kwargs_without_prefix, kwargs
@@ -88,6 +93,15 @@ class RelativePositionBias(nn.Module):
         return qk_dots + bias
 
 # classes
+
+class Rezero(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+        self.g = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) * self.g
 
 class ScaleNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
@@ -249,7 +263,7 @@ class Attention(nn.Module):
         return self.to_out(out)
 
 class Encoder(nn.Module):
-    def __init__(self, dim, depth, heads = 8, use_scalenorm = False, rel_pos_bias = False, **kwargs):
+    def __init__(self, dim, depth, heads = 8, use_scalenorm = False, use_rezero = False, rel_pos_bias = False, **kwargs):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
@@ -257,9 +271,10 @@ class Encoder(nn.Module):
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
+        prenorm_fn = Rezero if use_rezero else prenorm_fn
 
-        ff_kwargs, kwargs = group_by_key_prefix_and_trim('ff_', kwargs)
-        attn_kwargs, _ = group_by_key_prefix_and_trim('attn_', kwargs)
+        ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
+        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
@@ -273,7 +288,7 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, dim, depth, heads = 8, cross_attend = False, use_scalenorm = False, rel_pos_bias = False, **kwargs):
+    def __init__(self, dim, depth, heads = 8, cross_attend = False, use_scalenorm = False, use_rezero = False, rel_pos_bias = False, **kwargs):
         super().__init__()
         self.dim = dim
         self.layers = nn.ModuleList([])
@@ -281,9 +296,10 @@ class Decoder(nn.Module):
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
+        prenorm_fn = Rezero if use_rezero else prenorm_fn
 
-        ff_kwargs, kwargs = group_by_key_prefix_and_trim('ff_', kwargs)
-        attn_kwargs, _ = group_by_key_prefix_and_trim('attn_', kwargs)
+        ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
+        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
@@ -417,8 +433,8 @@ class XTransformer(nn.Module):
         **kwargs
     ):
         super().__init__()
-        enc_kwargs, kwargs = group_by_key_prefix_and_trim('enc_', kwargs)
-        dec_kwargs, kwargs = group_by_key_prefix_and_trim('dec_', kwargs)
+        enc_kwargs, kwargs = groupby_prefix_and_trim('enc_', kwargs)
+        dec_kwargs, kwargs = groupby_prefix_and_trim('dec_', kwargs)
 
         assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
         enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len', 'num_memory_tokens'], enc_kwargs)

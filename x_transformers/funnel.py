@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from functools import partial
-from x_transformers.x_transformers import Attention, FeedForward, ScaleNorm, PreNorm, group_by_key_prefix_and_trim
+from x_transformers.x_transformers import Attention, FeedForward, ScaleNorm, PreNorm, Rezero, groupby_prefix_and_trim
 
 from einops import repeat, reduce
 
@@ -50,7 +50,7 @@ class AttentionWithDownsample(Attention):
         return super().forward(x, **kwargs), None
 
 class FunnelEncoder(nn.Module):
-    def __init__(self, dim, depths, heads = 8, use_scalenorm = False, rel_pos_bias = False, num_memory_tokens = 0, **kwargs):
+    def __init__(self, dim, depths, heads = 8, use_scalenorm = False, use_rezero = False, rel_pos_bias = False, num_memory_tokens = 0, **kwargs):
         super().__init__()
         assert isinstance(depths, tuple), 'depths must be a tuple, where each element specifies the number of layers before the next bottleneck'
         assert len(depths) > 1, 'there must be at least 1 bottleneck'
@@ -61,9 +61,10 @@ class FunnelEncoder(nn.Module):
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
+        prenorm_fn = Rezero if use_rezero else prenorm_fn
 
-        ff_kwargs, kwargs = group_by_key_prefix_and_trim('ff_', kwargs)
-        attn_kwargs, _ = group_by_key_prefix_and_trim('attn_', kwargs)
+        ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
+        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
         for depth in depths:
             layers = nn.ModuleList([])
