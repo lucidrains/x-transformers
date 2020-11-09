@@ -182,6 +182,26 @@ mask = torch.ones_like(x).bool()
 model(x, mask = mask) # (1, 1024, 20000)
 ```
 
+## Features
+
+To be explained and documented
+
+- [x] memory key / values - All-attention paper
+- [x] memory tokens - Memory Transformers
+- [x] scale normalization - Transformers Without Tears
+- [x] feedforward gated linear variant - Noam's GLU Variants
+- [x] no normalization with zero gating - Rezero is all you need
+- [x] topk attention - Explicit Sparse Attention
+- [x] entmax15 instead of softmax - Adaptively Sparse Transformers
+- [x] mixing head information - Noam's Talking Heads
+- [x] gating multi-head attention output -  Attention on Attention
+- [x] simplified relative positional encoding bias - T5
+- [x] sandwich transformer - Reordering Sublayers
+- [x] encoder with downsampling - Funnel Transformer
+- [x] wrapper for processing images - Vision Transformer
+- [ ] reversibility - Reformer
+- [ ] macaron layers - Multi-Particle Dynamic System POV paper
+
 ## Citations
 
 ```bibtex
@@ -324,13 +344,13 @@ model(x, mask = mask) # (1, 1024, 20000)
 ```
 
 ```bibtex
-@misc{zhang2020selfattention,
-    title   = {When Can Self-Attention Be Replaced by Feed Forward Layers?}, 
-    author  = {Shucong Zhang and Erfan Loweimi and Peter Bell and Steve Renals},
-    year    = {2020},
-    eprint  = {2005.13895},
+@misc{lu2019understanding,
+    title   = {Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View}, 
+    author  = {Yiping Lu and Zhuohan Li and Di He and Zhiqing Sun and Bin Dong and Tao Qin and Liwei Wang and Tie-Yan Liu},
+    year    = {2019},
+    eprint  = {1906.02762},
     archivePrefix = {arXiv},
-    primaryClass = {eess.AS}
+    primaryClass = {cs.LG}
 }
 ```
 
@@ -375,5 +395,16 @@ model(x, mask = mask) # (1, 1024, 20000)
     eprint  = {1908.06954},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@misc{raffel2020exploring,
+    title   = {Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer}, 
+    author  = {Colin Raffel and Noam Shazeer and Adam Roberts and Katherine Lee and Sharan Narang and Michael Matena and Yanqi Zhou and Wei Li and Peter J. Liu},
+    year    = {2020},
+    eprint  = {1910.10683},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
