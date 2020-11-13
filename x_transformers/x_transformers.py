@@ -20,6 +20,9 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
+def max_neg_value(tensor):
+    return -torch.finfo(tensor.dtype).max
+
 # keyword argument helpers
 
 def pick_and_pop(keys, d):
@@ -229,6 +232,8 @@ class Attention(nn.Module):
 
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
+        mask_value = max_neg_value(dots)
+
         if talking_heads:
             dots = einsum('b h i j, h k -> b k i j', dots, self.pre_softmax_proj).contiguous()
 
@@ -236,20 +241,20 @@ class Attention(nn.Module):
             dots = rel_pos(dots)
 
         if exists(input_mask):
-            dots.masked_fill_(~input_mask, float('-inf'))
+            dots.masked_fill_(~input_mask, mask_value)
             del input_mask
 
         if self.causal:
             i, j = dots.shape[-2:]
             mask = torch.ones((i, j), device = device).triu_(j - i + 1).bool()
-            dots.masked_fill_(mask, float('-inf'))
+            dots.masked_fill_(mask, mask_value)
             del mask
 
         if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
             top, _ = dots.topk(self.sparse_topk, dim = -1)
             vk = top[..., -1].unsqueeze(-1).expand_as(dots)
             mask = dots < vk
-            dots.masked_fill_(mask, float('-inf'))
+            dots.masked_fill_(mask, mask_value)
             del mask
 
         attn = self.attn_fn(dots, dim = -1)
