@@ -297,6 +297,30 @@ model = TransformerWrapper(
 )
 ```
 
+### Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection
+
+<img src="./images/topk-attention.png" width="500px"></img>
+
+https://arxiv.org/abs/1912.11637
+
+This paper proposes an efficient way to sparsify attention by zeroing all dot-product query/key values not within the top k values. The show that this cheap method was as effective as other more expensive operations like sparsemax or entmax15. This technique comes with the cost of an extra hyperparameter (the top k values to keep). The paper recommends a value of `k = 8`
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        sparse_topk = 8 # keep only the top 8 values before attention (softmax)
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -306,7 +330,7 @@ To be explained and documented
 - [x] ~~scale normalization - Transformers Without Tears~~
 - [x] ~~feedforward gated linear variant - Noam's GLU Variants~~
 - [x] ~~rezero - Rezero is all you need~~
-- [x] topk attention - Explicit Sparse Attention
+- [x] ~~topk attention - Explicit Sparse Attention~~
 - [x] entmax15 instead of softmax - Adaptively Sparse Transformers
 - [x] mixing head information - Noam's Talking Heads
 - [x] gating multi-head attention output -  Attention on Attention
