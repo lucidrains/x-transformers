@@ -186,7 +186,7 @@ model(x, mask = mask) # (1, 1024, 20000)
 
 https://arxiv.org/abs/1907.01470
 
-Proposes adding learned memory key / values prior to attention. This can be added to either the encoder or the decoder.
+Proposes adding learned memory key / values prior to attention. They were able to remove feedforwards altogether and attain similar performance to the original transformers. I have found that keeping the feedforwards and adding the memory key / values leads to even better performance.
 
 ```python
 from x_transformers import Decoder, Encoder
@@ -205,7 +205,7 @@ enc = Encoder(
 
 https://arxiv.org/abs/2006.11527
 
-Proposes adding learned tokens, akin to CLS tokens, named memory tokens, that is passed through the attention layers along with the input tokens.
+Proposes adding learned tokens, akin to CLS tokens, named memory tokens, that is passed through the attention layers alongside the input tokens.
 
 ```python
 import torch
