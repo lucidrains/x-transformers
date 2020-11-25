@@ -365,6 +365,8 @@ model = TransformerWrapper(
 
 ### Attention on Attention for Image Captioning
 
+<img src="./images/attention-on-attention.png"></img>
+
 https://arxiv.org/abs/1908.06954
 
 This paper proposes to add a gated linear unit at the end of the attention layer, further gated by the original queries. Although this is not widely used outside of visual question / answering, I suspect it should lead to improvements after seeing the success of the feedforward GLU variant.
@@ -381,6 +383,36 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         attn_on_attn = True  # gate output of attention layer, by queries
+    )
+)
+```
+
+### Improving Transformer Models by Reordering their Sublayers
+
+<img src="./images/sandwich.png"></img>
+
+<img src="./images/sandwich-2.png"></img>
+
+https://arxiv.org/abs/1911.03864
+
+This paper proposes to break from the normal fixed pattern of alternating attention and feedforwards, but to have blocks of only attention at the beginning followed by blocks of feedforwards at the end. This was further corroborated by a paper by Nvidia that reduces the number of attention layers to be 1/3rd of the feedforwards without loss in performance.
+
+The amount of interleaving is controlled by a "sandwich coefficient", which they found to be optimal at a value of `6`.
+
+You can experiment with this feature as shown below
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_sandwich_coef = 6  # interleave attention and feedforwards with sandwich coefficient of 6
     )
 )
 ```
