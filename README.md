@@ -271,6 +271,32 @@ model = TransformerWrapper(
 )
 ```
 
+### Rezero Is All You Need
+
+<img src="./images/rezero.png"></img>
+
+https://arxiv.org/abs/2003.04887
+
+This paper proposes to do away with normalization altogether, and instead gate the output of each branch with a single learned scalar, initialized at zero. They demonstrate convergence for very deep networks, convolution or attention, all without normalization.
+
+I have had good results on usual datasets, but had met trouble with convergence on large datasets (GPT3 sized datasets). However, enough researchers have told me they had positive experiences with this that I decided to include it. If you run into trouble, please use Scalenorm instead.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        use_rezero = True # set to true to use for all layers
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -279,7 +305,7 @@ To be explained and documented
 - [x] ~~memory tokens - Memory Transformers~~
 - [x] ~~scale normalization - Transformers Without Tears~~
 - [x] ~~feedforward gated linear variant - Noam's GLU Variants~~
-- [x] rezero - Rezero is all you need
+- [x] ~~rezero - Rezero is all you need~~
 - [x] topk attention - Explicit Sparse Attention
 - [x] entmax15 instead of softmax - Adaptively Sparse Transformers
 - [x] mixing head information - Noam's Talking Heads
