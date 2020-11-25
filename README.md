@@ -412,7 +412,33 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_sandwich_coef = 6  # interleave attention and feedforwards with sandwich coefficient of 6
+        sandwich_coef = 6  # interleave attention and feedforwards with sandwich coefficient of 6
+    )
+)
+```
+
+### Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View
+
+<img src="./images/macaron-1.png"></img>
+
+<img src="./images/macaron-2.png"></img>
+
+https://arxiv.org/abs/1906.02762
+
+The authors propose to view the success of transformers from a dynamical systems point of view, and then proposes an improvement based on mathematics of that POV. Specifically, they propose to place the attention layer in between two feedforward layers. This was adopted by a paper using transformers for speech recognition, the <a href="https://arxiv.org/abs/2005.08100">Conformer</a>.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        macaron = True  # use macaron configuration
     )
 )
 ```
@@ -431,7 +457,7 @@ To be explained and documented
 - [x] ~~mixing head information - Noam's Talking Heads~~
 - [x] ~~gating multi-head attention output -  Attention on Attention~~
 - [x] simplified relative positional encoding bias - T5
-- [x] sandwich transformer - Reordering Sublayers
+- [x] ~~sandwich transformer - Reordering Sublayers~~
 - [x] encoder with downsampling and unet-like residual - Funnel Transformer
 - [x] wrapper for processing images - Vision Transformer
 - [x] macaron layers - 'Multi-particle Dynamic System' paper
