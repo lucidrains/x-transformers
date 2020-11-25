@@ -443,6 +443,28 @@ model = TransformerWrapper(
 )
 ```
 
+### T5's Simplified Relative Positional Encoding
+
+https://arxiv.org/abs/1910.10683
+
+T5 is one of the most successful encoder / decoder transformer architectures trained to date. They invented a new simplified relative positional encoding based on learned bias values that are added to the attention matrix pre-softmax. This bias is shared and injected into each attention layer. I have decided to include this because it offers a cheap way to have relative positional encoding (superior to absolute positional), and I have read papers that suggest having positional encoding added to each layer (vs only before the first) is beneficial.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        rel_pos_bias = True  # adds relative positional bias to all attention layers, a la T5
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -456,11 +478,11 @@ To be explained and documented
 - [x] ~~entmax15 instead of softmax - Adaptively Sparse Transformers~~
 - [x] ~~mixing head information - Noam's Talking Heads~~
 - [x] ~~gating multi-head attention output -  Attention on Attention~~
-- [x] simplified relative positional encoding bias - T5
+- [x] ~~simplified relative positional encoding bias - T5~~
 - [x] ~~sandwich transformer - Reordering Sublayers~~
 - [x] encoder with downsampling and unet-like residual - Funnel Transformer
 - [x] wrapper for processing images - Vision Transformer
-- [x] macaron layers - 'Multi-particle Dynamic System' paper
+- [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [ ] reversibility - Reformer
 
 ## Citations
@@ -590,17 +612,6 @@ To be explained and documented
     eprint  = {1911.03864},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
-}
-```
-
-```bibtex
-@misc{lu2019understanding,
-    title   = {Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View}, 
-    author  = {Yiping Lu and Zhuohan Li and Di He and Zhiqing Sun and Bin Dong and Tao Qin and Liwei Wang and Tie-Yan Liu},
-    year    = {2019},
-    eprint  = {1906.02762},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.LG}
 }
 ```
 
