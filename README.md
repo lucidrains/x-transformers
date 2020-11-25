@@ -182,7 +182,7 @@ model(x, mask = mask) # (1, 1024, 20000)
 
 ### Augmenting Self-attention with Persistent Memory
 
-<img src="./images/all-attention.png"></img>
+<img src="./images/all-attention.png" width="500px"></img>
 
 https://arxiv.org/abs/1907.01470
 
@@ -199,12 +199,36 @@ enc = Encoder(
 )
 ```
 
+### Memory Transformers
+
+<img src="./images/memory-transformer.png" width="500px"></img>
+
+https://arxiv.org/abs/2006.11527
+
+Proposes adding learned tokens, akin to CLS tokens, named memory tokens, that is passed through the attention layers along with the input tokens.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    num_memory_tokens = 20, # 20 memory tokens
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
 
 - [x] ~~memory key / values - All-attention paper~~
-- [x] memory tokens - Memory Transformers
+- [x] ~~memory tokens - Memory Transformers~~
 - [x] scale normalization - Transformers Without Tears
 - [x] feedforward gated linear variant - Noam's GLU Variants
 - [x] rezero - Rezero is all you need
