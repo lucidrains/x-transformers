@@ -316,7 +316,49 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        sparse_topk = 8 # keep only the top 8 values before attention (softmax)
+        attn_sparse_topk = 8 # keep only the top 8 values before attention (softmax)
+    )
+)
+```
+
+Alternatively, if you would like to use `entmax15`, you can also do so with one setting as shown below.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_use_entmax15 = True  # use entmax15 for attention step
+    )
+)
+```
+
+### Talking-Heads Attention
+
+<img src="./images/talking-heads.png" width="500px"></img>
+
+https://arxiv.org/abs/2003.02436
+
+A Noam Shazeer paper that proposes mixing information between heads pre and post attention (softmax). This comes with the cost of extra memory and compute.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_talking_heads = True  # turn on information exchange between attention heads
     )
 )
 ```
@@ -331,8 +373,8 @@ To be explained and documented
 - [x] ~~feedforward gated linear variant - Noam's GLU Variants~~
 - [x] ~~rezero - Rezero is all you need~~
 - [x] ~~topk attention - Explicit Sparse Attention~~
-- [x] entmax15 instead of softmax - Adaptively Sparse Transformers
-- [x] mixing head information - Noam's Talking Heads
+- [x] ~~entmax15 instead of softmax - Adaptively Sparse Transformers~~
+- [x] ~~mixing head information - Noam's Talking Heads~~
 - [x] gating multi-head attention output -  Attention on Attention
 - [x] simplified relative positional encoding bias - T5
 - [x] sandwich transformer - Reordering Sublayers
