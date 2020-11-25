@@ -363,6 +363,28 @@ model = TransformerWrapper(
 )
 ```
 
+### Attention on Attention for Image Captioning
+
+https://arxiv.org/abs/1908.06954
+
+This paper proposes to add a gated linear unit at the end of the attention layer, further gated by the original queries. Although this is not widely used outside of visual question / answering, I suspect it should lead to improvements after seeing the success of the feedforward GLU variant.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_on_attn = True  # gate output of attention layer, by queries
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -375,7 +397,7 @@ To be explained and documented
 - [x] ~~topk attention - Explicit Sparse Attention~~
 - [x] ~~entmax15 instead of softmax - Adaptively Sparse Transformers~~
 - [x] ~~mixing head information - Noam's Talking Heads~~
-- [x] gating multi-head attention output -  Attention on Attention
+- [x] ~~gating multi-head attention output -  Attention on Attention~~
 - [x] simplified relative positional encoding bias - T5
 - [x] sandwich transformer - Reordering Sublayers
 - [x] encoder with downsampling and unet-like residual - Funnel Transformer
