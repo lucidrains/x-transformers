@@ -223,6 +223,30 @@ model = TransformerWrapper(
 )
 ```
 
+### Transformers Without Tears
+
+<img src="./images/scalenorm.png"></img>
+
+https://arxiv.org/abs/1910.05895
+
+They experiment with alternatives to Layer normalization and found one that is both effective and simpler. Researchers have shared with me this leads to faster convergence.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        use_scalenorm = True # set to true to use for all layers
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
