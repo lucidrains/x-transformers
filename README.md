@@ -247,14 +247,38 @@ model = TransformerWrapper(
 )
 ```
 
+### GLU Variants Improve Transformer
+
+<img src="./images/ffglu.png"></img>
+
+https://arxiv.org/abs/2002.05202
+
+Noam Shazeer paper that explores gating in the feedforward, finding that simple gating with GELU leads to significant improvements. This variant also showed up in the latest mT5 architecture. You should always turn this on (I may eventually turn it on by default).
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        ff_glu = True # set to true to use for all feedforwards
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
 
 - [x] ~~memory key / values - All-attention paper~~
 - [x] ~~memory tokens - Memory Transformers~~
-- [x] scale normalization - Transformers Without Tears
-- [x] feedforward gated linear variant - Noam's GLU Variants
+- [x] ~~scale normalization - Transformers Without Tears~~
+- [x] ~~feedforward gated linear variant - Noam's GLU Variants~~
 - [x] rezero - Rezero is all you need
 - [x] topk attention - Explicit Sparse Attention
 - [x] entmax15 instead of softmax - Adaptively Sparse Transformers
