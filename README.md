@@ -180,9 +180,30 @@ model(x, mask = mask) # (1, 1024, 20000)
 
 ## Features
 
+### Augmenting Self-attention with Persistent Memory
+
+<img src="./images/all-attention.png"></img>
+
+https://arxiv.org/abs/1907.01470
+
+Proposes adding learned memory key / values prior to attention. This can be added to either the encoder or the decoder.
+
+```python
+from x_transformers import Decoder, Encoder
+
+enc = Encoder(
+    dim = 512,
+    depth = 6,
+    heads = 8,
+    attn_num_mem_kv = 16 # 16 memory key / values
+)
+```
+
+## Todo
+
 To be explained and documented
 
-- [x] memory key / values - All-attention paper
+- [x] ~~memory key / values - All-attention paper~~
 - [x] memory tokens - Memory Transformers
 - [x] scale normalization - Transformers Without Tears
 - [x] feedforward gated linear variant - Noam's GLU Variants
