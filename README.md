@@ -480,8 +480,8 @@ To be explained and documented
 - [x] ~~gating multi-head attention output -  Attention on Attention~~
 - [x] ~~simplified relative positional encoding bias - T5~~
 - [x] ~~sandwich transformer - Reordering Sublayers~~
-- [x] encoder with downsampling and unet-like residual - Funnel Transformer
-- [x] wrapper for processing images - Vision Transformer
+- [x] ~~encoder with downsampling and unet-like residual - Funnel Transformer~~
+- [x] ~~wrapper for processing images - Vision Transformer~~
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [ ] reversibility - Reformer
 
