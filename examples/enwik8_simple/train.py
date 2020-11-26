@@ -39,8 +39,7 @@ def decode_tokens(tokens):
 model = TransformerWrapper(
     num_tokens = 256,
     max_seq_len = SEQ_LEN,
-    attn_layers = Decoder(dim = 512, depth = 6, heads = 8),
-    return_logits = True
+    attn_layers = Decoder(dim = 512, depth = 6, heads = 8)
 )
 
 model = AutoregressiveWrapper(model)
