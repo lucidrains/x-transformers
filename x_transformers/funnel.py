@@ -21,33 +21,33 @@ def residualize(f):
 
 class AttentionWithDownsample(Attention):
     def forward(self, x, num_memory_tokens = 0, downsample = False, **kwargs):
-        if downsample:
-            b, n, *_, orig_x = *x.shape, x
-            is_odd = (n % 2) == 1
+        if not downsample:
+            return super().forward(x, **kwargs), None
 
-            mem, x       = x[:, :num_memory_tokens], x[:, num_memory_tokens:]
-            x, remainder = (x[:, :-1], x[:, -1:]) if is_odd else (x[:, :], x[:, 0:0])
-            x = reduce(x, 'b (n c) d -> b n d', 'mean', c = 2)
-            x = torch.cat((mem, x, remainder), dim = 1)
+        b, n, *_, orig_x = *x.shape, x
+        is_odd = (n % 2) == 1
 
-            mask = kwargs.pop('mask', None)
-            orig_mask = mask
+        mem, x       = x[:, :num_memory_tokens], x[:, num_memory_tokens:]
+        x, remainder = (x[:, :-1], x[:, -1:]) if is_odd else (x[:, :], x[:, 0:0])
+        x = reduce(x, 'b (n c) d -> b n d', 'mean', c = 2)
+        x = torch.cat((mem, x, remainder), dim = 1)
 
-            if exists(mask):
-                mask = mask[:, num_memory_tokens:]
-                mask = F.pad(mask, (0, 1), value = False) if is_odd else mask
-                mask = mask.reshape(b, -1, 2).any(dim = -1)
-                mask = F.pad(mask, (num_memory_tokens, 0), value = True)
+        mask = kwargs.pop('mask', None)
+        orig_mask = mask
 
-            return super().forward(
-                x,
-                mask = mask,
-                context = orig_x,
-                context_mask = orig_mask,
-                **kwargs
-            ), mask
+        if exists(mask):
+            mask = mask[:, num_memory_tokens:]
+            mask = F.pad(mask, (0, 1), value = False) if is_odd else mask
+            mask = mask.reshape(b, -1, 2).any(dim = -1)
+            mask = F.pad(mask, (num_memory_tokens, 0), value = True)
 
-        return super().forward(x, **kwargs), None
+        return super().forward(
+            x,
+            mask = mask,
+            context = orig_x,
+            context_mask = orig_mask,
+            **kwargs
+        ), mask
 
 class FunnelEncoder(nn.Module):
     def __init__(self, dim, depths, heads = 8, use_scalenorm = False, use_rezero = False, rel_pos_bias = False, num_memory_tokens = 0, **kwargs):
