@@ -70,8 +70,7 @@ class AutoregressiveWrapper(nn.Module):
                 probs = F.softmax(filtered_logits / temperature, dim=-1)
 
             elif filter_logits_fn is entmax:
-                alpha = torch.tensor(ENTMAX_ALPHA, device = device)
-                probs = entmax(logits / temperature, alpha, dim=-1)
+                probs = entmax(logits / temperature, alpha = ENTMAX_ALPHA, dim=-1)
 
             sample = torch.multinomial(probs, 1)
 
