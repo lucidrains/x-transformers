@@ -3,8 +3,9 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
+from entmax import entmax_bisect
 
-from entmax import entmax15
+# nucleus
 
 def top_p(logits, thres = 0.9):
     sorted_logits, sorted_indices = torch.sort(logits, descending=True)
@@ -17,12 +18,19 @@ def top_p(logits, thres = 0.9):
     sorted_logits[sorted_indices_to_remove] = float('-inf')
     return sorted_logits.scatter(1, sorted_indices, sorted_logits)
 
+# topk
+
 def top_k(logits, thres = 0.9):
     k = int((1 - thres) * logits.shape[-1])
     val, ind = torch.topk(logits, k)
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(1, ind, val)
     return probs
+
+# entmax
+
+ENTMAX_ALPHA = 1.3
+entmax = entmax_bisect
 
 class AutoregressiveWrapper(nn.Module):
     def __init__(self, net, ignore_index = -100, pad_value = 0):
@@ -34,7 +42,8 @@ class AutoregressiveWrapper(nn.Module):
         self.max_seq_len = net.max_seq_len
 
     @torch.no_grad()
-    def generate(self, start_tokens, seq_len, eos_token = None, temperature = 1., filter_logits_fn = entmax15, filter_thres = 0.9, **kwargs):
+    def generate(self, start_tokens, seq_len, eos_token = None, temperature = 1., filter_logits_fn = entmax, filter_thres = 0.9, **kwargs):
+        device = start_tokens.device
         was_training = self.net.training
         num_dims = len(start_tokens.shape)
 
@@ -60,8 +69,9 @@ class AutoregressiveWrapper(nn.Module):
                 filtered_logits = filter_logits_fn(logits, thres = filter_thres)
                 probs = F.softmax(filtered_logits / temperature, dim=-1)
 
-            elif filter_logits_fn is entmax15:
-                probs = entmax15(logits / temperature, dim=-1)
+            elif filter_logits_fn is entmax:
+                alpha = torch.tensor(ENTMAX_ALPHA, device = device)
+                probs = entmax(logits / temperature, alpha, dim=-1)
 
             sample = torch.multinomial(probs, 1)
 
