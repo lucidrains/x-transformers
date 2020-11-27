@@ -4,6 +4,8 @@ from torch import nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+from entmax import entmax15
+
 def top_p(logits, thres = 0.9):
     sorted_logits, sorted_indices = torch.sort(logits, descending=True)
     cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -32,7 +34,7 @@ class AutoregressiveWrapper(nn.Module):
         self.max_seq_len = net.max_seq_len
 
     @torch.no_grad()
-    def generate(self, start_tokens, seq_len, eos_token = None, temperature = 1., filter_logits_fn = top_k, filter_thres = 0.9, **kwargs):
+    def generate(self, start_tokens, seq_len, eos_token = None, temperature = 1., filter_logits_fn = entmax15, filter_thres = 0.9, **kwargs):
         was_training = self.net.training
         num_dims = len(start_tokens.shape)
 
@@ -53,8 +55,14 @@ class AutoregressiveWrapper(nn.Module):
             mask = mask[:, -self.max_seq_len:]
 
             logits = self.net(x, mask=mask, **kwargs)[:, -1, :]
-            filtered_logits = filter_logits_fn(logits, thres = filter_thres)
-            probs = F.softmax(filtered_logits / temperature, dim=-1)
+
+            if filter_logits_fn in {top_k, top_p}:
+                filtered_logits = filter_logits_fn(logits, thres = filter_thres)
+                probs = F.softmax(filtered_logits / temperature, dim=-1)
+
+            elif filter_logits_fn is entmax15:
+                probs = entmax15(logits / temperature, dim=-1)
+
             sample = torch.multinomial(probs, 1)
 
             out = torch.cat((out, sample), dim=-1)

@@ -680,3 +680,18 @@ To be explained and documented
     primaryClass = {cs.LG}
 }
 ```
+
+```bibtex
+@inproceedings{martins-etal-2020-sparse,
+    title = "Sparse Text Generation",
+    author = "Martins, Pedro Henrique  and
+        Marinho, Zita  and
+        Martins, Andr{\'e} F. T.",
+    booktitle = "Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)",
+    month = nov,
+    year = "2020",
+    address = "Online",
+    publisher = "Association for Computational Linguistics",
+    url = "https://www.aclweb.org/anthology/2020.emnlp-main.348"
+}
+```
