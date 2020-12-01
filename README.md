@@ -484,6 +484,7 @@ To be explained and documented
 - [x] ~~wrapper for processing images - Vision Transformer~~
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [ ] reversibility - Reformer
+- [ ] recurrence - Transformer-XL
 
 ## Citations
 
