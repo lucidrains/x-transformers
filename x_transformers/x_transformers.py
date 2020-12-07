@@ -407,7 +407,7 @@ class TransformerWrapper(nn.Module):
         max_seq_len,
         attn_layers,
         emb_dropout = 0.,
-        num_memory_tokens = 0
+        num_memory_tokens = None
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -423,6 +423,7 @@ class TransformerWrapper(nn.Module):
         self.to_logits = lambda t: t @ self.token_emb.weight.t()
 
         # memory tokens (like [cls]) from Memory Transformers paper
+        num_memory_tokens = default(num_memory_tokens, 0)
         self.num_memory_tokens = num_memory_tokens
         if num_memory_tokens > 0:
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
