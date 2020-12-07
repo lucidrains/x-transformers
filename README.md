@@ -27,8 +27,7 @@ model = XTransformer(
     dec_num_tokens = 256,
     dec_depth = 6,
     dec_heads = 8,
-    dec_max_seq_len = 1024,
-    enc_num_memory_tokens = 0
+    dec_max_seq_len = 1024
 )
 
 src = torch.randint(0, 256, (1, 1024))
