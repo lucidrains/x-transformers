@@ -467,6 +467,7 @@ class XTransformer(nn.Module):
         *,
         dim,
         return_tgt_loss = False,
+        tie_token_emb = False,
         **kwargs
     ):
         super().__init__()
@@ -486,6 +487,9 @@ class XTransformer(nn.Module):
             **dec_transformer_kwargs,
             attn_layers = Decoder(dim = dim, cross_attend = True, **dec_kwargs)
         )
+
+        if tie_token_emb:
+            self.decoder.token_emb = self.encoder.token_emb
 
         if return_tgt_loss:
             self.decoder = AutoregressiveWrapper(self.decoder)
