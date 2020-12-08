@@ -261,7 +261,7 @@ class Attention(nn.Module):
         attn = self.dropout(attn)
 
         if talking_heads:
-            dots = einsum('b h i j, h k -> b k i j', dots, self.post_softmax_proj).contiguous()
+            attn = einsum('b h i j, h k -> b k i j', attn, self.post_softmax_proj).contiguous()
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')

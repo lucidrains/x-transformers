@@ -486,6 +486,8 @@ To be explained and documented
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [ ] reversibility - Reformer
 - [ ] recurrence - Transformer-XL
+- [ ] shared key/value - 'One Value Head is All You Need' paper
+- [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
 
 ## Citations
 
