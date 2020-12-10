@@ -179,6 +179,29 @@ mask = torch.ones_like(x).bool()
 model(x, mask = mask) # (1, 1024, 20000)
 ```
 
+## Dropouts
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    emb_dropout = 0.1,         # dropout after embedding
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_dropout = 0.1,    # dropout post-attention
+        ff_dropout = 0.1       # feedforward dropout
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
 ## Features
 
 ### Augmenting Self-attention with Persistent Memory
