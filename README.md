@@ -36,7 +36,8 @@ src_mask = torch.ones_like(src).bool()
 tgt = torch.randint(0, 256, (1, 1024))
 tgt_mask = torch.ones_like(tgt).bool()
 
-model(src, tgt, src_mask = src_mask, tgt_mask = tgt_mask) # (1, 1024, 512)
+loss = model(src, tgt, src_mask = src_mask, tgt_mask = tgt_mask) # (1, 1024, 512)
+loss.backward()
 ```
 
 Decoder-only (GPT-like)

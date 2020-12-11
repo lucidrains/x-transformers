@@ -466,7 +466,6 @@ class XTransformer(nn.Module):
         self,
         *,
         dim,
-        return_tgt_loss = False,
         tie_token_emb = False,
         **kwargs
     ):
@@ -475,7 +474,9 @@ class XTransformer(nn.Module):
         dec_kwargs, kwargs = groupby_prefix_and_trim('dec_', kwargs)
 
         assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
-        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len', 'num_memory_tokens'], enc_kwargs)
+        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], enc_kwargs)
+        enc_transformer_kwargs['num_memory_tokens'] = enc_kwargs.pop('num_memory_tokens', None)
+
         dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
 
         self.encoder = TransformerWrapper(
@@ -491,8 +492,12 @@ class XTransformer(nn.Module):
         if tie_token_emb:
             self.decoder.token_emb = self.encoder.token_emb
 
-        if return_tgt_loss:
-            self.decoder = AutoregressiveWrapper(self.decoder)
+        self.decoder = AutoregressiveWrapper(self.decoder)
+
+    @torch.no_grad()
+    def generate(self, seq_in, seq_out_start, seq_len, src_mask = None):
+        encodings = self.encoder(seq_in, return_embeddings = True, mask = src_mask)
+        return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask)
 
     def forward(self, src, tgt, src_mask = None, tgt_mask = None):
         enc = self.encoder(src, mask = src_mask, return_embeddings = True)
