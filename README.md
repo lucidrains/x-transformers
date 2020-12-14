@@ -525,10 +525,14 @@ enc = Encoder(dim = 512, depth = 6)
 model = CrossAttender(dim = 512, depth = 6)
 
 nodes = torch.randn(1, 1, 512)
-neighbors = torch.randn(1, 5, 512)
+node_masks = torch.ones(1, 1).bool()
 
-encoded_neighbors = enc(neighbors)
-model(nodes, context = encoded_neighbors) # (1, 1, 512)
+neighbors = torch.randn(1, 5, 512)
+neighbor_masks = torch.ones(1, 5).bool()
+
+encoded_neighbors = enc(neighbors, mask = neighbor_masks)
+model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neighbor_masks) # (1, 1, 512)
+
 ```
 
 ## Citations
