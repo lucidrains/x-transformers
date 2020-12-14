@@ -513,6 +513,30 @@ To be explained and documented
 - [ ] shared key/value - 'One Value Head is All You Need' paper
 - [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
 
+## Miscellaneous
+
+Cross Attention
+
+```python
+import torch
+from x_transformers import Encoder
+
+enc = Encoder(dim = 512, depth = 6)
+
+cross_attn = Encoder(
+    dim = 512,
+    depth = 6,
+    cross_attend = True,
+    only_cross = True
+)
+
+nodes = torch.randn(1, 1, 512)
+neighbors = torch.randn(1, 5, 512)
+
+encoded_neighbors = enc(neighbors)
+cross_attn(nodes, context = encoded_neighbors) # (1, 1, 512)
+```
+
 ## Citations
 
 ```bibtex

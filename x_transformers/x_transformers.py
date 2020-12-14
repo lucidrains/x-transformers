@@ -279,6 +279,7 @@ class AttentionLayers(nn.Module):
         heads = 8,
         causal = False,
         cross_attend = False,
+        only_cross = False,
         use_scalenorm = False,
         use_rezero = False,
         rel_pos_bias = False,
@@ -299,8 +300,10 @@ class AttentionLayers(nn.Module):
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
-        if cross_attend:
+        if cross_attend and not only_cross:
             default_block = ('a', 'c', 'f')
+        elif cross_attend and only_cross:
+            default_block = ('c', 'f')
         else:
             default_block = ('a', 'f')
 
