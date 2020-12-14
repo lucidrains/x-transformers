@@ -519,22 +519,16 @@ Cross Attention
 
 ```python
 import torch
-from x_transformers import Encoder
+from x_transformers import Encoder, CrossAttender
 
 enc = Encoder(dim = 512, depth = 6)
-
-cross_attn = Encoder(
-    dim = 512,
-    depth = 6,
-    cross_attend = True,
-    only_cross = True
-)
+model = CrossAttender(dim = 512, depth = 6)
 
 nodes = torch.randn(1, 1, 512)
 neighbors = torch.randn(1, 5, 512)
 
 encoded_neighbors = enc(neighbors)
-cross_attn(nodes, context = encoded_neighbors) # (1, 1, 512)
+model(nodes, context = encoded_neighbors) # (1, 1, 512)
 ```
 
 ## Citations
