@@ -343,7 +343,6 @@ class AttentionLayers(nn.Module):
 class Encoder(AttentionLayers):
     def __init__(self, **kwargs):
         assert 'causal' not in kwargs, 'cannot set causality on encoder'
-        assert 'cross_attend' not in kwargs, 'encoder cannot cross attend'
         super().__init__(causal = False, **kwargs)
 
 class Decoder(AttentionLayers):
