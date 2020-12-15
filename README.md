@@ -396,6 +396,8 @@ https://arxiv.org/abs/1908.06954
 
 This paper proposes to add a gated linear unit at the end of the attention layer, further gated by the original queries. Although this is not widely used outside of visual question / answering, I suspect it should lead to improvements after seeing the success of the feedforward GLU variant.
 
+Update: After some experimentation, I found this variant actually performs worse, but if it were to be modified to not concatenate the queries before gating, it performs much better. That is what we will be using in this repository.
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder, Encoder

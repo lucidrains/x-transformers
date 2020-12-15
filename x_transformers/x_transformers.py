@@ -203,7 +203,7 @@ class Attention(nn.Module):
 
         # attention on attention
         self.attn_on_attn = on_attn
-        self.to_out = GEGLU(inner_dim * 2, dim) if on_attn else nn.Linear(inner_dim, dim)
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(inner_dim, dim)
 
     def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
@@ -265,9 +265,6 @@ class Attention(nn.Module):
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
-
-        if self.attn_on_attn:
-            out = torch.cat((q_, out), dim = -1)
 
         return self.to_out(out)
 
