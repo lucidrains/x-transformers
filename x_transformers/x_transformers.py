@@ -348,23 +348,25 @@ class AttentionLayers(nn.Module):
 
     def forward(self, x, context = None, mask = None, context_mask = None):
         prev_attn = None
-        for (layer_type, (norm, block)) in zip(self.layer_types, self.layers):
+        for ind, (layer_type, (norm, block)) in enumerate(zip(self.layer_types, self.layers)):
+            is_last = ind == (len(self.layers) - 1)
+
             if self.pre_norm:
                 x = norm(x)
 
             if layer_type == 'a':
-                attn_out, pre_attn = block(x, mask = mask, rel_pos = self.rel_pos, prev_attn = prev_attn)
-                x = x + attn_out
+                out, pre_attn = block(x, mask = mask, rel_pos = self.rel_pos, prev_attn = prev_attn)
             elif layer_type == 'c':
-                attn_out, pre_attn = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_attn) + x
-                x = x + attn_out
+                out, pre_attn = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_attn)
             elif layer_type == 'f':
-                x = block(x) + x
+                out = block(x)
+
+            x = x + out
 
             if isinstance(block, Attention) and self.residual_attn:
                 prev_attn = pre_attn
 
-            if not self.pre_norm:
+            if not self.pre_norm and not is_last:
                 x = norm(x)
 
         return x
