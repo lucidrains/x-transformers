@@ -805,3 +805,5 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
     primaryClass = {cs.LG}
 }
 ```
+
+*solve intelligence... then use that to solve everything else.* - Demis Hassabis
