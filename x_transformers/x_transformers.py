@@ -205,7 +205,7 @@ class Attention(nn.Module):
         self.attn_on_attn = on_attn
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(inner_dim, dim)
 
-    def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None):
+    def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None, prev_attn = None):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
         kv_input = default(context, x)
 
@@ -231,8 +231,11 @@ class Attention(nn.Module):
                 input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
 
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
-
         mask_value = max_neg_value(dots)
+
+        pre_softmax_attn = dots
+        if exists(prev_attn):
+            dots = dots + prev_attn
 
         if talking_heads:
             dots = einsum('b h i j, h k -> b k i j', dots, self.pre_softmax_proj).contiguous()
@@ -266,7 +269,7 @@ class Attention(nn.Module):
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
 
-        return self.to_out(out)
+        return self.to_out(out), prev_attn
 
 class AttentionLayers(nn.Module):
     def __init__(
@@ -282,7 +285,9 @@ class AttentionLayers(nn.Module):
         rel_pos_bias = False,
         custom_layers = None,
         sandwich_coef = None,
+        residual_attn = False,
         macaron = False,
+        pre_norm = True,
         **kwargs
     ):
         super().__init__()
@@ -290,9 +295,14 @@ class AttentionLayers(nn.Module):
         self.layers = nn.ModuleList([])
         self.rel_pos = RelativePositionBias(causal = causal) if rel_pos_bias else None
 
+        self.pre_norm = pre_norm and not residual_attn
+        self.residual_attn = residual_attn
+
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
-        prenorm_fn = partial(PreNorm, dim, norm_class = norm_class)
-        prenorm_fn = Rezero if use_rezero else prenorm_fn
+        norm_fn = partial(norm_class, dim)
+
+        norm_fn = nn.Identity if use_rezero else norm_fn
+        branch_fn = Rezero if use_rezero else None
 
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
@@ -328,16 +338,35 @@ class AttentionLayers(nn.Module):
             else:
                 raise Exception(f'invalid layer type {layer_type}')
 
-            self.layers.append(prenorm_fn(layer))
+            if isinstance(layer, Attention) and exists(branch_fn):
+                layer = branch_fn(layer)
+
+            self.layers.append(nn.ModuleList([
+                norm_fn(),
+                layer
+            ]))
 
     def forward(self, x, context = None, mask = None, context_mask = None):
-        for (layer_type, block) in zip(self.layer_types, self.layers):
+        prev_attn = None
+        for (layer_type, (norm, block)) in zip(self.layer_types, self.layers):
+            if self.pre_norm:
+                x = norm(x)
+
             if layer_type == 'a':
-                x = block(x, mask = mask, rel_pos = self.rel_pos) + x
+                attn_out, pre_attn = block(x, mask = mask, rel_pos = self.rel_pos, prev_attn = prev_attn)
+                x = x + attn_out
             elif layer_type == 'c':
-                x = block(x, context = context, mask = mask, context_mask = context_mask) + x
+                attn_out, pre_attn = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_attn) + x
+                x = x + attn_out
             elif layer_type == 'f':
                 x = block(x) + x
+
+            if isinstance(block, Attention) and self.residual_attn:
+                prev_attn = pre_attn
+
+            if not self.pre_norm:
+                x = norm(x)
+
         return x
 
 class Encoder(AttentionLayers):

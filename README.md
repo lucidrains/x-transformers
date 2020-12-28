@@ -492,6 +492,33 @@ model = TransformerWrapper(
 )
 ```
 
+### Residual Attention
+
+<img src="./images/residual_attn.png" width="500px"></img>
+
+https://arxiv.org/abs/2012.11747
+
+This paper from Google proposes residualizing the pre-attention scores across all layers. At the cost of no extra parameters, they show improvement on top of regular attention networks. If you turn on this setting, be aware that the configuration will be automatically changed from pre-normalization to post-normalization, and a learning warmup will be needed.
+
+Also be aware that I have tried this for the decoder, but not with good results. However, others have started to report good results with encoder, so I decided to add it to the repository.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        residual_attn = True  # add residual attention
+    )
+)
+```
+
+
 ## Todo
 
 To be explained and documented
@@ -510,11 +537,11 @@ To be explained and documented
 - [x] ~~encoder with downsampling and unet-like residual - Funnel Transformer~~
 - [x] ~~wrapper for processing images - Vision Transformer~~
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
+- [x] ~~add residual attention for encoder - Realformer paper~~
 - [ ] reversibility - Reformer
 - [ ] recurrence - Transformer-XL
 - [ ] shared key/value - 'One Value Head is All You Need' paper
 - [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
-- [ ] add residual attention for encoder - Realformer paper
 
 ## Miscellaneous
 
