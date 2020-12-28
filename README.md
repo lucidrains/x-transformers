@@ -498,9 +498,9 @@ model = TransformerWrapper(
 
 https://arxiv.org/abs/2012.11747
 
-This paper from Google proposes residualizing the pre-attention scores across all layers. At the cost of no extra parameters, they show improvement on top of regular attention networks. If you turn on this setting, be aware that the configuration will be automatically changed from pre-normalization to post-normalization, and a learning warmup will be needed.
+This paper from Google proposes residualizing the pre-attention scores across all layers. At the cost of no extra parameters, they show improvement on top of regular attention networks. If you turn on this setting, be aware that the configuration will be automatically changed from pre-normalization to post-normalization, and a learning warmup will be needed. The authors also reported that they could use a higher learning rate and get even better gains in the same amount of steps. (In the paper they use `2e-4` vs `1e-4` for vanilla transformer)
 
-Also be aware that I have tried this for the decoder, but not with good results. However, others have started to report good results with encoder, so I decided to add it to the repository.
+Also be aware that I have tried this for the decoder, but with not so great results. However, others have started to report good results with encoder, so I decided to add it to the repository.
 
 ```python
 import torch
