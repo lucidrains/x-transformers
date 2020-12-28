@@ -775,3 +775,14 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
     url = "https://www.aclweb.org/anthology/2020.emnlp-main.348"
 }
 ```
+
+```bibtex
+@misc{he2020realformer,
+    title   = {RealFormer: Transformer Likes Residual Attention},
+    author  = {Ruining He and Anirudh Ravula and Bhargav Kanagal and Joshua Ainslie},
+    year    = {2020},
+    eprint  = {2012.11747},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
+}
+```
