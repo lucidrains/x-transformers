@@ -513,11 +513,30 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        residual_attn = True  # add residual attention
+        residual_attn = True    # add residual attention
     )
 )
 ```
 
+I also gave residual attention a try on cross attention modules, in the encoder / decoder setting, and may have noticed an improvement. You can use it with the `cross_residual_attn` keyword
+
+```python
+import torch
+from x_transformers import XTransformer
+
+model = XTransformer(
+    dim = 512,
+    enc_num_tokens = 256,
+    enc_depth = 6,
+    enc_heads = 8,
+    enc_max_seq_len = 1024,
+    dec_num_tokens = 256,
+    dec_depth = 6,
+    dec_heads = 8,
+    dec_max_seq_len = 1024,
+    dec_cross_residual_attn = True     # residualize cross attention
+)
+```
 
 ## Todo
 

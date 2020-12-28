@@ -287,6 +287,7 @@ class AttentionLayers(nn.Module):
         custom_layers = None,
         sandwich_coef = None,
         residual_attn = False,
+        cross_residual_attn = False,
         macaron = False,
         pre_norm = True,
         **kwargs
@@ -297,7 +298,9 @@ class AttentionLayers(nn.Module):
         self.rel_pos = RelativePositionBias(causal = causal) if rel_pos_bias else None
 
         self.pre_norm = pre_norm and not residual_attn
+
         self.residual_attn = residual_attn
+        self.cross_residual_attn = cross_residual_attn
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         norm_fn = partial(norm_class, dim)
@@ -349,6 +352,8 @@ class AttentionLayers(nn.Module):
 
     def forward(self, x, context = None, mask = None, context_mask = None):
         prev_attn = None
+        prev_cross_attn = None
+
         for ind, (layer_type, (norm, block)) in enumerate(zip(self.layer_types, self.layers)):
             is_last = ind == (len(self.layers) - 1)
 
@@ -358,14 +363,16 @@ class AttentionLayers(nn.Module):
             if layer_type == 'a':
                 out, pre_attn = block(x, mask = mask, rel_pos = self.rel_pos, prev_attn = prev_attn)
             elif layer_type == 'c':
-                out, pre_attn = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_attn)
+                out, pre_attn = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
                 out = block(x)
 
             x = x + out
 
-            if isinstance(block, Attention) and self.residual_attn:
+            if layer_type == 'a' and self.residual_attn:
                 prev_attn = pre_attn
+            elif layer_type == 'c' and self.cross_residual_attn:
+                prev_cross_attn = pre_attn
 
             if not self.pre_norm and not is_last:
                 x = norm(x)
