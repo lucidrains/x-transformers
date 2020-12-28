@@ -233,9 +233,10 @@ class Attention(nn.Module):
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
         mask_value = max_neg_value(dots)
 
-        pre_softmax_attn = dots
         if exists(prev_attn):
             dots = dots + prev_attn
+
+        pre_softmax_attn = dots
 
         if talking_heads:
             dots = einsum('b h i j, h k -> b k i j', dots, self.pre_softmax_proj).contiguous()
@@ -269,7 +270,7 @@ class Attention(nn.Module):
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
 
-        return self.to_out(out), prev_attn
+        return self.to_out(out), pre_softmax_attn
 
 class AttentionLayers(nn.Module):
     def __init__(
