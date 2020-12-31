@@ -443,6 +443,7 @@ class ViTransformerWrapper(nn.Module):
         emb_dropout = 0.
     ):
         super().__init__()
+        assert isinstance(attn_layers, Encoder), 'attention layers must be an Encoder'
         assert image_size % patch_size == 0, 'image dimensions must be divisible by the patch size'
         dim = attn_layers.dim
         num_patches = (image_size // patch_size) ** 2
@@ -492,6 +493,8 @@ class TransformerWrapper(nn.Module):
         use_pos_emb = True
     ):
         super().__init__()
+        assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
+
         dim = attn_layers.dim
         self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(num_tokens, dim)
