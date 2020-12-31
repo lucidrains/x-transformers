@@ -240,11 +240,11 @@ class Attention(nn.Module):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
         kv_input = default(context, x)
 
-        q_ = self.to_q(x + pia_emb)
+        q = self.to_q(x + pia_emb)
         k = self.to_k(kv_input + pia_emb)
         v = self.to_v(kv_input)
 
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q_, k, v))
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
         input_mask = None
         if any(map(exists, (mask, context_mask))):
