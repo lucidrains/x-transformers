@@ -556,10 +556,10 @@ To be explained and documented
 - [x] ~~encoder with downsampling and unet-like residual - Funnel Transformer~~
 - [x] ~~wrapper for processing images - Vision Transformer~~
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
-- [x] ~~add residual attention for encoder - Realformer paper~~
+- [x] ~~residual attention - Realformer paper~~
+- [ ] position infused attention - Shortformer paper
 - [ ] reversibility - Reformer
 - [ ] recurrence - Transformer-XL
-- [ ] shared key/value - 'One Value Head is All You Need' paper
 - [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
 
 ## Miscellaneous
