@@ -478,7 +478,7 @@ T5 is one of the most successful encoder / decoder transformer architectures tra
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Decoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -488,6 +488,34 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         rel_pos_bias = True  # adds relative positional bias to all attention layers, a la T5
+    )
+)
+```
+
+### Position Infused Attention
+
+<img src="./images/pia.png" width="500px"></img>
+
+https://arxiv.org/abs/2005.12872
+
+https://ofir.io/shortformer.pdf
+
+In these two papers, the authors independently figured out a new technique where fixed sinusoidal positional embeddings are injected into the input prior to the queries and keys projection for all layers, leading to "position infused" attention, but leaving the actual tokens (values) uncolored by positional embedding. The Shortformer paper uses this property to cache the tokens for simplified recurrent type of transformer that bested Transformer-XL.
+
+I have tested this, and found that it produces better results than plain absolute positional encoding, even in the absence of recurrence. However, I have found that the T5 relative positional bias (also injected into all layers and has the same properties as PIA) performs even better. So given the option, you should just go with T5's `rel_pos_bias` above.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        position_infused_attn = True  # turns on position infused attention
     )
 )
 ```
@@ -557,7 +585,7 @@ To be explained and documented
 - [x] ~~wrapper for processing images - Vision Transformer~~
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [x] ~~residual attention - Realformer paper~~
-- [ ] position infused attention - Shortformer paper
+- [x] ~~position infused attention - Shortformer paper~~
 - [ ] reversibility - Reformer
 - [ ] recurrence - Transformer-XL
 - [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
