@@ -498,7 +498,7 @@ class TransformerWrapper(nn.Module):
         dim = attn_layers.dim
         self.max_seq_len = max_seq_len
         self.token_emb = nn.Embedding(num_tokens, dim)
-        self.pos_emb = AbsolutePositionalEmbedding(max_seq_len, dim) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+        self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.attn_layers = attn_layers
