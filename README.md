@@ -838,4 +838,12 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 }
 ```
 
+```bibtex
+@misc{press2020shortformer,
+    title   = {Shortformer: Better Language Modeling using Shorter Inputs},
+    author  = {Ofir Press and Noah A. Smith and Mike Lewis},
+    year    = {2020}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
