@@ -87,8 +87,8 @@ class FixedPositionalEmbedding(nn.Module):
         inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
 
-    def forward(self, x):
-        t = torch.arange(x.shape[1], device=x.device).type_as(self.inv_freq)
+    def forward(self, x, seq_dim = 1, offset = 0):
+        t = torch.arange(x.shape[seq_dim], device = x.device).type_as(self.inv_freq) + offset
         sinusoid_inp = torch.einsum('i , j -> i j', t, self.inv_freq)
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
         return emb[None, :, :]
@@ -256,20 +256,26 @@ class Attention(nn.Module):
         mask = None,
         context_mask = None,
         rel_pos = None,
-        pia_emb = 0,
+        sinusoidal_emb = None,
         prev_attn = None,
         mem = None
     ):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
         kv_input = default(context, x)
 
-        q_input = x + pia_emb
-        k_input = kv_input + pia_emb
+        q_input = x
+        k_input = kv_input
         v_input = kv_input
 
         if exists(mem):
             k_input = torch.cat((mem, k_input), dim = -2)
             v_input = torch.cat((mem, v_input), dim = -2)
+
+        if exists(sinusoidal_emb):
+            # in shortformer, the query would start at a position offset depending on the past cached memory
+            offset = k_input.shape[-2] - q_input.shape[-2]
+            q_input = q_input + sinusoidal_emb(q_input, offset = offset)
+            k_input = k_input + sinusoidal_emb(k_input)
 
         q = self.to_q(q_input)
         k = self.to_k(k_input)
@@ -369,7 +375,7 @@ class AttentionLayers(nn.Module):
         self.layers = nn.ModuleList([])
 
         self.has_pos_emb = position_infused_attn or rel_pos_bias
-        self.pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else always(0)
+        self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
         self.rel_pos = RelativePositionBias(causal = causal) if rel_pos_bias else None
 
         self.pre_norm = pre_norm and not residual_attn
@@ -439,8 +445,6 @@ class AttentionLayers(nn.Module):
         prev_attn = None
         prev_cross_attn = None
 
-        pos_emb = self.pos_emb(x)
-
         mems = mems.copy() if exists(mems) else ([None] * self.depth)
 
         for ind, (layer_type, (norm, block)) in enumerate(zip(self.layer_types, self.layers)):
@@ -454,7 +458,7 @@ class AttentionLayers(nn.Module):
                 x = norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, pia_emb = pos_emb, rel_pos = self.rel_pos, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, prev_attn = prev_attn, mem = layer_mem)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
