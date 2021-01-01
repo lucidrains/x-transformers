@@ -4,11 +4,24 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from functools import partial
 from inspect import isfunction
+from collections import namedtuple
 
 from einops import rearrange, repeat, reduce
 from entmax import entmax15
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+
+# constants
+
+Intermediates = namedtuple('Intermediates', [
+    'pre_softmax_attn',
+    'post_softmax_attn'
+])
+
+LayerIntermediates = namedtuple('Intermediates', [
+    'hiddens',
+    'attn_intermediates'
+])
 
 # helpers
 
@@ -76,7 +89,7 @@ class FixedPositionalEmbedding(nn.Module):
 
     def forward(self, x):
         t = torch.arange(x.shape[1], device=x.device).type_as(self.inv_freq)
-        sinusoid_inp = torch.einsum("i,j->ij", t, self.inv_freq)
+        sinusoid_inp = torch.einsum('i , j -> i j', t, self.inv_freq)
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
         return emb[None, :, :]
 
@@ -236,7 +249,17 @@ class Attention(nn.Module):
         self.attn_on_attn = on_attn
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(inner_dim, dim)
 
-    def forward(self, x, context = None, mask = None, context_mask = None, rel_pos = None, pia_emb = 0, prev_attn = None, mem = None):
+    def forward(
+        self,
+        x,
+        context = None,
+        mask = None,
+        context_mask = None,
+        rel_pos = None,
+        pia_emb = 0,
+        prev_attn = None,
+        mem = None
+    ):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
         kv_input = default(context, x)
 
@@ -302,6 +325,8 @@ class Attention(nn.Module):
             del mask
 
         attn = self.attn_fn(dots, dim = -1)
+        post_softmax_attn = attn
+
         attn = self.dropout(attn)
 
         if talking_heads:
@@ -310,7 +335,12 @@ class Attention(nn.Module):
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
 
-        return self.to_out(out), pre_softmax_attn
+        intermediates = Intermediates(
+            pre_softmax_attn = pre_softmax_attn,
+            post_softmax_attn = post_softmax_attn
+        )
+
+        return self.to_out(out), intermediates
 
 class AttentionLayers(nn.Module):
     def __init__(
@@ -395,8 +425,17 @@ class AttentionLayers(nn.Module):
                 layer
             ]))
 
-    def forward(self, x, context = None, mask = None, context_mask = None, mems = None, return_hiddens = False):
+    def forward(
+        self,
+        x,
+        context = None,
+        mask = None,
+        context_mask = None,
+        mems = None,
+        return_hiddens = False
+    ):
         hiddens = []
+        intermediates = []
         prev_attn = None
         prev_cross_attn = None
 
@@ -415,24 +454,32 @@ class AttentionLayers(nn.Module):
                 x = norm(x)
 
             if layer_type == 'a':
-                out, pre_attn = block(x, mask = mask, pia_emb = pos_emb, rel_pos = self.rel_pos, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, pia_emb = pos_emb, rel_pos = self.rel_pos, prev_attn = prev_attn, mem = layer_mem)
             elif layer_type == 'c':
-                out, pre_attn = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
+                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
                 out = block(x)
 
             x = x + out
 
+            if layer_type in ('a', 'c'):
+                intermediates.append(inter)
+
             if layer_type == 'a' and self.residual_attn:
-                prev_attn = pre_attn
+                prev_attn = inter.pre_softmax_attn
             elif layer_type == 'c' and self.cross_residual_attn:
-                prev_cross_attn = pre_attn
+                prev_cross_attn = inter.pre_softmax_attn
 
             if not self.pre_norm and not is_last:
                 x = norm(x)
 
         if return_hiddens:
-            return x, hiddens
+            intermediates = LayerIntermediates(
+                hiddens = hiddens,
+                attn_intermediates = intermediates
+            )
+
+            return x, intermediates
 
         return x
 
@@ -544,7 +591,16 @@ class TransformerWrapper(nn.Module):
     def init_(self):
         nn.init.normal_(self.token_emb.weight, std = 0.02)
 
-    def forward(self, x, return_embeddings = False, mask = None, return_mems = False, mems = None, **kwargs):
+    def forward(
+        self,
+        x,
+        return_embeddings = False,
+        mask = None,
+        return_mems = False,
+        return_attn = False,
+        mems = None,
+        **kwargs
+    ):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
         x = self.token_emb(x)
         x += self.pos_emb(x)
@@ -558,7 +614,7 @@ class TransformerWrapper(nn.Module):
             if exists(mask):
                 mask = F.pad(mask, (num_mem, 0), value = True)
 
-        x, hiddens = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
         x = self.norm(x)
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
@@ -566,9 +622,14 @@ class TransformerWrapper(nn.Module):
         out = self.to_logits(x) if not return_embeddings else x
 
         if return_mems:
+            hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
             new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
             return out, new_mems
+
+        if return_attn:
+            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
+            return out, attn_maps
 
         return out
 
