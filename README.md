@@ -566,6 +566,37 @@ model = XTransformer(
 )
 ```
 
+### Transformer-XL recurrence
+
+You can also do Transformer-XL recurrence, by simply passing in a `max_mem_len` in the `TransformerWrapper` class, and then making sure your `Decoder` has `rel_pos_bias` set to `True`.
+
+Then, you can retrieve the memories at each step with the `return_mems` keyword and pass it to the next iteration.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model_xl = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 512,
+    max_mem_len = 2048,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        rel_pos_bias = True
+    )
+)
+
+seg1 = torch.randint(0, 20000, (1, 512))
+seg2 = torch.randint(0, 20000, (1, 512))
+seg3 = torch.randint(0, 20000, (1, 512))
+
+logits1, mems1  = model_xl(seg1, return_mems = True)
+logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True)
+logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
+```
+
 ## Todo
 
 To be explained and documented
@@ -586,8 +617,8 @@ To be explained and documented
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [x] ~~residual attention - Realformer paper~~
 - [x] ~~position infused attention - Shortformer paper~~
+- [x] ~~recurrence - Transformer-XL~~
 - [ ] reversibility - Reformer
-- [ ] recurrence - Transformer-XL
 - [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
 
 ## Miscellaneous
