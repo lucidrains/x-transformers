@@ -245,12 +245,12 @@ class Attention(nn.Module):
         v_input = kv_input
 
         if exists(mem):
-            torch.cat((mem, k_input), dim = -2)
-            torch.cat((mem, v_input), dim = -2)
+            k_input = torch.cat((mem, k_input), dim = -2)
+            v_input = torch.cat((mem, v_input), dim = -2)
 
-        q = self.to_q(x + pia_emb)
-        k = self.to_k(kv_input + pia_emb)
-        v = self.to_v(kv_input)
+        q = self.to_q(q_input)
+        k = self.to_k(k_input)
+        v = self.to_v(v_input)
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
