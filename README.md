@@ -695,7 +695,7 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 @misc{burtsev2020memory,
     title   = {Memory Transformer}, 
     author  = {Mikhail S. Burtsev and Grigory V. Sapunov},
-    year        = {2020},
+    year    = {2020},
     eprint  = {2006.11527},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
@@ -803,16 +803,16 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 
 ```bibtex
 @inproceedings{martins-etal-2020-sparse,
-    title = "Sparse Text Generation",
-    author = "Martins, Pedro Henrique  and
+    title   = "Sparse Text Generation",
+    author  = "Martins, Pedro Henrique  and
         Marinho, Zita  and
         Martins, Andr{\'e} F. T.",
     booktitle = "Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)",
-    month = nov,
-    year = "2020",
+    month   = nov,
+    year    = "2020",
     address = "Online",
     publisher = "Association for Computational Linguistics",
-    url = "https://www.aclweb.org/anthology/2020.emnlp-main.348"
+    url     = "https://www.aclweb.org/anthology/2020.emnlp-main.348"
 }
 ```
 
