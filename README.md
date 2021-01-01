@@ -724,7 +724,7 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 @misc{shazeer2020talkingheads,
     title   = {Talking-Heads Attention}, 
     author  = {Noam Shazeer and Zhenzhong Lan and Youlong Cheng and Nan Ding and Le Hou},
-    year        = {2020},
+    year    = {2020},
     eprint  = {2003.02436},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
@@ -831,6 +831,17 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
     eprint  = {2012.11747},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{carion2020endtoend,
+    title   = {End-to-End Object Detection with Transformers},
+    author  = {Nicolas Carion and Francisco Massa and Gabriel Synnaeve and Nicolas Usunier and Alexander Kirillov and Sergey Zagoruyko},
+    year    = {2020},
+    eprint  = {2005.12872},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
 }
 ```
 
