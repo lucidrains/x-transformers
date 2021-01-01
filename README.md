@@ -154,32 +154,6 @@ encoded = encoder(img, return_embeddings = True)
 decoder(caption, context = encoded) # (1, 1024, 20000)
 ```
 
-Funnel Transformer for Encoder
-
-```python
-import torch
-from x_transformers import TransformerWrapper, FunnelEncoder
-
-# 4 blocks
-# followed by downsample, 4 blocks
-# then final downsample and yet another 4
-
-model = TransformerWrapper(
-    num_tokens = 20000,
-    max_seq_len = 1024,
-    num_memory_tokens = 10,
-    attn_layers = FunnelEncoder(
-        dim = 512,
-        heads = 8,
-        depths = (4, 4, 4)
-    )
-)
-
-x = torch.randint(1, 20000, (1, 1024))
-mask = torch.ones_like(x).bool()
-model(x, mask = mask) # (1, 1024, 20000)
-```
-
 ## Dropouts
 
 ```python
@@ -612,7 +586,6 @@ To be explained and documented
 - [x] ~~gating multi-head attention output -  Attention on Attention~~
 - [x] ~~simplified relative positional encoding bias - T5~~
 - [x] ~~sandwich transformer - Reordering Sublayers~~
-- [x] ~~encoder with downsampling and unet-like residual - Funnel Transformer~~
 - [x] ~~wrapper for processing images - Vision Transformer~~
 - [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
 - [x] ~~residual attention - Realformer paper~~
@@ -792,17 +765,6 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
     eprint    = {2006.15595},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
-}
-```
-
-```bibtex
-@misc{dai2020funneltransformer,
-    title   = {Funnel-Transformer: Filtering out Sequential Redundancy for Efficient Language Processing},
-    author  = {Zihang Dai and Guokun Lai and Yiming Yang and Quoc V. Le},
-    year    = {2020},
-    eprint  = {2006.03236},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.LG}
 }
 ```
 
