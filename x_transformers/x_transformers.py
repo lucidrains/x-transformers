@@ -38,9 +38,14 @@ def always(val):
         return val
     return inner
 
-def not_equal(val):
+def not_equals(val):
     def inner(x):
         return x != val
+    return inner
+
+def equals(val):
+    def inner(x):
+        return x == val
     return inner
 
 def max_neg_value(tensor):
@@ -415,7 +420,7 @@ class AttentionLayers(nn.Module):
         elif exists(par_ratio):
             par_depth = depth * len(default_block)
             assert 1 < par_ratio <= par_depth, 'par ratio out of range'
-            default_block = tuple(filter(not_equal('f'), default_block))
+            default_block = tuple(filter(not_equals('f'), default_block))
             par_attn  = par_depth // par_ratio
             depth_cut = par_depth * 2 // 3  # 2 / 3 attention layer cutoff suggested by PAR paper
             par_width = (depth_cut + depth_cut // par_attn) // par_attn
@@ -430,6 +435,7 @@ class AttentionLayers(nn.Module):
             layer_types = default_block * depth
 
         self.layer_types = layer_types
+        self.default_mems = ([None] * len(list(filter(equals('a'), layer_types))))
 
         for layer_type in self.layer_types:
             if layer_type == 'a':
@@ -464,7 +470,7 @@ class AttentionLayers(nn.Module):
         prev_attn = None
         prev_cross_attn = None
 
-        mems = mems.copy() if exists(mems) else ([None] * self.depth)
+        mems = mems.copy() if exists(mems) else self.default_mems
 
         for ind, (layer_type, (norm, block)) in enumerate(zip(self.layer_types, self.layers)):
             is_last = ind == (len(self.layers) - 1)
