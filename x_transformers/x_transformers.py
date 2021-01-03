@@ -38,6 +38,11 @@ def always(val):
         return val
     return inner
 
+def not_equal(val):
+    def inner(x):
+        return x != val
+    return inner
+
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
@@ -365,6 +370,7 @@ class AttentionLayers(nn.Module):
         position_infused_attn = False,
         custom_layers = None,
         sandwich_coef = None,
+        par_ratio = None,
         residual_attn = False,
         cross_residual_attn = False,
         macaron = False,
@@ -406,6 +412,17 @@ class AttentionLayers(nn.Module):
 
         if exists(custom_layers):
             layer_types = custom_layers
+        elif exists(par_ratio):
+            par_depth = depth * len(default_block)
+            assert 1 < par_ratio <= par_depth, 'par ratio out of range'
+            default_block = tuple(filter(not_equal('f'), default_block))
+            par_attn  = par_depth // par_ratio
+            depth_cut = par_depth * 2 // 3  # 2 / 3 attention layer cutoff suggested by PAR paper
+            par_width = (depth_cut + depth_cut // par_attn) // par_attn
+            assert len(default_block) <= par_width, 'default block is too large for par_ratio'
+            par_block = default_block + ('f',) * (par_width - len(default_block))
+            par_head = par_block * par_attn
+            layer_types = par_head + ('f',) * (par_depth - len(par_head))
         elif exists(sandwich_coef):
             assert sandwich_coef > 0 and sandwich_coef <= depth, 'sandwich coefficient should be less than the depth'
             layer_types = ('a',) * sandwich_coef + default_block * (depth - sandwich_coef) + ('f',) * sandwich_coef
