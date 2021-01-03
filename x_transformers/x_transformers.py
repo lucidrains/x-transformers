@@ -142,7 +142,8 @@ class Scale(nn.Module):
         self.fn = fn
 
     def forward(self, x, **kwargs):
-        return self.fn(x, **kwargs) * self.value
+        x, *rest = self.fn(x, **kwargs)
+        return (x * self.value, *rest)
 
 class Rezero(nn.Module):
     def __init__(self, fn):
@@ -151,7 +152,8 @@ class Rezero(nn.Module):
         self.g = nn.Parameter(torch.zeros(1))
 
     def forward(self, x, **kwargs):
-        return self.fn(x, **kwargs) * self.g
+        x, *rest = self.fn(x, **kwargs)
+        return (x * self.g, *rest)
 
 class ScaleNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
@@ -180,7 +182,7 @@ class GEGLU(nn.Module):
 
     def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim = -1)
-        return x * F.gelu(x)
+        return x * F.gelu(gate)
 
 class FeedForward(nn.Module):
     def __init__(self, dim, dim_out = None, mult = 4, glu = False, dropout = 0.):
