@@ -115,7 +115,7 @@ class RelativePositionBias(nn.Module):
     def _relative_position_bucket(relative_position, causal = True, num_buckets = 32, max_distance = 128):
         ret = 0
         n = -relative_position
-        if causal:
+        if not causal:
             num_buckets //= 2
             ret += (n < 0).long() * num_buckets
             n = torch.abs(n)
