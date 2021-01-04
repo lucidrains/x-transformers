@@ -138,7 +138,7 @@ class RelativePositionBias(nn.Module):
         q_pos = torch.arange(i, dtype = torch.long, device = device)
         k_pos = torch.arange(j, dtype = torch.long, device = device)
         rel_pos = k_pos[None, :] - q_pos[:, None]
-        rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets)
+        rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance= self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
         bias = rearrange(values, 'i j h -> () h i j')
         return qk_dots + bias
@@ -389,7 +389,7 @@ class AttentionLayers(nn.Module):
 
         self.has_pos_emb = position_infused_attn or rel_pos_bias
         self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
-        self.rel_pos = RelativePositionBias(causal = causal) if rel_pos_bias else None
+        self.rel_pos = RelativePositionBias(causal = causal, heads=heads)  if rel_pos_bias else None
 
         self.pre_norm = pre_norm and not residual_attn
 
@@ -673,13 +673,12 @@ class XTransformer(nn.Module):
         super().__init__()
         enc_kwargs, kwargs = groupby_prefix_and_trim('enc_', kwargs)
         dec_kwargs, kwargs = groupby_prefix_and_trim('dec_', kwargs)
-
         assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
         enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], enc_kwargs)
         enc_transformer_kwargs['num_memory_tokens'] = enc_kwargs.pop('num_memory_tokens', None)
 
         dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
-
+        
         self.encoder = TransformerWrapper(
             **enc_transformer_kwargs,
             attn_layers = Encoder(dim = dim, **enc_kwargs)
