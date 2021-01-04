@@ -585,7 +585,7 @@ class TransformerWrapper(nn.Module):
         max_mem_len = 0.,
         emb_dropout = 0.,
         num_memory_tokens = None,
-        tie_embedding = True,
+        tie_embedding = False,
         use_pos_emb = True
     ):
         super().__init__()
