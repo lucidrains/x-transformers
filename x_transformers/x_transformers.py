@@ -138,7 +138,7 @@ class RelativePositionBias(nn.Module):
         q_pos = torch.arange(i, dtype = torch.long, device = device)
         k_pos = torch.arange(j, dtype = torch.long, device = device)
         rel_pos = k_pos[None, :] - q_pos[:, None]
-        rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets)
+        rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
         bias = rearrange(values, 'i j h -> () h i j')
         return qk_dots + bias
@@ -372,6 +372,8 @@ class AttentionLayers(nn.Module):
         use_scalenorm = False,
         use_rezero = False,
         rel_pos_bias = False,
+        rel_pos_num_buckets = 32,
+        rel_pos_max_distance = 128,
         position_infused_attn = False,
         custom_layers = None,
         sandwich_coef = None,
@@ -389,7 +391,7 @@ class AttentionLayers(nn.Module):
 
         self.has_pos_emb = position_infused_attn or rel_pos_bias
         self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
-        self.rel_pos = RelativePositionBias(causal = causal) if rel_pos_bias else None
+        self.rel_pos = RelativePositionBias(causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
 
         self.pre_norm = pre_norm and not residual_attn
 
