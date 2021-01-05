@@ -437,7 +437,7 @@ class AttentionLayers(nn.Module):
             layer_types = default_block * depth
 
         self.layer_types = layer_types
-        self.default_mems = ([None] * len(list(filter(equals('a'), layer_types))))
+        self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
 
         for layer_type in self.layer_types:
             if layer_type == 'a':
@@ -472,7 +472,7 @@ class AttentionLayers(nn.Module):
         prev_attn = None
         prev_cross_attn = None
 
-        mems = mems.copy() if exists(mems) else self.default_mems
+        mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
 
         for ind, (layer_type, (norm, block)) in enumerate(zip(self.layer_types, self.layers)):
             is_last = ind == (len(self.layers) - 1)
