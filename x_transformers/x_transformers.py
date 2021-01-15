@@ -175,16 +175,6 @@ class ScaleNorm(nn.Module):
         n = torch.norm(x, dim = -1, keepdim = True).clamp(min = self.eps)
         return x / n * self.g
 
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn, norm_class = nn.LayerNorm):
-        super().__init__()
-        self.fn = fn
-        self.norm = norm_class(dim)
-
-    def forward(self, x, **kwargs):
-        x = self.norm(x)
-        return self.fn(x, **kwargs)
-
 class GEGLU(nn.Module):
     def __init__(self, dim_in, dim_out):
         super().__init__()
@@ -482,6 +472,8 @@ class AttentionLayers(nn.Module):
                 hiddens.append(x)
                 layer_mem = mems.pop(0)
 
+            res_x = x
+
             if self.pre_norm:
                 x = norm(x)
 
@@ -492,7 +484,7 @@ class AttentionLayers(nn.Module):
             elif layer_type == 'f':
                 out = block(x)
 
-            x = x + out
+            x = res_x + out
 
             if layer_type in ('a', 'c'):
                 intermediates.append(inter)
