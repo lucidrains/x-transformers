@@ -575,6 +575,8 @@ logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
 
 <img src="./images/gating.png" width="500px"></img>
 
+https://arxiv.org/abs/1910.06764
+
 The authors propose gating the residual connections in the transformer network and demonstrate increased stability and performance for Transformer-XL in a variety of reinforcement learning tasks.
 
 ```python
