@@ -573,6 +573,8 @@ logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
 
 ### Gated residual
 
+<img src="./images/gating.png" width="500px"></img>
+
 The authors propose gating the residual connections in the transformer network and demonstrate increased stability and performance for Transformer-XL in a variety of reinforcement learning tasks.
 
 ```python
