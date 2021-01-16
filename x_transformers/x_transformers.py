@@ -175,6 +175,25 @@ class ScaleNorm(nn.Module):
         n = torch.norm(x, dim = -1, keepdim = True).clamp(min = self.eps)
         return x / n * self.g
 
+class Residual(nn.Module):
+    def forward(self, x, residual):
+        return x + residual
+
+class GRUGating(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.gru = nn.GRUCell(dim, dim)
+
+    def forward(self, x, residual):
+        gated_output = self.gru(
+            rearrange(x, 'b n d -> (b n) d'),
+            rearrange(residual, 'b n d -> (b n) d')
+        )
+
+        return gated_output.reshape_as(x)
+
+# feedforward
+
 class GEGLU(nn.Module):
     def __init__(self, dim_in, dim_out):
         super().__init__()
@@ -202,6 +221,8 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+# attention.
 
 class Attention(nn.Module):
     def __init__(
@@ -373,6 +394,7 @@ class AttentionLayers(nn.Module):
         cross_residual_attn = False,
         macaron = False,
         pre_norm = True,
+        gate_residual = False,
         **kwargs
     ):
         super().__init__()
@@ -444,9 +466,15 @@ class AttentionLayers(nn.Module):
             if isinstance(layer, Attention) and exists(branch_fn):
                 layer = branch_fn(layer)
 
+            if not gate_residual:
+                residual_fn = GRUGating(dim)
+            else:
+                residual_fn = Residual()
+
             self.layers.append(nn.ModuleList([
                 norm_fn(),
-                layer
+                layer,
+                residual_fn
             ]))
 
     def forward(
@@ -465,14 +493,14 @@ class AttentionLayers(nn.Module):
 
         mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
 
-        for ind, (layer_type, (norm, block)) in enumerate(zip(self.layer_types, self.layers)):
+        for ind, (layer_type, (norm, block, residual_fn)) in enumerate(zip(self.layer_types, self.layers)):
             is_last = ind == (len(self.layers) - 1)
 
             if layer_type == 'a':
                 hiddens.append(x)
                 layer_mem = mems.pop(0)
 
-            res_x = x
+            residual = x
 
             if self.pre_norm:
                 x = norm(x)
@@ -484,7 +512,7 @@ class AttentionLayers(nn.Module):
             elif layer_type == 'f':
                 out = block(x)
 
-            x = res_x + out
+            x = residual_fn(out, residual)
 
             if layer_type in ('a', 'c'):
                 intermediates.append(inter)

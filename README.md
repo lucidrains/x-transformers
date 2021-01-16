@@ -571,6 +571,27 @@ logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True)
 logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
 ```
 
+### Gated residual
+
+The authors propose gating the residual connections in the transformer network and demonstrate increased stability and performance for Transformer-XL in a variety of reinforcement learning tasks.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    max_mem_len = 2048,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 16,
+        gate_residual = True
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -591,8 +612,8 @@ To be explained and documented
 - [x] ~~residual attention - Realformer paper~~
 - [x] ~~position infused attention - Shortformer paper~~
 - [x] ~~recurrence - Transformer-XL~~
+- [x] ~~gated transformer-xl - Stabilizing Transformers for RL~~
 - [ ] reversibility - Reformer
-- [ ] gated transformer-xl - gates at residuals, from stabilizing Transformers for RL paper
 
 ## Miscellaneous
 
@@ -843,6 +864,17 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
     title   = {Shortformer: Better Language Modeling using Shorter Inputs},
     author  = {Ofir Press and Noah A. Smith and Mike Lewis},
     year    = {2020}
+}
+```
+
+```bibtex
+@misc{parisotto2019stabilizing,
+      title     = {Stabilizing Transformers for Reinforcement Learning},
+      author    = {Emilio Parisotto and H. Francis Song and Jack W. Rae and Razvan Pascanu and Caglar Gulcehre and Siddhant M. Jayakumar and Max Jaderberg and Raphael Lopez Kaufman and Aidan Clark and Seb Noury and Matthew M. Botvinick and Nicolas Heess and Raia Hadsell},
+      year      = {2019},
+      eprint    = {1910.06764},
+      archivePrefix = {arXiv},
+      primaryClass = {cs.LG}
 }
 ```
 
