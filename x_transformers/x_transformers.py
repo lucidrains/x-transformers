@@ -466,7 +466,7 @@ class AttentionLayers(nn.Module):
             if isinstance(layer, Attention) and exists(branch_fn):
                 layer = branch_fn(layer)
 
-            if not gate_residual:
+            if gate_residual:
                 residual_fn = GRUGating(dim)
             else:
                 residual_fn = Residual()
