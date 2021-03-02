@@ -607,6 +607,7 @@ class TransformerWrapper(nn.Module):
         num_tokens,
         max_seq_len,
         attn_layers,
+        emb_dim = None,
         max_mem_len = 0.,
         emb_dropout = 0.,
         num_memory_tokens = None,
@@ -617,13 +618,16 @@ class TransformerWrapper(nn.Module):
         assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
 
         dim = attn_layers.dim
+        emb_dim = default(emb_dim, dim)
+
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
 
-        self.token_emb = nn.Embedding(num_tokens, dim)
-        self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+        self.token_emb = nn.Embedding(num_tokens, emb_dim)
+        self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
         self.emb_dropout = nn.Dropout(emb_dropout)
 
+        self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
         self.attn_layers = attn_layers
         self.norm = nn.LayerNorm(dim)
 
@@ -659,6 +663,8 @@ class TransformerWrapper(nn.Module):
         x = self.token_emb(x)
         x += self.pos_emb(x)
         x = self.emb_dropout(x)
+
+        x = self.project_emb(x)
 
         if num_mem > 0:
             mem = repeat(self.memory_tokens, 'n d -> b n d', b = b)
