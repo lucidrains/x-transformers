@@ -882,4 +882,26 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 }
 ```
 
+```bibtex
+@misc{narang2021transformer,
+    title       = {Do Transformer Modifications Transfer Across Implementations and Applications?},
+    author      = {Sharan Narang and Hyung Won Chung and Yi Tay and William Fedus and Thibault Fevry and Michael Matena and Karishma Malkan and Noah Fiedel and Noam Shazeer and Zhenzhong Lan and Yanqi Zhou and Wei Li and Nan Ding and Jake Marcus and Adam Roberts and Colin Raffel},
+    year        = {2021},
+    eprint      = {2102.11972},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{zhang2019root,
+    title   = {Root Mean Square Layer Normalization},
+    author  = {Biao Zhang and Rico Sennrich},
+    year    = {2019},
+    eprint  = {1910.07467},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
