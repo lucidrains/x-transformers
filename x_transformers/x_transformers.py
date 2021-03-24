@@ -594,7 +594,11 @@ class ViTransformerWrapper(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.mlp_head = FeedForward(dim, dim_out = num_classes, dropout = dropout) if exists(num_classes) else None
 
-    def forward(self, img):
+    def forward(
+        self,
+        img,
+        return_embeddings = False
+    ):
         p = self.patch_size
 
         x = rearrange(img, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
@@ -609,7 +613,7 @@ class ViTransformerWrapper(nn.Module):
         x = self.attn_layers(x)
         x = self.norm(x)
 
-        if not exists(self.mlp_head):
+        if not exists(self.mlp_head) or return_embeddings:
             return x
 
         return self.mlp_head(x[:, 0])
