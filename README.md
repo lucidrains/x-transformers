@@ -904,4 +904,13 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 }
 ```
 
+```bibtex
+@techreport{zhuiyiroformer,
+    title   = {RoFormer: Transformer with Rotary Position Embeddings - ZhuiyiAI},
+    author  = {Jianlin Su},
+    year    = {2021},
+    url     = "https://github.com/ZhuiyiTechnology/roformer",
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

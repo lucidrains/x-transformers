@@ -13,6 +13,8 @@ from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # constants
 
+DEFAULT_DIM_HEAD = 64
+
 Intermediates = namedtuple('Intermediates', [
     'pre_softmax_attn',
     'post_softmax_attn'
@@ -143,6 +145,21 @@ class RelativePositionBias(nn.Module):
         bias = rearrange(values, 'i j h -> () h i j')
         return qk_dots + bias
 
+# rotary positional embedding helpers
+
+def rotate_every_two(x):
+    x = rearrange(x, '... (d j) -> ... d j', j = 2)
+    x1, x2 = x.unbind(dim = -1)
+    x = torch.stack((-x2, x1), dim = -1)
+    return rearrange(x, '... d j -> ... (d j)')
+
+def apply_rotary_pos_emb(q, k, sinu_pos):
+    sinu_pos = rearrange(sinu_pos, '() n (j d) -> n j d', j = 2)
+    sin, cos = sinu_pos.unbind(dim = -2)
+    sin, cos = map(lambda t: repeat(t, 'b n -> b (n j)', j = 2), (sin, cos))
+    q, k = map(lambda t: (t * cos) + (rotate_every_two(t) * sin), (q, k))
+    return q, k
+
 # classes
 
 class Scale(nn.Module):
@@ -240,7 +257,7 @@ class Attention(nn.Module):
     def __init__(
         self,
         dim,
-        dim_head = 64,
+        dim_head = DEFAULT_DIM_HEAD,
         heads = 8,
         causal = False,
         mask = None,
@@ -293,6 +310,7 @@ class Attention(nn.Module):
         context_mask = None,
         rel_pos = None,
         sinusoidal_emb = None,
+        rotary_pos_emb = None,
         prev_attn = None,
         mem = None
     ):
@@ -318,6 +336,9 @@ class Attention(nn.Module):
         v = self.to_v(v_input)
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
+
+        if exists(rotary_pos_emb):
+            q, k = apply_rotary_pos_emb(q, k, rotary_pos_emb)
 
         input_mask = None
         if any(map(exists, (mask, context_mask))):
@@ -400,6 +421,7 @@ class AttentionLayers(nn.Module):
         rel_pos_num_buckets = 32,
         rel_pos_max_distance = 128,
         position_infused_attn = False,
+        rotary_pos_emb = False,
         custom_layers = None,
         sandwich_coef = None,
         par_ratio = None,
@@ -411,12 +433,19 @@ class AttentionLayers(nn.Module):
         **kwargs
     ):
         super().__init__()
+        ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
+        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
+
+        dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
+
         self.dim = dim
         self.depth = depth
         self.layers = nn.ModuleList([])
 
-        self.has_pos_emb = position_infused_attn or rel_pos_bias
+        self.has_pos_emb = position_infused_attn or rel_pos_bias or rotary_pos_emb
         self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
+
+        self.rotary_pos_emb = FixedPositionalEmbedding(dim_head) if rotary_pos_emb else always(None)
 
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
         self.rel_pos = RelativePositionBias(causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
@@ -432,9 +461,6 @@ class AttentionLayers(nn.Module):
 
         norm_fn = nn.Identity if use_rezero else norm_fn
         branch_fn = Rezero if use_rezero else None
-
-        ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
-        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
 
         if cross_attend and not only_cross:
             default_block = ('a', 'c', 'f')
@@ -509,6 +535,8 @@ class AttentionLayers(nn.Module):
 
         mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
 
+        rotary_pos_emb = self.rotary_pos_emb(x)
+
         for ind, (layer_type, (norm, block, residual_fn)) in enumerate(zip(self.layer_types, self.layers)):
             is_last = ind == (len(self.layers) - 1)
 
@@ -522,7 +550,7 @@ class AttentionLayers(nn.Module):
                 x = norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
