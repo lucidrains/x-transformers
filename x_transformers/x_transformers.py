@@ -450,7 +450,7 @@ class AttentionLayers(nn.Module):
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
         self.rel_pos = RelativePositionBias(causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
 
-        self.pre_norm = pre_norm and not residual_attn
+        self.pre_norm = pre_norm
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
