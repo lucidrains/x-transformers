@@ -376,7 +376,9 @@ class Attention(nn.Module):
 
         if self.causal:
             i, j = dots.shape[-2:]
-            mask = torch.ones((i, j), device = device).triu_(j - i + 1).bool()
+            r = torch.arange(i, device = device)
+            mask = rearrange(r, 'i -> () () i ()') < rearrange(r, 'j -> () () () j')
+            mask = F.pad(mask, (j - i, 0), value = False)
             dots.masked_fill_(mask, mask_value)
             del mask
 
