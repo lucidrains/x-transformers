@@ -7,6 +7,8 @@ from inspect import isfunction
 from collections import namedtuple
 
 from einops import rearrange, repeat, reduce
+from einops.layers.torch import Rearrange
+
 from entmax import entmax15
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
@@ -79,6 +81,17 @@ def groupby_prefix_and_trim(prefix, d):
     return kwargs_without_prefix, kwargs
 
 # positional embeddings
+
+class DepthWiseConv1d(nn.Module):
+    def __init__(self, dim_in, dim_out, kernel_size, padding = 0, stride = 1, bias = True, groups = False):
+        super().__init__()
+        groups = default(groups, dim_in)
+        self.net = nn.Sequential(
+            nn.Conv1d(dim_in, dim_in, kernel_size = kernel_size, padding = padding, groups = dim_in, stride = stride, bias = bias),
+            nn.Conv1d(dim_in, dim_out, 1)
+        )
+    def forward(self, x):
+        return self.net(x)
 
 class AbsolutePositionalEmbedding(nn.Module):
     def __init__(self, dim, max_seq_len):
@@ -275,7 +288,13 @@ class Attention(nn.Module):
         self.mask = mask
 
         inner_dim = dim_head * heads
-        self.to_q = nn.Linear(dim, inner_dim, bias = False)
+
+        self.to_q = nn.Sequential(
+            Rearrange('b n c -> b c n'),
+            DepthWiseConv1d(dim, inner_dim, 9, bias = False),
+            Rearrange('b c n -> b n c')
+        )
+
         self.to_k = nn.Linear(dim, inner_dim, bias = False)
         self.to_v = nn.Linear(dim, inner_dim, bias = False)
         self.dropout = nn.Dropout(dropout)
@@ -320,6 +339,9 @@ class Attention(nn.Module):
         q_input = x
         k_input = kv_input
         v_input = kv_input
+
+        padding = (8, 0) if self.causal else (4, 4)
+        q_input = F.pad(q_input, (0, 0, *padding), value = 0)
 
         if exists(mem):
             k_input = torch.cat((mem, k_input), dim = -2)
@@ -734,6 +756,61 @@ class TransformerWrapper(nn.Module):
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
             new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
             return out, new_mems
+
+        if return_attn:
+            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
+            return out, attn_maps
+
+        return out
+
+class ContinuousTransformerWrapper(nn.Module):
+    def __init__(
+        self,
+        *,
+        max_seq_len,
+        attn_layers,
+        dim_in = None,
+        dim_out = None,
+        emb_dim = None,
+        emb_dropout = 0.,
+        use_pos_emb = True
+    ):
+        super().__init__()
+        assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
+
+        dim = attn_layers.dim
+
+        self.max_seq_len = max_seq_len
+
+        self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+        self.emb_dropout = nn.Dropout(emb_dropout)
+
+        self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
+
+        self.attn_layers = attn_layers
+        self.norm = nn.LayerNorm(dim)
+
+        self.project_out = nn.Linear(dim, dim_out) if exists(dim_out) else nn.Identity()
+
+    def forward(
+        self,
+        x,
+        return_embeddings = False,
+        mask = None,
+        return_attn = False,
+        mems = None,
+        **kwargs
+    ):
+        b, n, _, device = *x.shape, x.device
+
+        x = self.project_in(x)
+        x += self.pos_emb(x)
+        x = self.emb_dropout(x)
+
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
+        x = self.norm(x)
+
+        out = self.project_out(x) if not return_embeddings else x
 
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))

@@ -640,6 +640,29 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 
 ```
 
+Pass in continuous values
+
+```python
+import torch
+from x_transformers import ContinuousTransformerWrapper, Decoder
+
+model = ContinuousTransformerWrapper(
+    dim_in = 32,
+    dim_out = 100,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 12,
+        heads = 8
+    )
+)
+
+x = torch.randn((1, 1024, 32))
+mask = torch.ones(1, 1024).bool()
+
+model(x, mask = mask) # (1, 1024, 100)
+```
+
 ## Citations
 
 ```bibtex
