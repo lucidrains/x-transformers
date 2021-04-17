@@ -289,12 +289,7 @@ class Attention(nn.Module):
 
         inner_dim = dim_head * heads
 
-        self.to_q = nn.Sequential(
-            Rearrange('b n c -> b c n'),
-            DepthWiseConv1d(dim, inner_dim, 9, bias = False),
-            Rearrange('b c n -> b n c')
-        )
-
+        self.to_q = nn.Linear(dim, inner_dim, bias = False)
         self.to_k = nn.Linear(dim, inner_dim, bias = False)
         self.to_v = nn.Linear(dim, inner_dim, bias = False)
         self.dropout = nn.Dropout(dropout)
@@ -339,9 +334,6 @@ class Attention(nn.Module):
         q_input = x
         k_input = kv_input
         v_input = kv_input
-
-        padding = (8, 0) if self.causal else (4, 4)
-        q_input = F.pad(q_input, (0, 0, *padding), value = 0)
 
         if exists(mem):
             k_input = torch.cat((mem, k_input), dim = -2)
