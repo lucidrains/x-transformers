@@ -158,19 +158,25 @@ class RelativePositionBias(nn.Module):
         bias = rearrange(values, 'i j h -> () h i j')
         return qk_dots + bias
 
-# rotary positional embedding helpers
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer('inv_freq', inv_freq)
 
-def rotate_every_two(x):
-    x = rearrange(x, '... (d j) -> ... d j', j = 2)
-    x1, x2 = x.unbind(dim = -1)
-    x = torch.stack((-x2, x1), dim = -1)
-    return rearrange(x, '... d j -> ... (d j)')
+    def forward(self, x, seq_dim = 1):
+        t = torch.arange(x.shape[seq_dim], device = x.device).type_as(self.inv_freq)
+        freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        return emb[None, :, :]
 
-def apply_rotary_pos_emb(q, k, sinu_pos):
-    sinu_pos = rearrange(sinu_pos, '() n (j d) -> n j d', j = 2)
-    sin, cos = sinu_pos.unbind(dim = -2)
-    sin, cos = map(lambda t: repeat(t, 'b n -> b (n j)', j = 2), (sin, cos))
-    q, k = map(lambda t: (t * cos) + (rotate_every_two(t) * sin), (q, k))
+def rotate_half(x):
+    x = rearrange(x, '... (j d) -> ... j d', j = 2)
+    x1, x2 = x.unbind(dim = -2)
+    return torch.cat((-x2, x1), dim = -1)
+
+def apply_rotary_pos_emb(q, k, freqs):
+    q, k = map(lambda t: (t * freqs.cos()) + (rotate_half(t) * freqs.sin()), (q, k))
     return q, k
 
 # classes
@@ -461,7 +467,7 @@ class AttentionLayers(nn.Module):
         self.has_pos_emb = position_infused_attn or rel_pos_bias or rotary_pos_emb
         self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
 
-        self.rotary_pos_emb = FixedPositionalEmbedding(dim_head) if rotary_pos_emb else always(None)
+        self.rotary_pos_emb = RotaryEmbedding(dim_head) if rotary_pos_emb else always(None)
 
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
         self.rel_pos = RelativePositionBias(causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
