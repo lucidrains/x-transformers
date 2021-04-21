@@ -89,17 +89,15 @@ class AutoregressiveWrapper(nn.Module):
         return out
 
     def forward(self, x, **kwargs):
-        pad = partial(pad_sequence, batch_first = True, padding_value = self.pad_value)
-
         xi = x[:, :-1]
         xo = x[:, 1:]
 
         # help auto-solve a frequent area of confusion around input masks in auto-regressive
         # if user supplies a mask that is only off by one from the source sequence, resolve it for them
-        mask = kwargs.pop('mask', None)
+        mask = kwargs.get('mask', None)
         if mask is not None and mask.shape[1] == x.shape[1]:
             mask = mask[:, :-1]
-            kwargs.update(mask = mask)
+            kwargs['mask'] = mask
 
         out = self.net(xi, **kwargs)
         loss = F.cross_entropy(out.transpose(1, 2), xo, ignore_index = self.ignore_index)
