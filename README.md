@@ -595,6 +595,28 @@ model = TransformerWrapper(
 )
 ```
 
+### Rotary Positional Embeddings
+
+<img src="./images/rotary.png" width="500px"></img>
+
+Developed in Beijing, this new technique quickly gained interest in the NLP circles. In short, it allows you to endow the transformer with relative positional embeddings at the cost of no learned parameters. You apply a rotary operation to the queries and keys prior to their dot product in attention. It is highly effective and it is recommended you have this on whenever there is implicit order in your input.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        rotary_pos_emb = True  # turns on rotary positional embeddings
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -895,12 +917,12 @@ model(x, mask = mask) # (1, 1024, 100)
 
 ```bibtex
 @misc{parisotto2019stabilizing,
-      title     = {Stabilizing Transformers for Reinforcement Learning},
-      author    = {Emilio Parisotto and H. Francis Song and Jack W. Rae and Razvan Pascanu and Caglar Gulcehre and Siddhant M. Jayakumar and Max Jaderberg and Raphael Lopez Kaufman and Aidan Clark and Seb Noury and Matthew M. Botvinick and Nicolas Heess and Raia Hadsell},
-      year      = {2019},
-      eprint    = {1910.06764},
-      archivePrefix = {arXiv},
-      primaryClass = {cs.LG}
+    title     = {Stabilizing Transformers for Reinforcement Learning},
+    author    = {Emilio Parisotto and H. Francis Song and Jack W. Rae and Razvan Pascanu and Caglar Gulcehre and Siddhant M. Jayakumar and Max Jaderberg and Raphael Lopez Kaufman and Aidan Clark and Seb Noury and Matthew M. Botvinick and Nicolas Heess and Raia Hadsell},
+    year      = {2019},
+    eprint    = {1910.06764},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
@@ -927,11 +949,13 @@ model(x, mask = mask) # (1, 1024, 100)
 ```
 
 ```bibtex
-@techreport{zhuiyiroformer,
-    title   = {RoFormer: Transformer with Rotary Position Embeddings - ZhuiyiAI},
-    author  = {Jianlin Su},
+@misc{su2021roformer,
+    title   = {RoFormer: Enhanced Transformer with Rotary Position Embedding},
+    author  = {Jianlin Su and Yu Lu and Shengfeng Pan and Bo Wen and Yunfeng Liu},
     year    = {2021},
-    url     = "https://github.com/ZhuiyiTechnology/roformer",
+    eprint  = {2104.09864},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
 
