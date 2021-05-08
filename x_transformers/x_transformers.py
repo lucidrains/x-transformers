@@ -168,7 +168,7 @@ class RotaryEmbedding(nn.Module):
         t = torch.arange(x.shape[seq_dim], device = x.device).type_as(self.inv_freq)
         freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
         emb = torch.cat((freqs, freqs), dim=-1)
-        return emb[None, :, :]
+        return emb[None, None, :, :]
 
 def rotate_half(x):
     x = rearrange(x, '... (j d) -> ... j d', j = 2)
