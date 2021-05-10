@@ -334,7 +334,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
+        b, n, _, h, talking_heads, device, has_context = *x.shape, self.heads, self.talking_heads, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -357,7 +357,7 @@ class Attention(nn.Module):
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
 
-        if exists(rotary_pos_emb):
+        if exists(rotary_pos_emb) and not has_context:
             l = rotary_pos_emb.shape[-1]
             (ql, qr), (kl, kr) = map(lambda t: (t[..., :l], t[..., l:]), (q, k))
             ql, kl = apply_rotary_pos_emb(ql, kl, rotary_pos_emb)
