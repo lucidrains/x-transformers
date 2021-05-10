@@ -119,8 +119,9 @@ class FixedPositionalEmbedding(nn.Module):
         return emb[None, :, :]
 
 class RelativePositionBias(nn.Module):
-    def __init__(self, causal = False, num_buckets = 32, max_distance = 128, heads = 8):
+    def __init__(self, scale, causal = False, num_buckets = 32, max_distance = 128, heads = 8):
         super().__init__()
+        self.scale = scale
         self.causal = causal
         self.num_buckets = num_buckets
         self.max_distance = max_distance
@@ -156,7 +157,7 @@ class RelativePositionBias(nn.Module):
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
         bias = rearrange(values, 'i j h -> () h i j')
-        return qk_dots + bias
+        return qk_dots + (bias * self.scale)
 
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim):
@@ -477,7 +478,7 @@ class AttentionLayers(nn.Module):
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim) if rotary_pos_emb else None
 
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
-        self.rel_pos = RelativePositionBias(causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
+        self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
 
         self.pre_norm = pre_norm
 
