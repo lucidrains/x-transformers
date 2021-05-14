@@ -361,10 +361,9 @@ class Attention(nn.Module):
 
         if exists(rotary_pos_emb) and not has_context:
             l = rotary_pos_emb.shape[-1]
-            (ql, qr), (kl, kr) = map(lambda t: (t[..., :l], t[..., l:]), (q, k))
+            (ql, qr), (kl, kr), (vl, vr) = map(lambda t: (t[..., :l], t[..., l:]), (q, k, v))
             ql, kl = map(lambda t: apply_rotary_pos_emb(t, rotary_pos_emb), (ql, kl))
-            q = torch.cat((ql, qr), dim = -1)
-            k = torch.cat((kl, kr), dim = -1)
+            q, k, v = map(lambda t: torch.cat(t, dim = -1), ((ql, qr), (kl, kr), (vl, vr)))
 
         input_mask = None
         if any(map(exists, (mask, context_mask))):
