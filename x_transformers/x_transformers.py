@@ -366,7 +366,7 @@ class Attention(nn.Module):
         v = self.to_v(v_input)
 
         if not collaborative_heads:
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
         else:
             q = einsum('b i d, h d -> b h i d', q, self.collaborative_mixing)
             k = rearrange(k, 'b n d -> b () n d')
