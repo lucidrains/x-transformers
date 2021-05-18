@@ -282,7 +282,7 @@ I have had good results on usual datasets, but had met trouble with convergence 
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Decoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -306,7 +306,7 @@ This paper proposes an efficient way to sparsify attention by zeroing all dot-pr
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Decoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -324,7 +324,7 @@ Alternatively, if you would like to use `entmax15`, you can also do so with one 
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Decoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -348,7 +348,7 @@ A Noam Shazeer paper that proposes mixing information between heads pre and post
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Decoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -372,7 +372,7 @@ Share redundent learned key/query projections accross heads. Collaborative atten
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Decoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -381,8 +381,8 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_collaborative_heads=True,
-        attn_collaborative_compression=.3,
+        attn_collab_heads = True,
+        attn_collab_compression = .3,
     )
 )
 ```
@@ -399,7 +399,7 @@ Update: After some experimentation, I found this variant actually performs worse
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Encoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -429,7 +429,7 @@ You can experiment with this feature as shown below
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Encoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -455,7 +455,7 @@ The authors propose to view the success of transformers from a dynamical systems
 
 ```python
 import torch
-from x_transformers import TransformerWrapper, Decoder, Encoder
+from x_transformers import TransformerWrapper, Encoder
 
 model = TransformerWrapper(
     num_tokens = 20000,
@@ -831,12 +831,12 @@ model(x, mask = mask) # (1, 1024, 100)
 
 ```bibtex
 @misc{cordonnier2020multihead,
-      title={Multi-Head Attention: Collaborate Instead of Concatenate},
-      author={Jean-Baptiste Cordonnier and Andreas Loukas and Martin Jaggi},
-      year={2020},
-      eprint={2006.16362},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+    title   = {Multi-Head Attention: Collaborate Instead of Concatenate},
+    author  = {Jean-Baptiste Cordonnier and Andreas Loukas and Martin Jaggi},
+    year    = {2020},
+    eprint  = {2006.16362},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
