@@ -283,6 +283,8 @@ class Attention(nn.Module):
         causal = False,
         mask = None,
         talking_heads = False,
+        collaborative_heads = False,
+        collaborative_compression = .3,
         sparse_topk = None,
         use_entmax15 = False,
         num_mem_kv = 0,
@@ -295,11 +297,17 @@ class Attention(nn.Module):
         self.causal = causal
         self.mask = mask
 
-        inner_dim = dim_head * heads
+        qk_dim = v_dim = dim_head * heads
 
-        self.to_q = nn.Linear(dim, inner_dim, bias = False)
-        self.to_k = nn.Linear(dim, inner_dim, bias = False)
-        self.to_v = nn.Linear(dim, inner_dim, bias = False)
+        # collaborative heads
+        self.collaborative_heads = collaborative_heads
+        if self.collaborative_heads:
+            qk_dim = int(collaborative_compression * qk_dim)
+            self.collaborative_mixing = nn.Parameter(torch.randn(heads, qk_dim))
+
+        self.to_q = nn.Linear(dim, qk_dim, bias = False)
+        self.to_k = nn.Linear(dim, qk_dim, bias = False)
+        self.to_v = nn.Linear(dim, v_dim, bias = False)
         self.dropout = nn.Dropout(dropout)
 
         # talking heads
@@ -322,7 +330,7 @@ class Attention(nn.Module):
 
         # attention on attention
         self.attn_on_attn = on_attn
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(inner_dim, dim)
+        self.to_out = nn.Sequential(nn.Linear(v_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(v_dim, dim)
 
     def forward(
         self,
@@ -336,7 +344,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, talking_heads, device, has_context = *x.shape, self.heads, self.talking_heads, x.device, exists(context)
+        b, n, _, h, talking_heads, collaborative_heads, device, has_context = *x.shape, self.heads, self.talking_heads, self.collaborative_heads, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -357,7 +365,12 @@ class Attention(nn.Module):
         k = self.to_k(k_input)
         v = self.to_v(v_input)
 
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
+        if not collaborative_heads:
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
+        else:
+            q = einsum('b i d, h d -> b h i d', q, self.collaborative_mixing)
+            k = rearrange(k, 'b n d -> b () n d')
+            v = rearrange(v, 'b n (h d) -> b h n d', h = h)
 
         if exists(rotary_pos_emb) and not has_context:
             l = rotary_pos_emb.shape[-1]
@@ -380,6 +393,9 @@ class Attention(nn.Module):
             v = torch.cat((mem_v, v), dim = -2)
             if exists(input_mask):
                 input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
+
+        if collaborative_heads:
+            k = k.expand(-1, h, -1, -1)
 
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
         mask_value = max_neg_value(dots)

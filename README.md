@@ -362,6 +362,31 @@ model = TransformerWrapper(
 )
 ```
 
+### Collaborative Attention
+
+<img src="./images/collaborative-attention.png" width="500px"></img>
+
+https://arxiv.org/abs/2006.16362
+
+Share redundent learned key/query projections accross heads. Collaborative attention reduces the number of parameters but requires slightly more memory and computation. A good compression factor to match the performance of the vanilla multi-head attention is between 0.25 and 0.5.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_collaborative_heads=True,
+        attn_collaborative_compression=.3,
+    )
+)
+```
+
 ### Attention on Attention for Image Captioning
 
 <img src="./images/attention-on-attention.png"></img>
@@ -801,6 +826,17 @@ model(x, mask = mask) # (1, 1024, 100)
     eprint  = {2003.02436},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{cordonnier2020multihead,
+      title={Multi-Head Attention: Collaborate Instead of Concatenate},
+      author={Jean-Baptiste Cordonnier and Andreas Loukas and Martin Jaggi},
+      year={2020},
+      eprint={2006.16362},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
 }
 ```
 
