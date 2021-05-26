@@ -876,9 +876,9 @@ class XTransformer(nn.Module):
         self.decoder = AutoregressiveWrapper(self.decoder)
 
     @torch.no_grad()
-    def generate(self, seq_in, seq_out_start, seq_len, src_mask = None):
+    def generate(self, seq_in, seq_out_start, seq_len, src_mask = None, **kwargs):
         encodings = self.encoder(seq_in, return_embeddings = True, mask = src_mask)
-        return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask)
+        return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask, **kwargs)
 
     def forward(self, src, tgt, src_mask = None, tgt_mask = None):
         enc = self.encoder(src, mask = src_mask, return_embeddings = True)
