@@ -357,7 +357,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_talking_heads = True  # turn on information exchange between attention heads
+        talking_heads = True  # turn on information exchange between attention heads
     )
 )
 ```
