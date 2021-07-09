@@ -37,20 +37,23 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
-def always(val):
-    def inner(*args, **kwargs):
-        return val
-    return inner
+class always():
+    def __init__(self, val):
+        self.val = val
+    def __call__(self, *args, **kwargs):
+        return self.val
 
-def not_equals(val):
-    def inner(x):
-        return x != val
-    return inner
+class not_equals():
+    def __init__(self, val):
+        self.val = val
+    def __call__(self, x, *args, **kwargs):
+        return x != self.val
 
-def equals(val):
-    def inner(x):
-        return x == val
-    return inner
+class equals():
+    def __init__(self, val):
+        self.val = val
+    def __call__(self, x, *args, **kwargs):
+        return x == self.val
 
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
