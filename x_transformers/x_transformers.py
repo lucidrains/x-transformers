@@ -292,7 +292,8 @@ class Attention(nn.Module):
         use_entmax15 = False,
         num_mem_kv = 0,
         dropout = 0.,
-        on_attn = False
+        on_attn = False,
+        gate_values = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -311,7 +312,15 @@ class Attention(nn.Module):
         self.to_q = nn.Linear(dim, qk_dim, bias = False)
         self.to_k = nn.Linear(dim, qk_dim, bias = False)
         self.to_v = nn.Linear(dim, v_dim, bias = False)
+
         self.dropout = nn.Dropout(dropout)
+
+        # add GLU gating for aggregated values, from alphafold2
+        self.to_v_gate = None
+        if gate_values:
+            self.to_v_gate = nn.Linear(dim, v_dim)
+            nn.init.constant_(self.to_v_gate.weight, 0)
+            nn.init.constant_(self.to_v_gate.bias, 1)
 
         # talking heads
         self.talking_heads = talking_heads
@@ -443,6 +452,10 @@ class Attention(nn.Module):
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
+
+        if exists(self.to_v_gate):
+            gates = self.gate_v(x)
+            out = out * gates.sigmoid()
 
         intermediates = Intermediates(
             pre_softmax_attn = pre_softmax_attn,
