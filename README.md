@@ -415,7 +415,9 @@ model = TransformerWrapper(
 
 ### Intra-attention Gating on Values
 
-<a href="https://github.com/deepmind/alphafold">Alphafold2</a> had a peculiar variant of attention where they gate the aggregated values with the input, presumably to have the block have more control over whether to update a value or not.
+<img src="./images/gate_values.png" width="400px"></img>
+
+<a href="https://github.com/deepmind/alphafold">Alphafold2</a> had a peculiar variant of attention where they gate the aggregated values with the input, presumably to have the block have more control over the update.
 
 A quick test shows a small but noticeable improvement, on about the same order as attention on attention.
 
