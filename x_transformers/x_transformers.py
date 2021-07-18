@@ -871,10 +871,12 @@ class XTransformer(nn.Module):
         dec_kwargs, kwargs = groupby_prefix_and_trim('dec_', kwargs)
 
         assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
-        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len', 'emb_dropout'], enc_kwargs)
+        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], enc_kwargs)
+        enc_transformer_kwargs['emb_dropout'] = enc_kwargs.pop('emb_dropout', 0)
         enc_transformer_kwargs['num_memory_tokens'] = enc_kwargs.pop('num_memory_tokens', None)
 
-        dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len', 'emb_dropout'], dec_kwargs)
+        dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
+        dec_transformer_kwargs['emb_dropout'] = dec_kwargs.pop('emb_dropout', 0)
 
         self.encoder = TransformerWrapper(
             **enc_transformer_kwargs,
