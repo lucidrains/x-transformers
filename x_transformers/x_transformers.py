@@ -415,7 +415,7 @@ class Attention(nn.Module):
         if exists(prev_attn):
             dots = dots + prev_attn
 
-        pre_softmax_attn = dots
+        pre_softmax_attn = dots.clone()
 
         if talking_heads:
             dots = einsum('b h i j, h k -> b k i j', dots, self.pre_softmax_proj).contiguous()
@@ -443,7 +443,7 @@ class Attention(nn.Module):
             del mask
 
         attn = self.attn_fn(dots, dim = -1)
-        post_softmax_attn = attn
+        post_softmax_attn = attn.clone()
 
         attn = self.dropout(attn)
 
