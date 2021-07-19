@@ -699,7 +699,7 @@ class ViTransformerWrapper(nn.Module):
 
         cls_tokens = repeat(self.cls_token, '() n d -> b n d', b = b)
         x = torch.cat((cls_tokens, x), dim=1)
-        x += self.pos_embedding[:, :(n + 1)]
+        x = x + self.pos_embedding[:, :(n + 1)]
         x = self.dropout(x)
 
         x = self.attn_layers(x)
@@ -771,7 +771,7 @@ class TransformerWrapper(nn.Module):
     ):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
         x = self.token_emb(x)
-        x += self.pos_emb(x)
+        x = x + self.pos_emb(x)
         x = self.emb_dropout(x)
 
         x = self.project_emb(x)
@@ -844,7 +844,7 @@ class ContinuousTransformerWrapper(nn.Module):
         b, n, _, device = *x.shape, x.device
 
         x = self.project_in(x)
-        x += self.pos_emb(x)
+        x = x + self.pos_emb(x)
         x = self.emb_dropout(x)
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
