@@ -515,6 +515,7 @@ class AttentionLayers(nn.Module):
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
+        self.cross_attend = cross_attend
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
         norm_class = RMSNorm if use_rmsnorm else norm_class
@@ -589,6 +590,8 @@ class AttentionLayers(nn.Module):
         mems = None,
         return_hiddens = False
     ):
+        assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
+
         hiddens = []
         intermediates = []
         prev_attn = None
