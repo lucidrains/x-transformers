@@ -753,6 +753,7 @@ class TransformerWrapper(nn.Module):
         mask = None,
         return_mems = False,
         return_attn = False,
+        return_memory = True,
         mems = None,
         **kwargs
     ):
@@ -774,7 +775,8 @@ class TransformerWrapper(nn.Module):
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
         x = self.norm(x)
 
-        mem, x = x[:, :num_mem], x[:, num_mem:]
+        if not return_memory:
+            mem, x = x[:, :num_mem], x[:, num_mem:]
 
         out = self.to_logits(x) if not return_embeddings else x
 
