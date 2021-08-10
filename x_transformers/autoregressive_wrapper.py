@@ -5,6 +5,9 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from entmax import entmax_bisect
 
+def exists(val):
+    return val is not None
+
 # nucleus
 
 def top_p(logits, thres = 0.9):
@@ -77,8 +80,15 @@ class AutoregressiveWrapper(nn.Module):
             out = torch.cat((out, sample), dim=-1)
             mask = F.pad(mask, (0, 1), value=True)
 
-            if eos_token is not None and (sample == eos_token).all():
-                break
+            if exists(eos_token):
+                is_eos_token = (out == eos_token)
+
+                if is_eos_token.any(dim = -1).all():
+                    # mask out everything after the eos tokens
+                    shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
+                    mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
+                    out = out.masked_fill(mask, self.pad_value)
+                    break
 
         out = out[:, t:]
 
