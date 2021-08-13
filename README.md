@@ -666,6 +666,46 @@ model = TransformerWrapper(
 )
 ```
 
+### Shifted Tokens
+
+An <a href="https://github.com/BlinkDL">independent researcher</a> has found that shifting a subset of the feature dimension along the sequence dimension by 1 token helps with convergence. I have tested this for the autoregressive case and can confirm that it leads to greatly improved convergence. This also lines up with <a href="https://arxiv.org/abs/2106.07477">the results</a> of some papers in the vision domain.
+
+To use it, simply set `shift_tokens = 1` (or to whatever number of shifts you desire). The feature dimension will be divided by `shift_tokens + 1` and then each chunk will be shifted `[0, shift_tokens]` respectively
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        shift_tokens = 1
+    )
+)
+```
+
+If you want finer control over how much is shifted per block (whether attention or feedforward), simply pass in a tuple of size that is equal to the number of layers.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        shift_tokens = (2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0) # 12 blocks, attention and feedforward alternating, with progressively less shifting
+    )
+)
+```
+
 ## Todo
 
 To be explained and documented
@@ -1027,6 +1067,19 @@ model(x, mask = mask) # (1, 1024, 100)
     year    = {2021},
     doi     = {10.1038/s41586-021-03819-2},
     note    = {(Accelerated article preview)},
+}
+```
+
+```bibtex
+@software{peng_bo_2021_5196578,
+    author       = {PENG Bo},
+    title        = {BlinkDL/RWKV-LM: 0.01},
+    month        = aug,
+    year         = 2021,
+    publisher    = {Zenodo},
+    version      = {0.01},
+    doi          = {10.5281/zenodo.5196578},
+    url          = {https://doi.org/10.5281/zenodo.5196578%7D
 }
 ```
 

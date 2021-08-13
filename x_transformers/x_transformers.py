@@ -37,6 +37,9 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
+def cast_tuple(val, depth):
+    return val if isinstance(val, tuple) else (val,) * depth
+
 class always():
     def __init__(self, val):
         self.val = val
@@ -244,6 +247,29 @@ class GRUGating(nn.Module):
         )
 
         return gated_output.reshape_as(x)
+
+# token shifting
+
+def shift(t, amount):
+    if amount == 0:
+        return t
+    return F.pad(t, (0, 0, amount, -amount), value = 0.)
+
+class ShiftTokens(nn.Module):
+    def __init__(self, shifts, fn):
+        super().__init__()
+        self.fn = fn
+        self.shifts = tuple(shifts)
+
+    def forward(self, x, **kwargs):
+        shifts = self.shifts
+        segments = len(shifts)
+        feats_per_shift = x.shape[-1] // segments
+        splitted = x.split(feats_per_shift, dim = -1)
+        segments_to_shift, rest = splitted[:segments], splitted[segments:]
+        segments_to_shift = list(map(lambda args: shift(*args), zip(segments_to_shift, shifts)))
+        x = torch.cat((*segments_to_shift, *rest), dim = -1)
+        return self.fn(x, **kwargs)
 
 # feedforward
 
@@ -490,6 +516,7 @@ class AttentionLayers(nn.Module):
         macaron = False,
         pre_norm = True,
         gate_residual = False,
+        shift_tokens = 0,
         **kwargs
     ):
         super().__init__()
@@ -534,6 +561,8 @@ class AttentionLayers(nn.Module):
         if macaron:
             default_block = ('f',) + default_block
 
+        # calculate layer block order
+
         if exists(custom_layers):
             layer_types = custom_layers
         elif exists(par_ratio):
@@ -556,7 +585,13 @@ class AttentionLayers(nn.Module):
         self.layer_types = layer_types
         self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
 
-        for layer_type in self.layer_types:
+        # calculate token shifting
+
+        shift_tokens = cast_tuple(shift_tokens, len(layer_types))
+
+        # iterate and construct layers
+
+        for layer_type, layer_shift_tokens in zip(self.layer_types, shift_tokens):
             if layer_type == 'a':
                 layer = Attention(dim, heads = heads, causal = causal, **attn_kwargs)
             elif layer_type == 'c':
@@ -566,6 +601,11 @@ class AttentionLayers(nn.Module):
                 layer = layer if not macaron else Scale(0.5, layer)
             else:
                 raise Exception(f'invalid layer type {layer_type}')
+
+            if layer_shift_tokens > 0:
+                shift_range_upper = layer_shift_tokens + 1
+                shift_range_lower = -layer_shift_tokens if not causal else 0
+                layer = ShiftTokens(range(shift_range_lower, shift_range_upper), layer)
 
             if isinstance(layer, Attention) and exists(branch_fn):
                 layer = branch_fn(layer)
