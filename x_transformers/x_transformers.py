@@ -250,9 +250,13 @@ class GRUGating(nn.Module):
 
 # token shifting
 
-def shift(t, amount):
+def shift(t, amount, mask = None):
     if amount == 0:
         return t
+
+    if exists(mask):
+        t = t.masked_fill(~mask[..., None], 0.)
+
     return F.pad(t, (0, 0, amount, -amount), value = 0.)
 
 class ShiftTokens(nn.Module):
@@ -262,12 +266,13 @@ class ShiftTokens(nn.Module):
         self.shifts = tuple(shifts)
 
     def forward(self, x, **kwargs):
+        mask = kwargs.get('mask', None)
         shifts = self.shifts
         segments = len(shifts)
         feats_per_shift = x.shape[-1] // segments
         splitted = x.split(feats_per_shift, dim = -1)
         segments_to_shift, rest = splitted[:segments], splitted[segments:]
-        segments_to_shift = list(map(lambda args: shift(*args), zip(segments_to_shift, shifts)))
+        segments_to_shift = list(map(lambda args: shift(*args, mask = mask), zip(segments_to_shift, shifts)))
         x = torch.cat((*segments_to_shift, *rest), dim = -1)
         return self.fn(x, **kwargs)
 
