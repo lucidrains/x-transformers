@@ -672,6 +672,8 @@ An <a href="https://github.com/BlinkDL">independent researcher</a> has found tha
 
 To use it, simply set `shift_tokens = 1` (or to whatever number of shifts you desire). The feature dimension will be divided by `shift_tokens + 1` and then each chunk will be shifted `[0, shift_tokens]` respectively
 
+Update: new experiments by @sdtblck suggests this may only work for character-level training
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
