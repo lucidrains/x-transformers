@@ -674,6 +674,8 @@ To use it, simply set `shift_tokens = 1` (or to whatever number of shifts you de
 
 Update: new experiments by @sdtblck suggests this may only work for character-level training
 
+Update: after more experiments, it seems that in the context of BPE encoding, with rotary turned on, there is no benefit to shifting. for character-level training, shifting may still improve a tiny bit
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
