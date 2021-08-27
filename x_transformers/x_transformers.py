@@ -61,6 +61,13 @@ class equals():
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
+# init helpers
+
+def init_zero_(layer):
+    nn.init.constant_(layer.weight, 0.)
+    if exists(layer.bias):
+        nn.init.constant_(layer.bias, 0.)
+
 # keyword argument helpers
 
 def pick_and_pop(keys, d):
@@ -336,6 +343,9 @@ class FeedForward(nn.Module):
             nn.Linear(inner_dim, dim_out)
         )
 
+        # init last linear layer to 0
+        init_zero_(self.net[-1])
+
     def forward(self, x):
         return self.net(x)
 
@@ -407,6 +417,9 @@ class Attention(nn.Module):
         # attention on attention
         self.attn_on_attn = on_attn
         self.to_out = nn.Sequential(nn.Linear(v_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(v_dim, dim)
+
+        # init output projection 0
+        init_zero_(self.to_out)
 
     def forward(
         self,
