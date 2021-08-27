@@ -650,6 +650,8 @@ model = TransformerWrapper(
 
 Developed in Beijing, this new technique quickly gained interest in the NLP circles. In short, it allows you to endow the transformer with relative positional embeddings at the cost of no learned parameters. You apply a rotary operation to the queries and keys prior to their dot product in attention. The big idea is injecting positions through rotations.
 
+Highly recommend that you have this turned on whenever you are working on an ordered sequence.
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
