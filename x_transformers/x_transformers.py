@@ -195,14 +195,16 @@ class AlibiPositionalBias(nn.Module):
         return get_slopes_power_of_2(closest_power_of_2) + get_slopes(2 * closest_power_of_2)[0::2][:heads-closest_power_of_2]
 
     def forward(self, qk_dots):
-        i, j, device = *qk_dots.shape[-2:], qk_dots.device
+        h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
             return qk_dots + self.bias[..., :j]
 
         bias = torch.arange(j, device = device)
         bias = rearrange(bias, 'j -> () () () j')
-        self.register_buffer('bias', bias * self.slopes)
+        bias = bias * self.slopes
+        bias = F.pad(bias, (0, 0, 0, 0, 0, h - bias.shape[1]))
+        self.register_buffer('bias', bias)
         return qk_dots + self.bias
 
 class RotaryEmbedding(nn.Module):
@@ -565,6 +567,7 @@ class AttentionLayers(nn.Module):
         use_rmsnorm = False,
         use_rezero = False,
         alibi_pos_bias = False,
+        alibi_num_heads = None,
         rel_pos_bias = False,
         rel_pos_num_buckets = 32,
         rel_pos_max_distance = 128,
@@ -605,7 +608,9 @@ class AttentionLayers(nn.Module):
         if rel_pos_bias:
             self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance)
         elif alibi_pos_bias:
-            self.rel_pos = AlibiPositionalBias(heads = heads)
+            alibi_num_heads = default(alibi_num_heads, heads)
+            assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
+            self.rel_pos = AlibiPositionalBias(heads = alibi_num_heads)
         else:
             self.rel_pos = None
 
