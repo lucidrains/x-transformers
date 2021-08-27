@@ -165,6 +165,39 @@ class RelativePositionBias(nn.Module):
         bias = rearrange(values, 'i j h -> () h i j')
         return qk_dots + (bias * self.scale)
 
+class AlibiPositionalBias(nn.Module):
+    def __init__(self, heads):
+        super().__init__()
+        self.heads = heads
+        slopes = torch.Tensor(self._get_slopes(heads))
+        slopes = rearrange(slopes, 'h -> () h () ()')
+        self.register_buffer('slopes', slopes)
+        self.register_buffer('bias', None)
+
+    @staticmethod
+    def _get_slopes(heads):
+        def get_slopes_power_of_2(n):
+            start = (2**(-2**-(math.log2(n)-3)))
+            ratio = start
+            return [start*ratio**i for i in range(n)]
+
+        if math.log2(heads).is_integer():
+            return get_slopes_power_of_2(heads)
+
+        closest_power_of_2 = 2 ** math.floor(math.log2(heads))
+        return get_slopes_power_of_2(closest_power_of_2) + get_slopes(2 * closest_power_of_2)[0::2][:heads-closest_power_of_2]
+
+    def forward(self, qk_dots):
+        i, j, device = *qk_dots.shape[-2:], qk_dots.device
+
+        if exists(self.bias) and self.bias.shape[-1] <= j:
+            return qk_dots + self.bias[..., :j]
+
+        bias = torch.arange(j, device = device)
+        bias = rearrange(bias, 'j -> () () () j')
+        self.register_buffer('bias', bias * self.slopes)
+        return qk_dots + self.bias
+
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -507,6 +540,7 @@ class AttentionLayers(nn.Module):
         use_scalenorm = False,
         use_rmsnorm = False,
         use_rezero = False,
+        alibi_pos_bias = False,
         rel_pos_bias = False,
         rel_pos_num_buckets = 32,
         rel_pos_max_distance = 128,
@@ -540,8 +574,15 @@ class AttentionLayers(nn.Module):
         rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim) if rotary_pos_emb else None
 
+        assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
-        self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance) if rel_pos_bias else None
+
+        if rel_pos_bias:
+            self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance)
+        elif alibi_pos_bias:
+            self.rel_pos = AlibiPositionalBias(heads = heads)
+        else:
+            self.rel_pos = None
 
         self.pre_norm = pre_norm
 

@@ -648,7 +648,7 @@ model = TransformerWrapper(
 
 <img src="./images/rotary.png" width="500px"></img>
 
-Developed in Beijing, this new technique quickly gained interest in the NLP circles. In short, it allows you to endow the transformer with relative positional embeddings at the cost of no learned parameters. You apply a rotary operation to the queries and keys prior to their dot product in attention. It is highly effective and it is recommended you have this on whenever there is implicit order in your input.
+Developed in Beijing, this new technique quickly gained interest in the NLP circles. In short, it allows you to endow the transformer with relative positional embeddings at the cost of no learned parameters. You apply a rotary operation to the queries and keys prior to their dot product in attention. The big idea is injecting positions through rotations.
 
 ```python
 import torch
@@ -662,6 +662,26 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         rotary_pos_emb = True  # turns on rotary positional embeddings
+    )
+)
+```
+
+### ALiBi Positional Embedding
+
+<a href="https://ofir.io/train_short_test_long.pdf">This paper</a> proposes to simply apply a static linear bias to the attention matrix. The authors show this is not only effective as a relative positional encoding, but also allows the attention net to extrapolate to greater sequences length than what it was trained on, for autoregressive language models. My tests show that it may be even slightly better than rotary positional embeddings. I highly recommend you always have this turned on.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        alibi_pos_emb = True  # turns on ALiBi positional embedding
     )
 )
 ```
@@ -1016,6 +1036,15 @@ model(x, mask = mask) # (1, 1024, 100)
     title   = {Shortformer: Better Language Modeling using Shorter Inputs},
     author  = {Ofir Press and Noah A. Smith and Mike Lewis},
     year    = {2020}
+}
+```
+
+```bibtex
+@misc{press2021ALiBi,
+    title   = {Train Short, Test Long: Attention with Linear Biases Enable Input Length Extrapolation},
+    author  = {Ofir Press and Noah A. Smith and Mike Lewis},
+    year    = {2021},
+    url     = {https://ofir.io/train_short_test_long.pdf}
 }
 ```
 
