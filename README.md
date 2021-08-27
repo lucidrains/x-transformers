@@ -696,6 +696,8 @@ Update: new experiments by @sdtblck suggests this may only work for character-le
 
 Update: after more experiments, it seems that in the context of BPE encoding, with rotary turned on, there is no benefit to shifting. for character-level training, shifting may still improve a tiny bit
 
+Update: When doing BPE encoded tokens, it seems that shift of 2 will bottleneck the dimensions (divided by 5). It is recommended you always do a shift of 1, unless if you are working with character level.
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
@@ -725,7 +727,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        shift_tokens = (2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0) # 12 blocks, attention and feedforward alternating, with progressively less shifting
+        shift_tokens = (1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0) # 12 blocks, attention and feedforward alternating, with progressively less shifting
     )
 )
 ```
