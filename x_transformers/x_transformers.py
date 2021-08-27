@@ -328,7 +328,15 @@ class GEGLU(nn.Module):
         return x * F.gelu(gate)
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, dim_out = None, mult = 4, glu = False, dropout = 0.):
+    def __init__(
+        self,
+        dim,
+        dim_out = None,
+        mult = 4,
+        glu = False,
+        dropout = 0.,
+        zero_init_output = False
+    ):
         super().__init__()
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
@@ -344,7 +352,8 @@ class FeedForward(nn.Module):
         )
 
         # init last linear layer to 0
-        init_zero_(self.net[-1])
+        if zero_init_output:
+            init_zero_(self.net[-1])
 
     def forward(self, x):
         return self.net(x)
@@ -367,7 +376,8 @@ class Attention(nn.Module):
         num_mem_kv = 0,
         dropout = 0.,
         on_attn = False,
-        gate_values = False
+        gate_values = False,
+        zero_init_output = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -419,7 +429,8 @@ class Attention(nn.Module):
         self.to_out = nn.Sequential(nn.Linear(v_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(v_dim, dim)
 
         # init output projection 0
-        init_zero_(self.to_out)
+        if zero_init_output:
+            init_zero_(self.to_out)
 
     def forward(
         self,
@@ -569,6 +580,7 @@ class AttentionLayers(nn.Module):
         pre_norm = True,
         gate_residual = False,
         shift_tokens = 0,
+        zero_init_branch_output = False,
         **kwargs
     ):
         super().__init__()
@@ -619,6 +631,12 @@ class AttentionLayers(nn.Module):
 
         if macaron:
             default_block = ('f',) + default_block
+
+        # zero init
+
+        if zero_init_branch_output:
+            attn_kwargs = {**attn_kwargs, 'zero_init_output':  True}
+            ff_kwargs = {**ff_kwargs, 'zero_init_output':  True}
 
         # calculate layer block order
 
