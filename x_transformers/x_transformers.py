@@ -197,7 +197,7 @@ class AlibiPositionalBias(nn.Module):
     def forward(self, qk_dots):
         i, j, device = *qk_dots.shape[-2:], qk_dots.device
 
-        if exists(self.bias) and self.bias.shape[-1] <= j:
+        if exists(self.bias) and self.bias.shape[-1] >= j:
             return qk_dots + self.bias[..., :j]
 
         bias = torch.arange(j, device = device)
