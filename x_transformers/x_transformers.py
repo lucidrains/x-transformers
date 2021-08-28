@@ -178,8 +178,8 @@ class AlibiPositionalBias(nn.Module):
         self.heads = heads
         slopes = torch.Tensor(self._get_slopes(heads))
         slopes = rearrange(slopes, 'h -> () h () ()')
-        self.register_buffer('slopes', slopes)
-        self.register_buffer('bias', None)
+        self.register_buffer('slopes', slopes, persistent = False)
+        self.register_buffer('bias', None, persistent = False)
 
     @staticmethod
     def _get_slopes(heads):
@@ -204,7 +204,7 @@ class AlibiPositionalBias(nn.Module):
         bias = rearrange(bias, 'j -> () () () j')
         bias = bias * self.slopes
         bias = F.pad(bias, (0, 0, 0, 0, 0, h - bias.shape[1]))
-        self.register_buffer('bias', bias)
+        self.register_buffer('bias', bias, persistent = False)
         return qk_dots + self.bias
 
 class RotaryEmbedding(nn.Module):
