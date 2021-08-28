@@ -876,11 +876,6 @@ class TransformerWrapper(nn.Module):
         if num_memory_tokens > 0:
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
 
-            # let funnel encoder know number of memory tokens, if specified
-            # TODO: think of a cleaner solution
-            if hasattr(attn_layers, 'num_memory_tokens'):
-                attn_layers.num_memory_tokens = num_memory_tokens
-
     def init_(self):
         nn.init.normal_(self.token_emb.weight, std = 0.02)
 
