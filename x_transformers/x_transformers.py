@@ -95,17 +95,6 @@ def groupby_prefix_and_trim(prefix, d):
 
 # positional embeddings
 
-class DepthWiseConv1d(nn.Module):
-    def __init__(self, dim_in, dim_out, kernel_size, padding = 0, stride = 1, bias = True, groups = False):
-        super().__init__()
-        groups = default(groups, dim_in)
-        self.net = nn.Sequential(
-            nn.Conv1d(dim_in, dim_in, kernel_size = kernel_size, padding = padding, groups = dim_in, stride = stride, bias = bias),
-            nn.Conv1d(dim_in, dim_out, 1)
-        )
-    def forward(self, x):
-        return self.net(x)
-
 class AbsolutePositionalEmbedding(nn.Module):
     def __init__(self, dim, max_seq_len):
         super().__init__()
@@ -206,6 +195,25 @@ class AlibiPositionalBias(nn.Module):
         bias = F.pad(bias, (0, 0, 0, 0, 0, h - bias.shape[1]))
         self.register_buffer('bias', bias, persistent = False)
         return qk_dots + self.bias
+
+class LearnedAlibiPositionalBias(AlibiPositionalBias):
+    def __init__(self, heads):
+        super().__init__(heads)
+        self.learned_logslopes = nn.Parameter(torch.log(self.slopes))
+
+    def forward(self, qk_dots):
+        h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
+
+        slopes = self.learned_logslopes.exp()
+        slopes = F.pad(slopes, (0, 0, 0, 0, 0, h - slopes.shape[1]))
+
+        if exists(self.bias) and self.bias.shape[-1] >= j:
+            bias = self.bias[..., :j]
+        else:
+            bias = torch.arange(j, device = device)
+            self.register_buffer('bias', bias, persistent = False)
+
+        return qk_dots + (bias * slopes)
 
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim):
@@ -568,6 +576,7 @@ class AttentionLayers(nn.Module):
         use_rezero = False,
         alibi_pos_bias = False,
         alibi_num_heads = None,
+        alibi_learned = False,
         rel_pos_bias = False,
         rel_pos_num_buckets = 32,
         rel_pos_max_distance = 128,
@@ -610,7 +619,8 @@ class AttentionLayers(nn.Module):
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
-            self.rel_pos = AlibiPositionalBias(heads = alibi_num_heads)
+            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
+            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads)
         else:
             self.rel_pos = None
 
