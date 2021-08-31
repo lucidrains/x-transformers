@@ -181,7 +181,7 @@ class AlibiPositionalBias(nn.Module):
             return get_slopes_power_of_2(heads)
 
         closest_power_of_2 = 2 ** math.floor(math.log2(heads))
-        return get_slopes_power_of_2(closest_power_of_2) + get_slopes(2 * closest_power_of_2)[0::2][:heads-closest_power_of_2]
+        return get_slopes_power_of_2(closest_power_of_2) + get_slopes_power_of_2(2 * closest_power_of_2)[0::2][:heads-closest_power_of_2]
 
     def forward(self, qk_dots):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
