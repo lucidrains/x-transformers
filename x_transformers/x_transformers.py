@@ -619,6 +619,7 @@ class AttentionLayers(nn.Module):
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
+            assert causal, 'ALiBi currently does not work with non-autoregressive mode just yet'
             alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
             self.rel_pos = alibi_pos_klass(heads = alibi_num_heads)
         else:
