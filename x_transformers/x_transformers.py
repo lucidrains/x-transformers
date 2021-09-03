@@ -448,6 +448,7 @@ class Attention(nn.Module):
         context = None,
         mask = None,
         context_mask = None,
+        attn_mask = None,
         rel_pos = None,
         sinusoidal_emb = None,
         rotary_pos_emb = None,
@@ -524,6 +525,14 @@ class Attention(nn.Module):
         if exists(input_mask):
             dots.masked_fill_(~input_mask, mask_value)
             del input_mask
+
+        if exists(attn_mask):
+            assert 2 <= attn_mask.ndim <= 4, 'attention mask must have greater than 2 dimensions but less than or equal to 4'
+            if attn_mask.ndim == 2:
+                attn_mask = rearrange(attn_mask, 'i j -> () () i j')
+            elif attn_mask.ndim == 3:
+                attn_mask = rearrange(attn_mask, 'h i j -> () h i j')
+            dots.masked_fill_(~attn_mask, mask_value)
 
         if self.causal:
             i, j = dots.shape[-2:]
@@ -720,6 +729,7 @@ class AttentionLayers(nn.Module):
         context = None,
         mask = None,
         context_mask = None,
+        attn_mask = None,
         mems = None,
         return_hiddens = False
     ):
@@ -750,7 +760,7 @@ class AttentionLayers(nn.Module):
                 x = norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, attn_mask = attn_mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
@@ -1025,11 +1035,11 @@ class XTransformer(nn.Module):
         self.decoder = AutoregressiveWrapper(self.decoder)
 
     @torch.no_grad()
-    def generate(self, seq_in, seq_out_start, seq_len, src_mask = None, **kwargs):
-        encodings = self.encoder(seq_in, return_embeddings = True, mask = src_mask)
+    def generate(self, seq_in, seq_out_start, seq_len, src_mask = None, src_attn_mask = None, **kwargs):
+        encodings = self.encoder(seq_in, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
         return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask, **kwargs)
 
-    def forward(self, src, tgt, src_mask = None, tgt_mask = None):
-        enc = self.encoder(src, mask = src_mask, return_embeddings = True)
+    def forward(self, src, tgt, src_mask = None, tgt_mask = None, src_attn_mask = None):
+        enc = self.encoder(src, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
         out = self.decoder(tgt, context = enc, mask = tgt_mask, context_mask = src_mask)
         return out
