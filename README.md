@@ -1123,4 +1123,15 @@ model(x, mask = mask) # (1, 1024, 100)
 }
 ```
 
+```bibtex
+@misc{csordás2021devil,
+    title   = {The Devil is in the Detail: Simple Tricks Improve Systematic Generalization of Transformers},
+    author  = {Róbert Csordás and Kazuki Irie and Jürgen Schmidhuber},
+    year    = {2021},
+    eprint  = {2108.12284},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
