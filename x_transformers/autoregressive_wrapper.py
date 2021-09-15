@@ -82,9 +82,9 @@ class AutoregressiveWrapper(nn.Module):
             mask = F.pad(mask, (0, 1), value=True)
 
             if exists(eos_token):
-                is_eos_token = (out == eos_token)
+                is_eos_tokens = (out == eos_token)
 
-                if is_eos_token.any(dim = -1).all():
+                if is_eos_tokens.any(dim = -1).all():
                     # mask out everything after the eos tokens
                     shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
                     mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
