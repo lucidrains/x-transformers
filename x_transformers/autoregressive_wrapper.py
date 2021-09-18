@@ -31,6 +31,15 @@ def top_k(logits, thres = 0.9):
     probs.scatter_(1, ind, val)
     return probs
 
+# top_a
+
+def top_a(logits, min_p_pow=2.0, min_p_ratio=0.02):
+    probs = F.softmax(logits, dim=-1)
+    limit = torch.pow(torch.max(probs), min_p_pow) * min_p_ratio
+    logits[probs < limit] = -float("Inf")
+    logits[probs >= limit] = 1
+    return logits
+
 # entmax
 
 ENTMAX_ALPHA = 1.3
@@ -46,7 +55,7 @@ class AutoregressiveWrapper(nn.Module):
         self.max_seq_len = net.max_seq_len
 
     @torch.no_grad()
-    def generate(self, start_tokens, seq_len, eos_token = None, temperature = 1., filter_logits_fn = top_k, filter_thres = 0.9, **kwargs):
+    def generate(self, start_tokens, seq_len, eos_token = None, temperature = 1., filter_logits_fn = top_k, filter_thres = 0.9, min_p_pow=2.0, min_p_ratio=0.02, **kwargs):
         device = start_tokens.device
         was_training = self.net.training
         num_dims = len(start_tokens.shape)
@@ -71,6 +80,10 @@ class AutoregressiveWrapper(nn.Module):
 
             if filter_logits_fn in {top_k, top_p}:
                 filtered_logits = filter_logits_fn(logits, thres = filter_thres)
+                probs = F.softmax(filtered_logits / temperature, dim=-1)
+
+            elif filter_logits_fn is top_a:
+                filtered_logits = filter_logits_fn(logits, min_p_pow = min_p_pow, min_p_ratio= min_p_ratio)
                 probs = F.softmax(filtered_logits / temperature, dim=-1)
 
             elif filter_logits_fn is entmax:
