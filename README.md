@@ -270,6 +270,28 @@ model = TransformerWrapper(
 )
 ```
 
+### ReLU²
+
+https://arxiv.org/abs/2109.08668
+
+This paper used neural architecture search and found an activation, Relu Squared, that is both simpler and performs better than GELU, in the autoregressive language model setting. I have confirmed this in my independent experiments. However, if one were using the GLU variant from above, GELU still performs better. Pending further corroboration.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        ff_relu_squared = True
+    )
+)
+```
+
 ### Rezero Is All You Need
 
 <img src="./images/rezero.png"></img>
@@ -1129,6 +1151,17 @@ model(x, mask = mask) # (1, 1024, 100)
     author  = {Róbert Csordás and Kazuki Irie and Jürgen Schmidhuber},
     year    = {2021},
     eprint  = {2108.12284},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{so2021primer,
+    title   = {Primer: Searching for Efficient Transformers for Language Modeling}, 
+    author  = {David R. So and Wojciech Mańke and Hanxiao Liu and Zihang Dai and Noam Shazeer and Quoc V. Le},
+    year    = {2021},
+    eprint  = {2109.08668},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
 }
