@@ -93,6 +93,12 @@ def groupby_prefix_and_trim(prefix, d):
     kwargs_without_prefix = dict(map(lambda x: (x[0][len(prefix):], x[1]), tuple(kwargs_with_prefix.items())))
     return kwargs_without_prefix, kwargs
 
+# activations
+
+class ReluSquared(nn.Module):
+    def forward(self, x):
+        return F.relu(x) ** 2
+
 # positional embeddings
 
 class AbsolutePositionalEmbedding(nn.Module):
@@ -236,7 +242,7 @@ def apply_rotary_pos_emb(t, freqs):
     freqs = freqs[:, :, -seq_len:]
     return (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
 
-# classes
+# norms
 
 class Scale(nn.Module):
     def __init__(self, value, fn):
@@ -279,6 +285,8 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         norm = torch.norm(x, dim = -1, keepdim = True) * self.scale
         return x / norm.clamp(min = self.eps) * self.g
+
+# residual and residual gates
 
 class Residual(nn.Module):
     def forward(self, x, residual):
@@ -327,14 +335,15 @@ class ShiftTokens(nn.Module):
 
 # feedforward
 
-class GEGLU(nn.Module):
-    def __init__(self, dim_in, dim_out):
+class GLU(nn.Module):
+    def __init__(self, dim_in, dim_out, activation):
         super().__init__()
+        self.act = activation
         self.proj = nn.Linear(dim_in, dim_out * 2)
 
     def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim = -1)
-        return x * F.gelu(gate)
+        return x * self.act(gate)
 
 class FeedForward(nn.Module):
     def __init__(
@@ -343,16 +352,19 @@ class FeedForward(nn.Module):
         dim_out = None,
         mult = 4,
         glu = False,
+        relu_squared = False,
         dropout = 0.,
         zero_init_output = False
     ):
         super().__init__()
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
+        activation = ReluSquared() if relu_squared else nn.GELU()
+
         project_in = nn.Sequential(
             nn.Linear(dim, inner_dim),
-            nn.GELU()
-        ) if not glu else GEGLU(dim, inner_dim)
+            activation
+        ) if not glu else GLU(dim, inner_dim, activation)
 
         self.net = nn.Sequential(
             project_in,
