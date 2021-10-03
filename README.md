@@ -641,6 +641,40 @@ logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True)
 logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
 ```
 
+### Enhanced recurrence
+
+<img src="./images/enhanced-recurrence.png" width="400px"/>
+
+<a href="https://arxiv.org/abs/2012.15688">This paper</a> proposes a simple technique to enhance the range of Transformer-XL. They simply route the memory segment of a layer to the layer below it, for the next recurrent step. You can enable this by setting `shift_mem_down = 1`. You can also shift down arbitrary number of layers by setting this value to `> 1`.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model_xl = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 512,
+    max_mem_len = 2048,
+    shift_mem_down = 1,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        rotary_pos_emb = True
+    )
+)
+
+seg1 = torch.randint(0, 20000, (1, 512))
+seg2 = torch.randint(0, 20000, (1, 512))
+seg3 = torch.randint(0, 20000, (1, 512))
+
+logits1, mems1  = model_xl(seg1, return_mems = True)
+logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True)
+logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
+
+len(mems1), len(mem2), len(mem3) # (5, 5, 5) instead of (6, 6, 6)
+```
+
 ### Gated residual
 
 <img src="./images/gating.png" width="500px"></img>
@@ -759,29 +793,6 @@ model = TransformerWrapper(
 )
 ```
 
-## Todo
-
-To be explained and documented
-
-- [x] ~~memory key / values - All-attention paper~~
-- [x] ~~memory tokens - Memory Transformers~~
-- [x] ~~scale normalization - Transformers Without Tears~~
-- [x] ~~feedforward gated linear variant - Noam's GLU Variants~~
-- [x] ~~rezero - Rezero is all you need~~
-- [x] ~~topk attention - Explicit Sparse Attention~~
-- [x] ~~entmax15 instead of softmax - Adaptively Sparse Transformers~~
-- [x] ~~mixing head information - Noam's Talking Heads~~
-- [x] ~~gating multi-head attention output -  Attention on Attention~~
-- [x] ~~simplified relative positional encoding bias - T5~~
-- [x] ~~sandwich transformer - Reordering Sublayers~~
-- [x] ~~wrapper for processing images - Vision Transformer~~
-- [x] ~~macaron layers - 'Multi-particle Dynamic System' paper~~
-- [x] ~~residual attention - Realformer paper~~
-- [x] ~~position infused attention - Shortformer paper~~
-- [x] ~~recurrence - Transformer-XL~~
-- [x] ~~gated transformer-xl - Stabilizing Transformers for RL~~
-- [ ] reversibility - Reformer
-
 ## Miscellaneous
 
 Cross Attention
@@ -837,16 +848,6 @@ model(x, mask = mask) # (1, 1024, 100)
     eprint  = {1706.03762},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
-}
-```
-
-```bibtex
-@inproceedings{kitaev2020reformer,
-    title       = {Reformer: The Efficient Transformer},
-    author      = {Nikita Kitaev and Lukasz Kaiser and Anselm Levskaya},
-    booktitle   = {International Conference on Learning Representations},
-    year        = {2020},
-    url         = {https://openreview.net/forum?id=rkgNKkHtvB}
 }
 ```
 
@@ -1164,6 +1165,17 @@ model(x, mask = mask) # (1, 1024, 100)
     eprint  = {2109.08668},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@misc{ding2021erniedoc,
+    title   = {ERNIE-Doc: A Retrospective Long-Document Modeling Transformer}, 
+    author  = {Siyu Ding and Junyuan Shang and Shuohuan Wang and Yu Sun and Hao Tian and Hua Wu and Haifeng Wang},
+    year    = {2021},
+    eprint  = {2012.15688},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
 }
 ```
 

@@ -763,7 +763,7 @@ class AttentionLayers(nn.Module):
 
             if layer_type == 'a':
                 hiddens.append(x)
-                layer_mem = mems.pop(0)
+                layer_mem = mems.pop(0) if mems else None
 
             residual = x
 
@@ -876,6 +876,7 @@ class TransformerWrapper(nn.Module):
         attn_layers,
         emb_dim = None,
         max_mem_len = 0.,
+        shift_mem_down = 0,
         emb_dropout = 0.,
         num_memory_tokens = None,
         tie_embedding = False,
@@ -889,6 +890,7 @@ class TransformerWrapper(nn.Module):
 
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
+        self.shift_mem_down = shift_mem_down
 
         self.token_emb = nn.Embedding(num_tokens, emb_dim)
         self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
@@ -947,6 +949,7 @@ class TransformerWrapper(nn.Module):
             hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
             new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
+            new_mems = new_mems[self.shift_mem_down:]
             return out, new_mems
 
         if return_attn:
