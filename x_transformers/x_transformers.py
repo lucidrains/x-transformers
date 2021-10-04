@@ -938,6 +938,10 @@ class TransformerWrapper(nn.Module):
             if exists(mask):
                 mask = F.pad(mask, (num_mem, 0), value = True)
 
+        if self.shift_mem_down and exists(mems):
+            mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
+            mems = [*mems_r, *mems_l]
+
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
         x = self.norm(x)
 
@@ -949,7 +953,6 @@ class TransformerWrapper(nn.Module):
             hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
             new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
-            new_mems = new_mems[self.shift_mem_down:]
             return out, new_mems
 
         if return_attn:

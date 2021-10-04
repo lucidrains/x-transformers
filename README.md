@@ -669,10 +669,7 @@ seg2 = torch.randint(0, 20000, (1, 512))
 seg3 = torch.randint(0, 20000, (1, 512))
 
 logits1, mems1  = model_xl(seg1, return_mems = True)
-logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True)
-logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
-
-len(mems1), len(mem2), len(mem3) # (5, 5, 5) instead of (6, 6, 6)
+logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True) # mems1 of layer N are automatically routed to the layer N-1
 ```
 
 ### Gated residual
