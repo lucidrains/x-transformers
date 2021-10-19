@@ -612,6 +612,7 @@ class AttentionLayers(nn.Module):
         pre_norm = True,
         gate_residual = False,
         shift_tokens = 0,
+        sandwich_norm = False,
         zero_init_branch_output = False,
         **kwargs
     ):
@@ -645,7 +646,9 @@ class AttentionLayers(nn.Module):
         else:
             self.rel_pos = None
 
+        assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
         self.pre_norm = pre_norm
+        self.sandwich_norm = sandwich_norm
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
@@ -726,10 +729,15 @@ class AttentionLayers(nn.Module):
             if gate_residual:
                 residual_fn = GRUGating(dim)
             else:
-                residual_fn = Residual()
+                residual_fn = Residual(dim)
+
+            if sandwich_norm:
+                norm = nn.ModuleList([norm_fn(), norm_fn()])
+            else:
+                norm = norm_fn()
 
             self.layers.append(nn.ModuleList([
-                norm_fn(),
+                norm,
                 layer,
                 residual_fn
             ]))
@@ -767,6 +775,9 @@ class AttentionLayers(nn.Module):
 
             residual = x
 
+            if self.sandwich_norm:
+                norm, postnorm = norm
+
             if self.pre_norm:
                 x = norm(x)
 
@@ -776,6 +787,9 @@ class AttentionLayers(nn.Module):
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
                 out = block(x)
+
+            if self.sandwich_norm:
+                out = postnorm(out)
 
             x = residual_fn(out, residual)
 

@@ -790,6 +790,28 @@ model = TransformerWrapper(
 )
 ```
 
+### Sandwich Norm
+
+<img src="./images/sandwich_norm.png" width="400px"/>
+
+This technique first made an appearance in <a href="https://arxiv.org/abs/2105.13290">the CoqView paper</a>, a Chinese version of the famous text-to-image transformer DALL-E. They propose, when using pre-layernorm, to add an extra layernorm to all the branch outputs. I have found this to be very effective for a number of projects, when facing instability during training.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        sandwich_norm = True # set this to True
+    )
+)
+```
+
 ## Miscellaneous
 
 Cross Attention
@@ -1173,6 +1195,17 @@ model(x, mask = mask) # (1, 1024, 100)
     eprint  = {2012.15688},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
+}
+```
+
+```bibtex
+@misc{ding2021cogview,
+    title   = {CogView: Mastering Text-to-Image Generation via Transformers},
+    author  = {Ming Ding and Zhuoyi Yang and Wenyi Hong and Wendi Zheng and Chang Zhou and Da Yin and Junyang Lin and Xu Zou and Zhou Shao and Hongxia Yang and Jie Tang},
+    year    = {2021},
+    eprint  = {2105.13290},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
 }
 ```
 
