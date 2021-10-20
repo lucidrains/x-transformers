@@ -353,6 +353,7 @@ class FeedForward(nn.Module):
         mult = 4,
         glu = False,
         relu_squared = False,
+        post_act_ln = False,
         dropout = 0.,
         zero_init_output = False
     ):
@@ -368,6 +369,7 @@ class FeedForward(nn.Module):
 
         self.net = nn.Sequential(
             project_in,
+            nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
             nn.Dropout(dropout),
             nn.Linear(inner_dim, dim_out)
         )
@@ -390,6 +392,7 @@ class Attention(nn.Module):
         causal = False,
         mask = None,
         talking_heads = False,
+        head_scale = False,
         collab_heads = False,
         collab_compression = .3,
         sparse_topk = None,
@@ -433,6 +436,11 @@ class Attention(nn.Module):
             self.pre_softmax_proj = nn.Parameter(torch.randn(heads, heads))
             self.post_softmax_proj = nn.Parameter(torch.randn(heads, heads))
 
+        # head scaling
+        self.head_scale = head_scale
+        if head_scale:
+            self.head_scale_params = nn.Parameter(torch.ones(1, heads, 1, 1))
+
         # explicit topk sparse attention
         self.sparse_topk = sparse_topk
 
@@ -466,7 +474,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, talking_heads, collab_heads, device, has_context = *x.shape, self.heads, self.talking_heads, self.collab_heads, x.device, exists(context)
+        b, n, _, h, talking_heads, collab_heads, head_scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.collab_heads, self.head_scale, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -569,6 +577,10 @@ class Attention(nn.Module):
             attn = einsum('b h i j, h k -> b k i j', attn, self.post_softmax_proj).contiguous()
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
+
+        if head_scale:
+            out = out * self.head_scale_params
+
         out = rearrange(out, 'b h n d -> b n (h d)')
 
         if exists(self.to_v_gate):

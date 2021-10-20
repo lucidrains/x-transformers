@@ -812,6 +812,58 @@ model = TransformerWrapper(
 )
 ```
 
+### Normformer
+
+<img src="./images/normformer.png" width="400px"/>
+
+This <a href="https://openreview.net/forum?id=GMYWzWztDx5">paper</a> uncovers an issue with pre-norm transformers where gradients are mismatched between the early and later layers. They propose 4 changes, of which I will be offering 3.
+
+The first change is to offer per head scaling after aggregating the values in attention. My experiments show a slight improvement in convergence.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_head_scale = True  # set this to True
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
+The second change is an extra layernorm right after the activation in the feedforward. I have also verified a slight improvement, at the cost of extra compute.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        ff_post_act_ln = True # set this to True
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
+One of the other two changes is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
+
+Finally, I have tried the parameterized scaling of the residual branch in the feedforward pre-norm block, but noticed some slight instability, so I will hold off from adding that feature until I investigate it a bit more.
+
 ## Miscellaneous
 
 Cross Attention
@@ -1206,6 +1258,17 @@ model(x, mask = mask) # (1, 1024, 100)
     eprint  = {2105.13290},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@inproceedings{anonymous2022normformer,
+    title   = {NormFormer: Improved Transformer Pretraining with Extra Normalization},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Tenth International Conference on Learning Representations },
+    year    = {2022},
+    url     = {https://openreview.net/forum?id=GMYWzWztDx5},
+    note    = {under review}
 }
 ```
 
