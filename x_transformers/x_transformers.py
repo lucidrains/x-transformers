@@ -729,7 +729,7 @@ class AttentionLayers(nn.Module):
             if gate_residual:
                 residual_fn = GRUGating(dim)
             else:
-                residual_fn = Residual(dim)
+                residual_fn = Residual()
 
             if sandwich_norm:
                 norm = nn.ModuleList([norm_fn(), norm_fn()])
