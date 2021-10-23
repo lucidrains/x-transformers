@@ -289,15 +289,26 @@ class RMSNorm(nn.Module):
 # residual and residual gates
 
 class Residual(nn.Module):
+    def __init__(self, dim, scale_residual = False):
+        super().__init__()
+        self.residual_scale = nn.Parameter(torch.ones(dim)) if scale_residual else None
+
     def forward(self, x, residual):
+        if exists(self.residual_scale):
+            residual = residual * self.residual_scale
+
         return x + residual
 
 class GRUGating(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, scale_residual = False):
         super().__init__()
         self.gru = nn.GRUCell(dim, dim)
+        self.residual_scale = nn.Parameter(torch.ones(dim)) if scale_residual else None
 
     def forward(self, x, residual):
+        if exists(self.residual_scale):
+            residual = residual * self.residual_scale
+
         gated_output = self.gru(
             rearrange(x, 'b n d -> (b n) d'),
             rearrange(residual, 'b n d -> (b n) d')
@@ -623,6 +634,7 @@ class AttentionLayers(nn.Module):
         macaron = False,
         pre_norm = True,
         gate_residual = False,
+        scale_residual = False,
         shift_tokens = 0,
         sandwich_norm = False,
         zero_init_branch_output = False,
@@ -738,10 +750,8 @@ class AttentionLayers(nn.Module):
             if isinstance(layer, Attention) and exists(branch_fn):
                 layer = branch_fn(layer)
 
-            if gate_residual:
-                residual_fn = GRUGating(dim)
-            else:
-                residual_fn = Residual()
+            residual_fn = GRUGating if gate_residual else Residual
+            residual = residual_fn(dim, scale_residual = scale_residual)
 
             if sandwich_norm:
                 norm = nn.ModuleList([norm_fn(), norm_fn()])
@@ -751,7 +761,7 @@ class AttentionLayers(nn.Module):
             self.layers.append(nn.ModuleList([
                 norm,
                 layer,
-                residual_fn
+                residual
             ]))
 
     def forward(

@@ -860,9 +860,28 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
-One of the other two changes is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
+For the residual scaling, you simply have to set `scale_residual = True`. I have noticed slight improvements, but occasional instability as well, so use with caution.
 
-Finally, I have tried the parameterized scaling of the residual branch in the feedforward pre-norm block, but noticed some slight instability, so I will hold off from adding that feature until I investigate it a bit more.
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        scale_residual = True # set this to True
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
+The last change is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
 
 ## Miscellaneous
 
