@@ -595,7 +595,7 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)')
 
         if exists(self.to_v_gate):
-            gates = self.gate_v(x)
+            gates = self.to_v_gate(x)
             out = out * gates.sigmoid()
 
         intermediates = Intermediates(

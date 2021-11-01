@@ -454,7 +454,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        gate_values = True  # gate aggregated values with the input
+        attn_gate_values = True  # gate aggregated values with the input
     )
 )
 ```
