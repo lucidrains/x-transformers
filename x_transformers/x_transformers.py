@@ -401,7 +401,6 @@ class Attention(nn.Module):
         dim_head = DEFAULT_DIM_HEAD,
         heads = 8,
         causal = False,
-        mask = None,
         talking_heads = False,
         head_scale = False,
         collab_heads = False,
@@ -412,13 +411,14 @@ class Attention(nn.Module):
         dropout = 0.,
         on_attn = False,
         gate_values = False,
-        zero_init_output = False
+        zero_init_output = False,
+        max_attend_past = None
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
         self.causal = causal
-        self.mask = mask
+        self.max_attend_past = max_attend_past
 
         qk_dim = v_dim = dim_head * heads
 
@@ -563,6 +563,15 @@ class Attention(nn.Module):
             elif attn_mask.ndim == 3:
                 attn_mask = rearrange(attn_mask, 'h i j -> () h i j')
             dots.masked_fill_(~attn_mask, mask_value)
+
+        if exists(self.max_attend_past):
+            i, j = dots.shape[-2:]
+            range_q = torch.arange(j - i, j, device = device)
+            range_k = torch.arange(j, device = device)
+            dist = rearrange(range_q, 'i -> () () i ()') - rearrange(range_k, 'j -> () () () j')
+            mask = dist > self.max_attend_past
+            dots.masked_fill_(mask, mask_value)
+            del mask
 
         if self.causal:
             i, j = dots.shape[-2:]
