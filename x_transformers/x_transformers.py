@@ -197,7 +197,10 @@ class AlibiPositionalBias(nn.Module):
         bias = torch.arange(j, device = device)
         bias = rearrange(bias, 'j -> () () () j')
         bias = bias * self.slopes
-        bias = F.pad(bias, (0, 0, 0, 0, 0, h - bias.shape[1]))
+
+        num_heads_unalibied = h - bias.shape[1]
+        bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
+
         self.register_buffer('bias', bias, persistent = False)
         return qk_dots + self.bias
 
