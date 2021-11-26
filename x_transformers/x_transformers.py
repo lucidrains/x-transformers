@@ -769,7 +769,7 @@ class AttentionLayers(nn.Module):
                 shift_range_lower = -layer_shift_tokens if not causal else 0
                 layer = ShiftTokens(range(shift_range_lower, shift_range_upper), layer)
 
-            if isinstance(layer, (Attention, FeedForward)) and exists(branch_fn):
+            if exists(branch_fn):
                 layer = branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
