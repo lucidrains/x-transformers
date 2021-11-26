@@ -254,8 +254,13 @@ class Scale(nn.Module):
         self.fn = fn
 
     def forward(self, x, **kwargs):
-        x, *rest = self.fn(x, **kwargs)
-        return (x * self.value, *rest)
+        out = self.fn(x, **kwargs)
+        scale_fn = lambda t: t * self.value
+
+        if not isinstance(out, tuple):
+            return scale_fn(out)
+
+        return (scale_fn(out[0]), *out[1:])
 
 class Rezero(nn.Module):
     def __init__(self, fn):
@@ -264,8 +269,13 @@ class Rezero(nn.Module):
         self.g = nn.Parameter(torch.zeros(1))
 
     def forward(self, x, **kwargs):
-        x, *rest = self.fn(x, **kwargs)
-        return (x * self.g, *rest)
+        out = self.fn(x, **kwargs)
+        rezero_fn = lambda t: t * self.g
+
+        if not isinstance(out, tuple):
+            return rezero_fn(out)
+
+        return (rezero_fn(out[0]), *out[1:])
 
 class ScaleNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
