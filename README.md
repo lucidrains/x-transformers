@@ -810,6 +810,9 @@ model = TransformerWrapper(
         sandwich_norm = True # set this to True
     )
 )
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
 ```
 
 ### Normformer
@@ -882,6 +885,38 @@ model(x)
 ```
 
 The last change is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
+
+## Query-Key Normalization
+
+<img src="./images/cosine-sim-attention.png" width="400px"></img>
+
+This <a href="https://arxiv.org/abs/2010.04245">paper</a> proposes to l2 normalize the queries and keys along the head dimension before the dot product (cosine similarity), with the additional change of the scale being learned rather than static. The normalization prevents the attention operation from overflowing, a perennial problem when training transformers.
+
+This was validated at scale recently by the training of <a href="https://arxiv.org/abs/2111.09883">a 3B parameter vision transformer</a>. The SwinV2 paper also proposes to change the pre-layernorm to a post-layernorm for further stability.
+
+I have validated that this works just as well as dot product attention in an autoregressive setting, if one were to initialize the temperature as proposed in the QK-norm paper (as a function of the sequence length).
+
+You can use it as follows
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        use_qk_norm_attn = True, # set this to True
+        qk_norm_attn_seq_len = 1024 # set this to max_seq_len from above
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
 
 ## Miscellaneous
 
@@ -1288,6 +1323,28 @@ model(x, mask = mask) # (1, 1024, 100)
     year    = {2022},
     url     = {https://openreview.net/forum?id=GMYWzWztDx5},
     note    = {under review}
+}
+```
+
+```bibtex
+@misc{henry2020querykey,
+    title   = {Query-Key Normalization for Transformers},
+    author  = {Alex Henry and Prudhvi Raj Dachapally and Shubham Pawar and Yuxuan Chen},
+    year    = {2020},
+    eprint  = {2010.04245},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL}
+}
+```
+
+```bibtex
+@misc{liu2021swin,
+    title   = {Swin Transformer V2: Scaling Up Capacity and Resolution},
+    author  = {Ze Liu and Han Hu and Yutong Lin and Zhuliang Yao and Zhenda Xie and Yixuan Wei and Jia Ning and Yue Cao and Zheng Zhang and Li Dong and Furu Wei and Baining Guo},
+    year    = {2021},
+    eprint  = {2111.09883},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
 }
 ```
 

@@ -61,6 +61,9 @@ class equals():
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
+def l2norm(t):
+    return F.normalize(t, p = 2, dim = -1)
+
 # init helpers
 
 def init_zero_(layer):
@@ -425,10 +428,13 @@ class Attention(nn.Module):
         on_attn = False,
         gate_values = False,
         zero_init_output = False,
-        max_attend_past = None
+        max_attend_past = None,
+        qk_norm = False,
+        scale_init_value = None
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
+
         self.heads = heads
         self.causal = causal
         self.max_attend_past = max_attend_past
@@ -453,6 +459,12 @@ class Attention(nn.Module):
             self.to_v_gate = nn.Linear(dim, v_dim)
             nn.init.constant_(self.to_v_gate.weight, 0)
             nn.init.constant_(self.to_v_gate.bias, 1)
+
+        # cosine sim attention
+        self.qk_norm = qk_norm
+        if qk_norm:
+            scale_init_value = default(scale_init_value, -3) # if not provided, initialize as though it were sequence length of 1024
+            self.scale = nn.Parameter(torch.ones(1, heads, 1, 1) * scale_init_value)
 
         # talking heads
         self.talking_heads = talking_heads
@@ -498,7 +510,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, talking_heads, collab_heads, head_scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.collab_heads, self.head_scale, x.device, exists(context)
+        b, n, _, h, talking_heads, collab_heads, head_scale, scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.collab_heads, self.head_scale, self.scale, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -551,7 +563,11 @@ class Attention(nn.Module):
         if collab_heads:
             k = k.expand(-1, h, -1, -1)
 
-        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+        if self.qk_norm:
+            q, k = map(l2norm, (q, k))
+            scale = 1 / (self.scale.exp().clamp(min = 1e-2))
+
+        dots = einsum('b h i d, b h j d -> b h i j', q, k) * scale
         mask_value = max_neg_value(dots)
 
         if exists(prev_attn):
@@ -659,6 +675,8 @@ class AttentionLayers(nn.Module):
         scale_residual = False,
         shift_tokens = 0,
         sandwich_norm = False,
+        use_qk_norm_attn = False,
+        qk_norm_attn_seq_len = None,
         zero_init_branch_output = False,
         **kwargs
     ):
@@ -717,6 +735,12 @@ class AttentionLayers(nn.Module):
         if macaron:
             default_block = ('f',) + default_block
 
+        # qk normalization
+
+        if use_qk_norm_attn:
+            attn_scale_init_value = -math.log(math.log2(qk_norm_attn_seq_len ** 2 - qk_norm_attn_seq_len)) if exists(qk_norm_attn_seq_len) else None
+            attn_kwargs = {**attn_kwargs, 'qk_norm': True, 'scale_init_value': attn_scale_init_value}
+
         # zero init
 
         if zero_init_branch_output:
@@ -753,7 +777,9 @@ class AttentionLayers(nn.Module):
 
         # iterate and construct layers
 
-        for layer_type, layer_shift_tokens in zip(self.layer_types, shift_tokens):
+        for ind, (layer_type, layer_shift_tokens) in enumerate(zip(self.layer_types, shift_tokens)):
+            is_last_layer = ind == (len(self.layer_types) - 1)
+
             if layer_type == 'a':
                 layer = Attention(dim, heads = heads, causal = causal, **attn_kwargs)
             elif layer_type == 'c':
@@ -775,13 +801,18 @@ class AttentionLayers(nn.Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual)
 
-            if sandwich_norm:
-                norm = nn.ModuleList([norm_fn(), norm_fn()])
-            else:
-                norm = norm_fn()
+            pre_branch_norm = norm_fn() if sandwich_norm and not use_qk_norm_attn else None
+            post_branch_norm = norm_fn() if sandwich_norm or use_qk_norm_attn else None
+            post_main_norm = norm_fn() if not pre_norm and not is_last_layer else None
+
+            norms = nn.ModuleList([
+                pre_branch_norm,
+                post_branch_norm,
+                post_main_norm
+            ])
 
             self.layers.append(nn.ModuleList([
-                norm,
+                norms,
                 layer,
                 residual
             ]))
@@ -819,11 +850,10 @@ class AttentionLayers(nn.Module):
 
             residual = x
 
-            if self.sandwich_norm:
-                norm, postnorm = norm
+            pre_branch_norm, post_branch_norm, post_main_norm = norm
 
-            if self.pre_norm:
-                x = norm(x)
+            if exists(pre_branch_norm):
+                x = pre_branch_norm(x)
 
             if layer_type == 'a':
                 out, inter = block(x, mask = mask, attn_mask = attn_mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
@@ -832,8 +862,8 @@ class AttentionLayers(nn.Module):
             elif layer_type == 'f':
                 out = block(x)
 
-            if self.sandwich_norm:
-                out = postnorm(out)
+            if exists(post_branch_norm):
+                out = post_branch_norm(out)
 
             x = residual_fn(out, residual)
 
@@ -845,8 +875,8 @@ class AttentionLayers(nn.Module):
             elif layer_type == 'c' and self.cross_residual_attn:
                 prev_cross_attn = inter.pre_softmax_attn
 
-            if not self.pre_norm and not is_last:
-                x = norm(x)
+            if exists(post_main_norm):
+                x = post_main_norm(x)
 
         if return_hiddens:
             intermediates = LayerIntermediates(
