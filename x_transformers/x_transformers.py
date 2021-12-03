@@ -801,8 +801,10 @@ class AttentionLayers(nn.Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual)
 
-            pre_branch_norm = norm_fn() if sandwich_norm and not use_qk_norm_attn else None
-            post_branch_norm = norm_fn() if sandwich_norm or use_qk_norm_attn else None
+            layer_uses_qk_norm = use_qk_norm_attn and layer_type in ('a', 'c')
+
+            pre_branch_norm = norm_fn() if pre_norm and not layer_uses_qk_norm else None
+            post_branch_norm = norm_fn() if sandwich_norm or layer_uses_qk_norm else None
             post_main_norm = norm_fn() if not pre_norm and not is_last_layer else None
 
             norms = nn.ModuleList([

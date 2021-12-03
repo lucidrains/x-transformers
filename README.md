@@ -896,6 +896,8 @@ This was validated at scale recently by the training of <a href="https://arxiv.o
 
 I have validated that this works just as well as dot product attention in an autoregressive setting, if one were to initialize the temperature as proposed in the QK-norm paper (as a function of the sequence length).
 
+This flavor of attention also has <a href="https://arxiv.org/abs/2111.05498">a connection</a> to sparse distributed memory. <a href="https://www.youtube.com/watch?v=THIIk7LR9_8">[youtube talk]</a>
+
 You can use it as follows
 
 ```python
