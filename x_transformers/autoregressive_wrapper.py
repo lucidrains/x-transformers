@@ -1,9 +1,7 @@
 from math import ceil
-from functools import partial
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_sequence
 from entmax import entmax_bisect
 
 def exists(val):
