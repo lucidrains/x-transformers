@@ -965,6 +965,44 @@ mask = torch.ones(1, 1024).bool()
 model(x, mask = mask) # (1, 1024, 100)
 ```
 
+You can also train a transformer that accepts continuous values autoregressively easily, in the same scheme as done successfully in <a href="https://arxiv.org/abs/2112.05329">this paper</a>
+
+```python
+import torch
+from x_transformers import ContinuousTransformerWrapper, Decoder
+from x_transformers import ContinuousAutoregressiveWrapper
+
+model = ContinuousTransformerWrapper(
+    dim_in = 777,
+    dim_out = 777,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 12,
+        heads = 8
+    )
+)
+
+# wrap it with the continuous autoregressive wrapper
+
+model = ContinuousAutoregressiveWrapper(model)
+
+# mock data
+
+x = torch.randn((1, 1024, 777))
+mask = torch.ones(1, 1024).bool()
+
+# train on a lot of data above
+
+loss = model(x, mask = mask)
+loss.backward
+
+# then generate
+
+start_emb = torch.randn(1, 777)
+generated = model.generate(start_emb, 17) # (17, 777)
+```
+
 ## Citations
 
 ```bibtex
