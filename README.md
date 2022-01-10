@@ -246,6 +246,28 @@ model = TransformerWrapper(
 )
 ```
 
+### Root Mean Square Layer Normalization
+
+https://arxiv.org/abs/1910.07467
+
+The authors propose to replace layer normalization with a simpler alternative, without mean centering and the learned bias. An investigative paper found this to be the <a href="https://arxiv.org/abs/2102.11972">best performing normalization variant</a>. It was also used in Deepmind's latest large language models, <a href="https://deepmind.com/research/publications/2021/improving-language-models-by-retrieving-from-trillions-of-tokens">Retro</a> and <a href="https://arxiv.org/abs/2112.11446">Gopher</a>.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        use_rmsnorm = True # set to true to use for all layers
+    )
+)
+```
+
 ### GLU Variants Improve Transformer
 
 <img src="./images/ffglu.png"></img>
