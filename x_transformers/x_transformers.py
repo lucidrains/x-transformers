@@ -170,7 +170,7 @@ class RelativePositionBias(nn.Module):
         return qk_dots + (bias * self.scale)
 
 class AlibiPositionalBias(nn.Module):
-    def __init__(self, heads):
+    def __init__(self, heads, **kwargs):
         super().__init__()
         self.heads = heads
         slopes = torch.Tensor(self._get_slopes(heads))
@@ -208,23 +208,38 @@ class AlibiPositionalBias(nn.Module):
         return qk_dots + self.bias
 
 class LearnedAlibiPositionalBias(AlibiPositionalBias):
-    def __init__(self, heads):
+    def __init__(self, heads, bidirectional = False):
         super().__init__(heads)
-        self.learned_logslopes = nn.Parameter(torch.log(self.slopes))
+        los_slopes = torch.log(self.slopes)
+        self.learned_logslopes = nn.Parameter(los_slopes)
+
+        self.bidirectional = bidirectional
+        if self.bidirectional:
+            self.learned_logslopes_future = nn.Parameter(los_slopes)
 
     def forward(self, qk_dots):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
 
-        slopes = self.learned_logslopes.exp()
-        slopes = F.pad(slopes, (0, 0, 0, 0, 0, h - slopes.shape[1]))
+        def get_slopes(param):
+            return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[1]))
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
-            bias = self.bias[..., :j]
+            bias = self.bias[..., :i, :j]
         else:
-            bias = torch.arange(j, device = device)
+            i_arange = torch.arange(i, device = device)
+            j_arange = torch.arange(j, device = device)
+            bias = rearrange(i_arange, 'i -> 1 1 i 1') - rearrange(j_arange, 'j -> 1 1 1 j')
             self.register_buffer('bias', bias, persistent = False)
 
-        return qk_dots + (bias * slopes)
+        if self.bidirectional:
+            past_slopes = get_slopes(self.learned_logslopes)
+            future_slopes = get_slopes(self.learned_logslopes_future)
+            bias = torch.tril(bias * past_slopes) + torch.triu(bias * future_slopes)
+        else:
+            slopes = get_slopes(self.learned_logslopes)
+            bias = bias * slopes
+
+        return qk_dots + bias
 
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim):
@@ -704,9 +719,8 @@ class AttentionLayers(nn.Module):
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
-            assert causal, 'ALiBi currently does not work with non-autoregressive mode just yet'
-            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
-            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads)
+            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned or not causal else AlibiPositionalBias
+            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads, bidirectional = not causal)
         else:
             self.rel_pos = None
 
