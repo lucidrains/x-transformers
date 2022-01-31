@@ -234,6 +234,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         if self.bidirectional:
             past_slopes = get_slopes(self.learned_logslopes)
             future_slopes = get_slopes(self.learned_logslopes_future)
+            bias = bias.abs()
             bias = torch.tril(bias * past_slopes) + torch.triu(bias * future_slopes)
         else:
             slopes = get_slopes(self.learned_logslopes)
