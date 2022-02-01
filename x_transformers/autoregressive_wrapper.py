@@ -121,6 +121,18 @@ class AutoregressiveWrapper(nn.Module):
             mask = mask[:, :-1]
             kwargs['mask'] = mask
 
+        # if no attention mask is supplied, create a lower triangular one
+        attn_mask = kwargs.get('attn_mask', None)
+        if attn_mask is None:
+            attn_mask = torch.tril(
+                torch.full(
+                    size=(x.shape[0], 1, x.shape[1]-1, x.shape[1]-1),
+                    fill_value=True,
+                    device=x.device
+                )
+            )
+            kwargs['attn_mask'] = attn_mask
+
         out = self.net(xi, **kwargs)
         loss = F.cross_entropy(out.transpose(1, 2), xo, ignore_index = self.ignore_index)
         return loss
