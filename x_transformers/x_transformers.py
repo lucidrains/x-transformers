@@ -485,8 +485,8 @@ class Attention(nn.Module):
         # talking heads
         self.talking_heads = talking_heads
         if talking_heads:
-            self.pre_softmax_proj = nn.Parameter(torch.randn(heads, heads))
-            self.post_softmax_proj = nn.Parameter(torch.randn(heads, heads))
+            self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
+            self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
 
         # head scaling
         self.head_scale = head_scale
@@ -592,7 +592,7 @@ class Attention(nn.Module):
         pre_softmax_attn = dots.clone()
 
         if talking_heads:
-            dots = einsum('b h i j, h k -> b k i j', dots, self.pre_softmax_proj).contiguous()
+            dots = self.pre_softmax_talking_heads(dots)
 
         if exists(rel_pos):
             dots = rel_pos(dots)
@@ -639,7 +639,7 @@ class Attention(nn.Module):
         attn = self.dropout(attn)
 
         if talking_heads:
-            attn = einsum('b h i j, h k -> b k i j', attn, self.post_softmax_proj).contiguous()
+            attn = self.post_softmax_talking_heads(attn)
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
 
