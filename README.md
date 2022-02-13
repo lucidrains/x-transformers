@@ -241,7 +241,25 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        use_scalenorm = True # set to true to use for all layers
+        use_scalenorm = True # set to True to use for all layers
+    )
+)
+```
+
+You can also use the l2 normalized embeddings proposed as part of `fixnorm`. I have found it leads to improved convergence, when paired with small initialization (proposed by <a href="https://github.com/BlinkDL">BlinkDL</a>). The small initialization will be taken care of as long as `l2norm_embed` is set to `True`
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    l2norm_embed = True,    # set this to True for l2 normalized embedding + small init
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8
     )
 )
 ```

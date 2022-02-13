@@ -102,19 +102,33 @@ class ReluSquared(nn.Module):
     def forward(self, x):
         return F.relu(x) ** 2
 
+# embedding
+
+class TokenEmbedding(nn.Module):
+    def __init__(self, dim, num_tokens, l2norm_embed = False):
+        super().__init__()
+        self.l2norm_embed = l2norm_embed
+        self.emb = nn.Embedding(num_tokens, dim)
+
+    def forward(self, x):
+        token_emb = self.emb(x)
+        return l2norm(token_emb) if self.l2norm_embed else token_emb
+
 # positional embeddings
 
 class AbsolutePositionalEmbedding(nn.Module):
-    def __init__(self, dim, max_seq_len):
+    def __init__(self, dim, max_seq_len, l2norm_embed = False):
         super().__init__()
-        self.scale = dim ** -0.5
+        self.scale = dim ** -0.5 if not l2norm else 1.
+        self.l2norm_embed = l2norm_embed
         self.emb = nn.Embedding(max_seq_len, dim)
 
     def forward(self, x):
         n = torch.arange(x.shape[1], device = x.device)
         pos_emb = self.emb(n)
         pos_emb = rearrange(pos_emb, 'n d -> () n d')
-        return pos_emb * self.scale
+        pos_emb = pos_emb * self.scale
+        return l2norm(pos_emb) if self.l2norm_embed else pos_emb
 
 class FixedPositionalEmbedding(nn.Module):
     def __init__(self, dim):
@@ -985,7 +999,8 @@ class TransformerWrapper(nn.Module):
         emb_dropout = 0.,
         num_memory_tokens = None,
         tie_embedding = False,
-        use_pos_emb = True
+        use_pos_emb = True,
+        l2norm_embed = False
     ):
         super().__init__()
         assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
@@ -997,8 +1012,10 @@ class TransformerWrapper(nn.Module):
         self.max_mem_len = max_mem_len
         self.shift_mem_down = shift_mem_down
 
-        self.token_emb = nn.Embedding(num_tokens, emb_dim)
-        self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+        self.l2norm_embed = l2norm_embed
+        self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
+        self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed = l2norm_embed) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
@@ -1016,7 +1033,12 @@ class TransformerWrapper(nn.Module):
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
 
     def init_(self):
-        nn.init.kaiming_normal_(self.token_emb.weight)
+        if self.l2norm_embed:
+            nn.init.normal_(self.token_emb.emb.weight, std = 1e-5)
+            nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
+            return
+
+        nn.init.kaiming_normal_(self.token_emb.emb.weight)
 
     def forward(
         self,
@@ -1029,8 +1051,8 @@ class TransformerWrapper(nn.Module):
         **kwargs
     ):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
-        x = self.token_emb(x)
-        x = x + self.pos_emb(x)
+
+        x = self.token_emb(x) + self.pos_emb(x)
         x = self.emb_dropout(x)
 
         x = self.project_emb(x)
