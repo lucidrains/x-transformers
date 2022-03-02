@@ -761,6 +761,44 @@ model = TransformerWrapper(
 )
 ```
 
+### Dynamic Positional Bias
+
+<img src="./images/dynamic-pos-bias.png" width="150px"></img>
+
+This technique bears roots from the field of vision transformers, where researchers are trying to have relative positions generalize to larger resolutions (without having to retrain the entire network). It was used in two recent papers, <a href="https://arxiv.org/abs/2108.00154">CrossFormer</a>, as well as <a href="https://arxiv.org/abs/2111.09883">SwinV2</a>.
+
+<a href="https://github.com/cfoster0">Charles Foster</a> first tried this for a language model, and found that it works. Later on <a href="https://github.com/bob80333">Eric Engelhart</a> produced experimental results that show the same type of extrapolation holds, even for 1d sequences.
+
+Eric trained at sequence lengths of 128, and showed that it generalized well to 1024. In addition, he showed that linear positions was better than log (used in SwinV2), for language.
+
+Linear distances
+
+<img src="./images/dynamic-pos-bias-linear.png" width="400px"></img>
+
+Log distances
+
+<img src="./images/dynamic-pos-bias-log.png" width="400px"></img>
+
+You can use this type of relative position if you wish to train at smaller sequence lengths and have it generalize to longer ones, for both autoregressive and bidirectional models.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 256,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        dynamic_pos_bias = True,                # set this to True
+        dynamic_pos_bias_log_distance = False   # whether to use log distance, as in SwinV2
+    )
+)
+```
+
+
 ### ALiBi Positional Embedding
 
 <a href="https://ofir.io/train_short_test_long.pdf">This paper</a> proposes to simply apply a static linear bias to the attention matrix. The authors show this is not only effective as a relative positional encoding, but also allows the attention net to extrapolate to greater sequences length than what it was trained on, for autoregressive language models.
