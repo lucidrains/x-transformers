@@ -183,6 +183,46 @@ class RelativePositionBias(nn.Module):
         bias = rearrange(values, 'i j h -> () h i j')
         return qk_dots + (bias * self.scale)
 
+class DynamicPositionBias(nn.Module):
+    def __init__(self, dim, *, heads, depth, log_distance = False, norm = False):
+        super().__init__()
+        assert depth >= 1, 'depth for dynamic position bias MLP must be greater or equal to 1'
+        self.log_distance = log_distance
+
+        self.mlp = nn.ModuleList([])
+
+        self.mlp.append(nn.Sequential(
+            nn.Linear(1, dim),
+            nn.LayerNorm(dim) if norm else nn.Identity(),
+            nn.ReLU()
+        ))
+
+        for _ in range(depth - 1):
+            self.mlp.append(nn.Sequential(
+                nn.Linear(dim, dim),
+                nn.LayerNorm(dim) if norm else nn.Identity(),
+                nn.ReLU()
+            ))
+
+        self.mlp.append(nn.Linear(dim, heads))
+
+    def forward(self, qk_dots):
+        i, j, device, dtype = *qk_dots.shape[-2:], qk_dots.device, qk_dots.dtype
+
+        seq_arange = torch.arange(i, device = device, dtype = dtype)
+        context_arange = torch.arange(j, device = device, dtype = dtype)
+
+        bias = rearrange(seq_arange, 'i -> i 1 1') - rearrange(context_arange, 'j -> 1 j 1')
+
+        if self.log_distance:
+            bias = torch.sign(bias) * torch.log(bias.abs() + 1)  # log of distance is sign(rel_pos) * log(abs(rel_pos) + 1)
+
+        for layer in self.mlp:
+            bias = layer(bias)
+
+        bias = rearrange(bias, 'i j h -> h i j')
+        return qk_dots + bias
+
 class AlibiPositionalBias(nn.Module):
     def __init__(self, heads, **kwargs):
         super().__init__()
@@ -691,6 +731,10 @@ class AttentionLayers(nn.Module):
         rel_pos_bias = False,
         rel_pos_num_buckets = 32,
         rel_pos_max_distance = 128,
+        dynamic_pos_bias = False,
+        dynamic_pos_bias_log_distance = False,
+        dynamic_pos_bias_mlp_depth = 2,
+        dynamic_pos_bias_norm = False,
         position_infused_attn = False,
         rotary_pos_emb = False,
         rotary_emb_dim = None,
@@ -712,7 +756,7 @@ class AttentionLayers(nn.Module):
     ):
         super().__init__()
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
-        attn_kwargs, _ = groupby_prefix_and_trim('attn_', kwargs)
+        attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
 
@@ -729,15 +773,18 @@ class AttentionLayers(nn.Module):
         assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
 
+        # relative positional bias
+
+        self.rel_pos = None
         if rel_pos_bias:
             self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance)
+        elif dynamic_pos_bias:
+            self.rel_pos = DynamicPositionBias(dim = dim // 4, heads = heads, log_distance = dynamic_pos_bias_log_distance, depth = dynamic_pos_bias_mlp_depth, norm = dynamic_pos_bias_norm)
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
             alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned or not causal else AlibiPositionalBias
             self.rel_pos = alibi_pos_klass(heads = alibi_num_heads, bidirectional = not causal)
-        else:
-            self.rel_pos = None
 
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
         self.pre_norm = pre_norm
