@@ -783,6 +783,8 @@ Negative control - Sinusoidal
 
 <img src="./images/dynamic-pos-bias-sinusoidal.png" width="600px"></img>
 
+More of Eric's experimental results can be found <a href="https://github.com/bob80333/investigating_extrapolation">here</a>
+
 You can use this type of relative position if you wish to train at smaller sequence lengths and have it generalize to longer ones, for both autoregressive and bidirectional models.
 
 ```python
