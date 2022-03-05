@@ -64,6 +64,10 @@ def max_neg_value(tensor):
 def l2norm(t):
     return F.normalize(t, p = 2, dim = -1)
 
+def stable_softmax(t, dim = -1):
+    t = t - t.amax(dim = dim, keepdim = True).detach()
+    return F.softmax(t, dim = dim)
+
 # init helpers
 
 def init_zero_(layer):
@@ -207,19 +211,25 @@ class DynamicPositionBias(nn.Module):
         self.mlp.append(nn.Linear(dim, heads))
 
     def forward(self, qk_dots):
-        i, j, device, dtype = *qk_dots.shape[-2:], qk_dots.device, qk_dots.dtype
+        n, device, dtype = qk_dots.shape[-1], qk_dots.device, qk_dots.dtype
 
-        seq_arange = torch.arange(i, device = device, dtype = dtype)
-        context_arange = torch.arange(j, device = device, dtype = dtype)
+        # get the (n x n) matrix of distances
+        seq_arange = torch.arange(n, device = device)
+        context_arange = torch.arange(n, device = device)
+        indices = rearrange(seq_arange, 'i -> i 1') - rearrange(context_arange, 'j -> 1 j')
 
-        bias = rearrange(seq_arange, 'i -> i 1 1') - rearrange(context_arange, 'j -> 1 j 1')
+        # input to continuous positions MLP
+        pos = torch.arange(-n + 1, n, device = device, dtype = dtype)
+        pos = rearrange(pos, '... -> ... 1')
 
         if self.log_distance:
-            bias = torch.sign(bias) * torch.log(bias.abs() + 1)  # log of distance is sign(rel_pos) * log(abs(rel_pos) + 1)
+            pos = torch.sign(pos) * torch.log(pos.abs() + 1)  # log of distance is sign(rel_pos) * log(abs(rel_pos) + 1)
 
         for layer in self.mlp:
-            bias = layer(bias)
+            pos = layer(pos)
 
+        # get position biases
+        bias = pos[indices]
         bias = rearrange(bias, 'i j h -> h i j')
         return qk_dots + bias
 
@@ -551,7 +561,7 @@ class Attention(nn.Module):
         self.sparse_topk = sparse_topk
 
         # entmax
-        self.attn_fn = entmax15 if use_entmax15 else F.softmax
+        self.attn_fn = entmax15 if use_entmax15 else stable_softmax
 
         # add memory key / values
         self.num_mem_kv = num_mem_kv
