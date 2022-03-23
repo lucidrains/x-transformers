@@ -974,7 +974,7 @@ model(x)
 
 The last change is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
 
-## Query-Key Normalization
+### Query-Key Normalization
 
 <img src="./images/cosine-sim-attention.png" width="400px"></img>
 

@@ -386,13 +386,17 @@ class RMSNorm(nn.Module):
 # residual and residual gates
 
 class Residual(nn.Module):
-    def __init__(self, dim, scale_residual = False):
+    def __init__(self, dim, scale_residual = False, scale_residual_constant = 1.):
         super().__init__()
         self.residual_scale = nn.Parameter(torch.ones(dim)) if scale_residual else None
+        self.scale_residual_constant = scale_residual_constant
 
     def forward(self, x, residual):
         if exists(self.residual_scale):
             residual = residual * self.residual_scale
+
+        if self.scale_residual_constant != 1:
+            residual = residual * self.scale_residual_constant
 
         return x + residual
 
@@ -758,6 +762,7 @@ class AttentionLayers(nn.Module):
         pre_norm = True,
         gate_residual = False,
         scale_residual = False,
+        scale_residual_constant = 1.,
         shift_tokens = 0,
         sandwich_norm = False,
         use_qk_norm_attn = False,
@@ -886,7 +891,7 @@ class AttentionLayers(nn.Module):
                 layer = branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
-            residual = residual_fn(dim, scale_residual = scale_residual)
+            residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
             layer_uses_qk_norm = use_qk_norm_attn and layer_type in ('a', 'c')
 
