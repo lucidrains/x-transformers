@@ -946,7 +946,8 @@ class AttentionLayers(nn.Module):
             is_last = ind == (len(self.layers) - 1)
 
             if layer_type == 'a':
-                hiddens.append(x)
+                if return_hiddens:
+                    hiddens.append(x)
                 layer_mem = mems.pop(0) if mems else None
 
             residual = x
@@ -968,7 +969,7 @@ class AttentionLayers(nn.Module):
 
             x = residual_fn(out, residual)
 
-            if layer_type in ('a', 'c'):
+            if layer_type in ('a', 'c') and return_hiddens:
                 intermediates.append(inter)
 
             if layer_type == 'a' and self.residual_attn:
@@ -1105,7 +1106,8 @@ class TransformerWrapper(nn.Module):
     def init_(self):
         if self.l2norm_embed:
             nn.init.normal_(self.token_emb.emb.weight, std = 1e-5)
-            nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
+            if not isinstance(self.pos_emb, always):
+                nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
             return
 
         nn.init.kaiming_normal_(self.token_emb.emb.weight)
