@@ -1069,7 +1069,7 @@ class TransformerWrapper(nn.Module):
         emb_dropout = 0.,
         num_memory_tokens = None,
         tie_embedding = False,
-        use_pos_emb = True,
+        use_abs_pos_emb = True,
         l2norm_embed = False
     ):
         super().__init__()
@@ -1084,7 +1084,7 @@ class TransformerWrapper(nn.Module):
 
         self.l2norm_embed = l2norm_embed
         self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
-        self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed = l2norm_embed) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+        self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed = l2norm_embed) if (use_abs_pos_emb and not attn_layers.has_pos_emb) else always(0)
 
         self.emb_dropout = nn.Dropout(emb_dropout)
 
@@ -1168,7 +1168,7 @@ class ContinuousTransformerWrapper(nn.Module):
         dim_out = None,
         emb_dim = None,
         emb_dropout = 0.,
-        use_pos_emb = True
+        use_abs_pos_emb = True
     ):
         super().__init__()
         assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
@@ -1177,7 +1177,7 @@ class ContinuousTransformerWrapper(nn.Module):
 
         self.max_seq_len = max_seq_len
 
-        self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (use_pos_emb and not attn_layers.has_pos_emb) else always(0)
+        self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (use_abs_pos_emb and not attn_layers.has_pos_emb) else always(0)
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()

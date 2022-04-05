@@ -1027,6 +1027,31 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
+### Turning off absolute positional embedding
+
+A number of papers have hinted that causal transformers (`Decoder`) can learn absolute positions in the absence of added embeddings of any sort. This was recently thoroughly investigated <a href="https://arxiv.org/abs/2203.16634">here</a>. You can turn off the absolute positional embedding by setting `use_abs_pos_emb = False` in the `TransformerWrapper`
+
+Given <a href="https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html">PaLM</a>, the trend going forward may be to forgo absolute positional embedding (again, for causal transformers only), and add relative positional embeddings with RoPE, ALiBi, etc.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    use_abs_pos_emb = False,   # set this to False
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
 ## Miscellaneous
 
 Cross Attention
@@ -1492,6 +1517,16 @@ generated = model.generate(start_emb, 17) # (17, 777)
     eprint  = {2111.09883},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@article{Haviv2022TransformerLM,
+    title   = {Transformer Language Models without Positional Encodings Still Learn Positional Information},
+    author  = {Adi Haviv and Ori Ram and Ofir Press and Peter Izsak and Omer Levy},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2203.16634}
 }
 ```
 
