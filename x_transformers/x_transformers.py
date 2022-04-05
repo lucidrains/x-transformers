@@ -1105,7 +1105,8 @@ class TransformerWrapper(nn.Module):
     def init_(self):
         if self.l2norm_embed:
             nn.init.normal_(self.token_emb.emb.weight, std = 1e-5)
-            nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
+            if not isinstance(self.pos_emb, always):
+                nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
             return
 
         nn.init.kaiming_normal_(self.token_emb.emb.weight)
