@@ -310,6 +310,25 @@ model = TransformerWrapper(
 )
 ```
 
+The <a href="https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html">PaLM</a> language model also reported even better results than GEGLU using the Swish GLU variant. You can turn this on by setting two flags
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        ff_swish = True, # set this to True
+        ff_glu = True    # set to true to use for all feedforwards
+    )
+)
+``````
+
 ### ReLU²
 
 https://arxiv.org/abs/2109.08668
@@ -1473,6 +1492,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
     eprint  = {2111.09883},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
+}
+```
+
+```bibtex
+@article{chowdhery2022PaLM,
+  title   = {PaLM: Scaling Language Modeling with Pathways},
+  author  = {Chowdhery, Aakanksha et al},
+  year    = {2022}
 }
 ```
 

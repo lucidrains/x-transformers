@@ -464,6 +464,7 @@ class FeedForward(nn.Module):
         dim_out = None,
         mult = 4,
         glu = False,
+        swish = False,
         relu_squared = False,
         post_act_ln = False,
         dropout = 0.,
@@ -472,7 +473,13 @@ class FeedForward(nn.Module):
         super().__init__()
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
-        activation = ReluSquared() if relu_squared else nn.GELU()
+
+        if relu_squared:
+            activation = ReluSquared()
+        elif swish:
+            activation = nn.SiLU()
+        else:
+            activation = nn.GELU()
 
         project_in = nn.Sequential(
             nn.Linear(dim, inner_dim),
