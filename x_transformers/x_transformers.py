@@ -786,6 +786,7 @@ class AttentionLayers(nn.Module):
         self.dim = dim
         self.depth = depth
         self.layers = nn.ModuleList([])
+        self.causal = causal
 
         self.has_pos_emb = position_infused_attn or rel_pos_bias or rotary_pos_emb
         self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
@@ -926,7 +927,8 @@ class AttentionLayers(nn.Module):
         context_mask = None,
         attn_mask = None,
         mems = None,
-        return_hiddens = False
+        return_hiddens = False,
+        expected_seq_len = None,
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
 
@@ -939,7 +941,11 @@ class AttentionLayers(nn.Module):
 
         rotary_pos_emb = None
         if exists(self.rotary_pos_emb):
-            max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
+            if not self.training and self.causal:
+                assert expected_seq_len is not None, "To decode a transformer with rotary embeddings, you must specify an `expected_seq_len`"
+            elif expected_seq_len is None:
+                expected_seq_len = 0
+            max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)) + [expected_seq_len])
             rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, x.device)
 
         for ind, (layer_type, (norm, block, residual_fn)) in enumerate(zip(self.layer_types, self.layers)):
