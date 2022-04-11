@@ -443,13 +443,11 @@ model = TransformerWrapper(
 )
 ```
 
-### Collaborative Attention
+### One Write-head Is All You Need
 
-<img src="./images/collaborative-attention.png" width="500px"></img>
+https://arxiv.org/abs/1911.02150
 
-https://arxiv.org/abs/2006.16362
-
-Share redundent learned key/query projections accross heads. Collaborative attention reduces the number of parameters but requires slightly more memory and computation. A good compression factor to match the performance of the vanilla multi-head attention is between 0.25 and 0.5.
+Yet another Noam Shazeer paper (he's a legend) that proposes to only have one head for the key / values, but multi-headed queries. This paper was largely ignored for a while, but recently validated at scale in <a href="https://arxiv.org/abs/2203.07814">AlphaCode</a> as well as <a href="https://arxiv.org/abs/2204.02311">PaLM</a>. It has the property of being memory efficient when decoding extremely large language models. You can use it with one keyword argument as shown below.
 
 ```python
 import torch
@@ -462,8 +460,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_collab_heads = True,
-        attn_collab_compression = .3,
+        attn_one_kv_head = True
     )
 )
 ```
@@ -1245,17 +1242,6 @@ generated = model.generate(start_emb, 17) # (17, 777)
 ```
 
 ```bibtex
-@misc{cordonnier2020multihead,
-    title   = {Multi-Head Attention: Collaborate Instead of Concatenate},
-    author  = {Jean-Baptiste Cordonnier and Andreas Loukas and Martin Jaggi},
-    year    = {2020},
-    eprint  = {2006.16362},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.LG}
-}
-```
-
-```bibtex
 @misc{press2020improving,
     title   = {Improving Transformer Models by Reordering their Sublayers}, 
     author  = {Ofir Press and Noah A. Smith and Omer Levy},
@@ -1532,9 +1518,19 @@ generated = model.generate(start_emb, 17) # (17, 777)
 
 ```bibtex
 @article{chowdhery2022PaLM,
-  title   = {PaLM: Scaling Language Modeling with Pathways},
-  author  = {Chowdhery, Aakanksha et al},
-  year    = {2022}
+    title   = {PaLM: Scaling Language Modeling with Pathways},
+    author  = {Chowdhery, Aakanksha et al},
+    year    = {2022}
+}
+```
+
+```bibtex
+@article{Shazeer2019FastTD,
+    title   = {Fast Transformer Decoding: One Write-Head is All You Need},
+    author  = {Noam M. Shazeer},
+    journal = {ArXiv},
+    year    = {2019},
+    volume  = {abs/1911.02150}
 }
 ```
 

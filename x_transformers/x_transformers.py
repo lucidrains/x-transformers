@@ -316,8 +316,7 @@ class RotaryEmbedding(nn.Module):
     def forward(self, max_seq_len, device):
         t = torch.arange(max_seq_len, device = device).type_as(self.inv_freq)
         freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1)
-        return rearrange(emb, 'n d -> () () n d')
+        return torch.cat((freqs, freqs), dim=-1)
 
 def rotate_half(x):
     x = rearrange(x, '... (j d) -> ... j d', j = 2)
@@ -326,7 +325,7 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb(t, freqs):
     seq_len = t.shape[-2]
-    freqs = freqs[:, :, -seq_len:]
+    freqs = freqs[-seq_len:, :]
     return (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
 
 # norms
@@ -511,8 +510,6 @@ class Attention(nn.Module):
         causal = False,
         talking_heads = False,
         head_scale = False,
-        collab_heads = False,
-        collab_compression = .3,
         sparse_topk = None,
         use_entmax15 = False,
         num_mem_kv = 0,
@@ -522,7 +519,8 @@ class Attention(nn.Module):
         zero_init_output = False,
         max_attend_past = None,
         qk_norm = False,
-        scale_init_value = None
+        scale_init_value = None,
+        one_kv_head = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -531,24 +529,24 @@ class Attention(nn.Module):
         self.causal = causal
         self.max_attend_past = max_attend_past
 
-        qk_dim = v_dim = dim_head * heads
+        q_dim = k_dim = v_dim = out_dim = dim_head * heads
 
-        # collaborative heads
-        self.collab_heads = collab_heads
-        if self.collab_heads:
-            qk_dim = int(collab_compression * qk_dim)
-            self.collab_mixing = nn.Parameter(torch.randn(heads, qk_dim))
+        self.one_kv_head = one_kv_head
+        if one_kv_head:
+            k_dim = v_dim = dim_head
+            out_dim = v_dim * heads
 
-        self.to_q = nn.Linear(dim, qk_dim, bias = False)
-        self.to_k = nn.Linear(dim, qk_dim, bias = False)
+        self.to_q = nn.Linear(dim, q_dim, bias = False)
+        self.to_k = nn.Linear(dim, k_dim, bias = False)
         self.to_v = nn.Linear(dim, v_dim, bias = False)
 
         self.dropout = nn.Dropout(dropout)
 
+
         # add GLU gating for aggregated values, from alphafold2
         self.to_v_gate = None
         if gate_values:
-            self.to_v_gate = nn.Linear(dim, v_dim)
+            self.to_v_gate = nn.Linear(dim, out_dim)
             nn.init.constant_(self.to_v_gate.weight, 0)
             nn.init.constant_(self.to_v_gate.bias, 1)
 
@@ -583,7 +581,7 @@ class Attention(nn.Module):
 
         # attention on attention
         self.attn_on_attn = on_attn
-        self.to_out = nn.Sequential(nn.Linear(v_dim, dim * 2), nn.GLU()) if on_attn else nn.Linear(v_dim, dim)
+        self.to_out = nn.Sequential(nn.Linear(out_dim, dim * 2, bias = False), nn.GLU()) if on_attn else nn.Linear(out_dim, dim, bias = False)
 
         # init output projection 0
         if zero_init_output:
@@ -602,7 +600,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, talking_heads, collab_heads, head_scale, scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.collab_heads, self.head_scale, self.scale, x.device, exists(context)
+        b, n, _, h, talking_heads, head_scale, scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.head_scale, self.scale, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -623,12 +621,10 @@ class Attention(nn.Module):
         k = self.to_k(k_input)
         v = self.to_v(v_input)
 
-        if not collab_heads:
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
-        else:
-            q = einsum('b i d, h d -> b h i d', q, self.collab_mixing)
-            k = rearrange(k, 'b n d -> b () n d')
-            v = rearrange(v, 'b n (h d) -> b h n d', h = h)
+        q = rearrange(q, 'b n (h d) -> b h n d', h = h)
+
+        if not self.one_kv_head:
+            k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (k, v))
 
         if exists(rotary_pos_emb) and not has_context:
             l = rotary_pos_emb.shape[-1]
@@ -652,14 +648,13 @@ class Attention(nn.Module):
             if exists(input_mask):
                 input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
 
-        if collab_heads:
-            k = k.expand(-1, h, -1, -1)
-
         if self.qk_norm:
             q, k = map(l2norm, (q, k))
             scale = 1 / (self.scale.exp().clamp(min = 1e-2))
 
-        dots = einsum('b h i d, b h j d -> b h i j', q, k) * scale
+        kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
+
+        dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
         mask_value = max_neg_value(dots)
 
         if exists(prev_attn):
@@ -717,7 +712,7 @@ class Attention(nn.Module):
         if talking_heads:
             attn = self.post_softmax_talking_heads(attn)
 
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn, v)
 
         if head_scale:
             out = out * self.head_scale_params
