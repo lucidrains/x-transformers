@@ -520,7 +520,8 @@ class Attention(nn.Module):
         max_attend_past = None,
         qk_norm = False,
         scale_init_value = None,
-        one_kv_head = False
+        one_kv_head = False,
+        value_dim_head = None,
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -529,11 +530,14 @@ class Attention(nn.Module):
         self.causal = causal
         self.max_attend_past = max_attend_past
 
-        q_dim = k_dim = v_dim = out_dim = dim_head * heads
+        value_dim_head = default(value_dim_head, dim_head)
+        q_dim = k_dim = dim_head * heads
+        v_dim = out_dim = value_dim_head * heads
 
         self.one_kv_head = one_kv_head
         if one_kv_head:
-            k_dim = v_dim = dim_head
+            k_dim = dim_head
+            v_dim = value_dim_head
             out_dim = v_dim * heads
 
         self.to_q = nn.Linear(dim, q_dim, bias = False)
@@ -541,7 +545,6 @@ class Attention(nn.Module):
         self.to_v = nn.Linear(dim, v_dim, bias = False)
 
         self.dropout = nn.Dropout(dropout)
-
 
         # add GLU gating for aggregated values, from alphafold2
         self.to_v_gate = None
