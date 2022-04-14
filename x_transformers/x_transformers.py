@@ -1219,6 +1219,8 @@ class XTransformer(nn.Module):
         *,
         dim,
         tie_token_emb = False,
+        ignore_index=-100,
+        pad_value=0,
         **kwargs
     ):
         super().__init__()
@@ -1246,7 +1248,7 @@ class XTransformer(nn.Module):
         if tie_token_emb:
             self.decoder.token_emb = self.encoder.token_emb
 
-        self.decoder = AutoregressiveWrapper(self.decoder)
+        self.decoder = AutoregressiveWrapper(self.decoder, ignore_index=ignore_index, pad_value=pad_value)
 
     @torch.no_grad()
     def generate(self, seq_in, seq_out_start, seq_len, src_mask = None, src_attn_mask = None, **kwargs):
