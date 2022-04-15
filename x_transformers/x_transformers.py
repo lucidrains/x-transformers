@@ -1121,6 +1121,7 @@ class TransformerWrapper(nn.Module):
         **kwargs
     ):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
+        return_hiddens = return_mems | return_attn
 
         x = self.token_emb(x) + self.pos_emb(x)
         x = self.emb_dropout(x)
@@ -1139,7 +1140,10 @@ class TransformerWrapper(nn.Module):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
             mems = [*mems_r, *mems_l]
 
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
+        if return_hiddens:
+            x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
+        else:
+            x = self.attn_layers(x, mask = mask, mems = mems, **kwargs)
         x = self.norm(x)
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
