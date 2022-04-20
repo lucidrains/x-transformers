@@ -131,7 +131,8 @@ class AbsolutePositionalEmbedding(nn.Module):
         if not exists(pos):
             pos = torch.arange(x.shape[1], device = x.device)
         pos_emb = self.emb(pos)
-        pos_emb = rearrange(pos_emb, 'n d -> () n d')
+        if pos_emb.ndim == 2:
+            pos_emb = rearrange(pos_emb, 'n d -> () n d')
         pos_emb = pos_emb * self.scale
         return l2norm(pos_emb) if self.l2norm_embed else pos_emb
 
@@ -145,9 +146,11 @@ class FixedPositionalEmbedding(nn.Module):
         if not exists(pos):
             pos = torch.arange(x.shape[seq_dim], device = x.device)
         pos = pos.type_as(self.inv_freq) + offset
-        sinusoid_inp = torch.einsum('i , j -> i j', pos, self.inv_freq)
+        sinusoid_inp = pos.unsqueeze(-1) * self.inv_freq
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
-        return rearrange(emb, 'n d -> () n d')
+        if emb.ndim == 2:
+            emb = rearrange(emb, 'n d -> () n d')
+        return emb
 
 class RelativePositionBias(nn.Module):
     def __init__(self, scale, causal = False, num_buckets = 32, max_distance = 128, heads = 8):
