@@ -130,6 +130,7 @@ class AbsolutePositionalEmbedding(nn.Module):
     def forward(self, x, pos = None):
         if not exists(pos):
             pos = torch.arange(x.shape[1], device = x.device)
+
         pos_emb = self.emb(pos)
         pos_emb = pos_emb * self.scale
         return l2norm(pos_emb) if self.l2norm_embed else pos_emb
@@ -143,6 +144,7 @@ class FixedPositionalEmbedding(nn.Module):
     def forward(self, x, pos = None, seq_dim = 1, offset = 0):
         if not exists(pos):
             pos = torch.arange(x.shape[seq_dim], device = x.device)
+
         pos = pos.type_as(self.inv_freq) + offset
         sinusoid_inp = pos.unsqueeze(-1) * self.inv_freq
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
@@ -1125,7 +1127,14 @@ class TransformerWrapper(nn.Module):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
         return_hiddens = return_mems | return_attn
 
-        x = self.token_emb(x) + self.pos_emb(x, pos = pos)
+        # absolute positional embedding
+
+        external_pos_emb = exists(pos) and pos.dtype != torch.long
+        pos_emb = self.pos_emb(x, pos = pos) if not external_pos_emb else pos
+        x = self.token_emb(x) + pos_emb
+
+        # embedding dropout
+
         x = self.emb_dropout(x)
 
         x = self.project_emb(x)
