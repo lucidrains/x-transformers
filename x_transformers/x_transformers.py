@@ -127,10 +127,12 @@ class AbsolutePositionalEmbedding(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.emb = nn.Embedding(max_seq_len, dim)
 
-    def forward(self, x):
-        n = torch.arange(x.shape[1], device = x.device)
-        pos_emb = self.emb(n)
-        pos_emb = rearrange(pos_emb, 'n d -> () n d')
+    def forward(self, x, pos = None):
+        if not exists(pos):
+            pos = torch.arange(x.shape[1], device = x.device)
+        pos_emb = self.emb(pos)
+        if pos_emb.ndim == 2:
+            pos_emb = rearrange(pos_emb, 'n d -> () n d')
         pos_emb = pos_emb * self.scale
         return l2norm(pos_emb) if self.l2norm_embed else pos_emb
 
@@ -140,11 +142,15 @@ class FixedPositionalEmbedding(nn.Module):
         inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
 
-    def forward(self, x, seq_dim = 1, offset = 0):
-        t = torch.arange(x.shape[seq_dim], device = x.device).type_as(self.inv_freq) + offset
-        sinusoid_inp = torch.einsum('i , j -> i j', t, self.inv_freq)
+    def forward(self, x, pos = None, seq_dim = 1, offset = 0):
+        if not exists(pos):
+            pos = torch.arange(x.shape[seq_dim], device = x.device)
+        pos = pos.type_as(self.inv_freq) + offset
+        sinusoid_inp = pos.unsqueeze(-1) * self.inv_freq
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
-        return rearrange(emb, 'n d -> () n d')
+        if emb.ndim == 2:
+            emb = rearrange(emb, 'n d -> () n d')
+        return emb
 
 class RelativePositionBias(nn.Module):
     def __init__(self, scale, causal = False, num_buckets = 32, max_distance = 128, heads = 8):
@@ -1118,12 +1124,13 @@ class TransformerWrapper(nn.Module):
         return_mems = False,
         return_attn = False,
         mems = None,
+        pos = None,
         **kwargs
     ):
         b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
         return_hiddens = return_mems | return_attn
 
-        x = self.token_emb(x) + self.pos_emb(x)
+        x = self.token_emb(x) + self.pos_emb(x, pos = pos)
         x = self.emb_dropout(x)
 
         x = self.project_emb(x)
@@ -1198,12 +1205,13 @@ class ContinuousTransformerWrapper(nn.Module):
         mask = None,
         return_attn = False,
         mems = None,
+        pos = None,
         **kwargs
     ):
         b, n, _, device = *x.shape, x.device
 
         x = self.project_in(x)
-        x = x + self.pos_emb(x)
+        x = x + self.pos_emb(x, pos = pos)
         x = self.emb_dropout(x)
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
