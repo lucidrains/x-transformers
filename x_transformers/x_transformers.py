@@ -131,8 +131,6 @@ class AbsolutePositionalEmbedding(nn.Module):
         if not exists(pos):
             pos = torch.arange(x.shape[1], device = x.device)
         pos_emb = self.emb(pos)
-        if pos_emb.ndim == 2:
-            pos_emb = rearrange(pos_emb, 'n d -> () n d')
         pos_emb = pos_emb * self.scale
         return l2norm(pos_emb) if self.l2norm_embed else pos_emb
 
@@ -148,8 +146,6 @@ class FixedPositionalEmbedding(nn.Module):
         pos = pos.type_as(self.inv_freq) + offset
         sinusoid_inp = pos.unsqueeze(-1) * self.inv_freq
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
-        if emb.ndim == 2:
-            emb = rearrange(emb, 'n d -> () n d')
         return emb
 
 class RelativePositionBias(nn.Module):
@@ -190,7 +186,7 @@ class RelativePositionBias(nn.Module):
         rel_pos = k_pos[None, :] - q_pos[:, None]
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
-        bias = rearrange(values, 'i j h -> () h i j')
+        bias = rearrange(values, 'i j h -> h i j')
         return qk_dots + (bias * self.scale)
 
 class DynamicPositionBias(nn.Module):
@@ -245,7 +241,7 @@ class AlibiPositionalBias(nn.Module):
         super().__init__()
         self.heads = heads
         slopes = torch.Tensor(self._get_slopes(heads))
-        slopes = rearrange(slopes, 'h -> () h () ()')
+        slopes = rearrange(slopes, 'h -> h 1 1')
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
 
@@ -269,7 +265,6 @@ class AlibiPositionalBias(nn.Module):
             return qk_dots + self.bias[..., :j]
 
         bias = torch.arange(j, device = device)
-        bias = rearrange(bias, 'j -> () () () j')
         bias = bias * self.slopes
 
         num_heads_unalibied = h - bias.shape[1]
@@ -646,8 +641,8 @@ class Attention(nn.Module):
             q_mask = default(mask, lambda: torch.ones((b, n), device = device).bool())
             k_mask = q_mask if not exists(context) else context_mask
             k_mask = default(k_mask, lambda: torch.ones((b, k.shape[-2]), device = device).bool())
-            q_mask = rearrange(q_mask, 'b i -> b () i ()')
-            k_mask = rearrange(k_mask, 'b j -> b () () j')
+            q_mask = rearrange(q_mask, 'b i -> b 1 i 1')
+            k_mask = rearrange(k_mask, 'b j -> b 1 1 j')
             input_mask = q_mask * k_mask
 
         if self.num_mem_kv > 0:
@@ -684,16 +679,16 @@ class Attention(nn.Module):
         if exists(attn_mask):
             assert 2 <= attn_mask.ndim <= 4, 'attention mask must have greater than 2 dimensions but less than or equal to 4'
             if attn_mask.ndim == 2:
-                attn_mask = rearrange(attn_mask, 'i j -> () () i j')
+                attn_mask = rearrange(attn_mask, 'i j -> 1 1 i j')
             elif attn_mask.ndim == 3:
-                attn_mask = rearrange(attn_mask, 'h i j -> () h i j')
+                attn_mask = rearrange(attn_mask, 'h i j -> 1 h i j')
             dots.masked_fill_(~attn_mask, mask_value)
 
         if exists(self.max_attend_past):
             i, j = dots.shape[-2:]
             range_q = torch.arange(j - i, j, device = device)
             range_k = torch.arange(j, device = device)
-            dist = rearrange(range_q, 'i -> () () i ()') - rearrange(range_k, 'j -> () () () j')
+            dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
             mask = dist > self.max_attend_past
             dots.masked_fill_(mask, mask_value)
             del mask
@@ -701,7 +696,7 @@ class Attention(nn.Module):
         if self.causal:
             i, j = dots.shape[-2:]
             r = torch.arange(i, device = device)
-            mask = rearrange(r, 'i -> () () i ()') < rearrange(r, 'j -> () () () j')
+            mask = rearrange(r, 'i -> 1 1 i 1') < rearrange(r, 'j -> 1 1 1 j')
             mask = F.pad(mask, (j - i, 0), value = False)
             dots.masked_fill_(mask, mask_value)
             del mask
