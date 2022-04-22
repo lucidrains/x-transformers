@@ -470,6 +470,7 @@ class FeedForward(nn.Module):
         relu_squared = False,
         post_act_ln = False,
         dropout = 0.,
+        no_bias = False,
         zero_init_output = False
     ):
         super().__init__()
@@ -484,7 +485,7 @@ class FeedForward(nn.Module):
             activation = nn.GELU()
 
         project_in = nn.Sequential(
-            nn.Linear(dim, inner_dim),
+            nn.Linear(dim, inner_dim, bias = not no_bias),
             activation
         ) if not glu else GLU(dim, inner_dim, activation)
 
@@ -492,7 +493,7 @@ class FeedForward(nn.Module):
             project_in,
             nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
             nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim_out)
+            nn.Linear(inner_dim, dim_out, bias = not no_bias)
         )
 
         # init last linear layer to 0
