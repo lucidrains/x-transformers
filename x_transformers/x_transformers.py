@@ -348,21 +348,6 @@ class Scale(nn.Module):
 
         return (scale_fn(out[0]), *out[1:])
 
-class Rezero(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-        self.g = nn.Parameter(torch.zeros(1))
-
-    def forward(self, x, **kwargs):
-        out = self.fn(x, **kwargs)
-        rezero_fn = lambda t: t * self.g
-
-        if not isinstance(out, tuple):
-            return rezero_fn(out)
-
-        return (rezero_fn(out[0]), *out[1:])
-
 class ScaleNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
         super().__init__()
@@ -748,7 +733,6 @@ class AttentionLayers(nn.Module):
         only_cross = False,
         use_scalenorm = False,
         use_rmsnorm = False,
-        use_rezero = False,
         alibi_pos_bias = False,
         alibi_num_heads = None,
         alibi_learned = False,
@@ -823,9 +807,6 @@ class AttentionLayers(nn.Module):
         norm_class = RMSNorm if use_rmsnorm else norm_class
         norm_fn = partial(norm_class, dim)
 
-        norm_fn = nn.Identity if use_rezero else norm_fn
-        branch_fn = Rezero if use_rezero else None
-
         if cross_attend and not only_cross:
             default_block = ('a', 'c', 'f')
         elif cross_attend and only_cross:
@@ -895,9 +876,6 @@ class AttentionLayers(nn.Module):
                 shift_range_upper = layer_shift_tokens + 1
                 shift_range_lower = -layer_shift_tokens if not causal else 0
                 layer = ShiftTokens(range(shift_range_lower, shift_range_upper), layer)
-
-            if exists(branch_fn):
-                layer = branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
