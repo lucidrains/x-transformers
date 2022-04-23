@@ -351,32 +351,6 @@ model = TransformerWrapper(
 )
 ```
 
-### Rezero Is All You Need
-
-<img src="./images/rezero.png"></img>
-
-https://arxiv.org/abs/2003.04887
-
-This paper proposes to do away with normalization altogether, and instead gate the output of each branch with a single learned scalar, initialized at zero. They demonstrate convergence for very deep networks, convolution or attention, all without normalization.
-
-I have had good results on usual datasets, but had met trouble with convergence on large datasets (GPT3 sized datasets). However, enough researchers have told me they had positive experiences with this that I decided to include it. If you run into trouble, please use Scalenorm instead.
-
-```python
-import torch
-from x_transformers import TransformerWrapper, Decoder
-
-model = TransformerWrapper(
-    num_tokens = 20000,
-    max_seq_len = 1024,
-    attn_layers = Decoder(
-        dim = 512,
-        depth = 6,
-        heads = 8,
-        use_rezero = True # set to true to use for all layers
-    )
-)
-```
-
 ### Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection
 
 <img src="./images/topk-attention.png" width="500px"></img>
@@ -1176,15 +1150,6 @@ generated = model.generate(start_emb, 17) # (17, 777)
     author  = {Noam Shazeer},
     year    = {2020},
     url     = {https://arxiv.org/abs/2002.05202}    
-}
-```
-
-```bibtex
-@misc{bachlechner2020rezero,
-    title   = {ReZero is All You Need: Fast Convergence at Large Depth},
-    author  = {Thomas Bachlechner and Bodhisattwa Prasad Majumder and Huanru Henry Mao and Garrison W. Cottrell and Julian McAuley},
-    year    = {2020},
-    url     = {https://arxiv.org/abs/2003.04887}
 }
 ```
 
