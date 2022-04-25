@@ -269,7 +269,7 @@ class AlibiPositionalBias(nn.Module):
         bias = torch.arange(j, device = device)
         bias = bias * self.slopes
 
-        num_heads_unalibied = h - bias.shape[1]
+        num_heads_unalibied = h - bias.shape[0]
         bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
 
         self.register_buffer('bias', bias, persistent = False)
@@ -289,7 +289,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
 
         def get_slopes(param):
-            return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[1]))
+            return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[0]))
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
             bias = self.bias[..., :i, :j]
