@@ -409,6 +409,8 @@ class GRUGating(nn.Module):
 def shift(t, amount, mask = None):
     if amount == 0:
         return t
+    else:
+        amount = min(amount, t.shape[1])
 
     if exists(mask):
         t = t.masked_fill(~mask[..., None], 0.)
