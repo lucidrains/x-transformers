@@ -246,6 +246,12 @@ class AlibiPositionalBias(nn.Module):
         slopes = rearrange(slopes, 'h -> h 1 1')
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
+    
+    def get_bias(self, i, j, device):
+        i_arange = torch.arange(i, device = device)
+        j_arange = torch.arange(j, device = device)
+        bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 1 j') - rearrange(i_arange, 'i -> 1 1 i 1'))
+        return bias
 
     @staticmethod
     def _get_slopes(heads):
@@ -265,25 +271,21 @@ class AlibiPositionalBias(nn.Module):
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
             return qk_dots + self.bias[..., :j]
+        
+        if not exists(self.bias):
+            bias = self.get_bias(i, j, device)
+            bias = bias * self.slopes
 
-        bias = torch.arange(j, device = device)
-        bias = bias * self.slopes
-
-        num_heads_unalibied = h - bias.shape[0]
-        bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
-
-        self.register_buffer('bias', bias, persistent = False)
+            num_heads_unalibied = h - bias.shape[-3]
+            bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
+            self.register_buffer('bias', bias, persistent = False)
         return qk_dots + self.bias
 
 class LearnedAlibiPositionalBias(AlibiPositionalBias):
-    def __init__(self, heads, bidirectional = False):
+    def __init__(self, heads):
         super().__init__(heads)
         log_slopes = torch.log(self.slopes)
         self.learned_logslopes = nn.Parameter(log_slopes)
-
-        self.bidirectional = bidirectional
-        if self.bidirectional:
-            self.learned_logslopes_future = nn.Parameter(log_slopes)
 
     def forward(self, qk_dots):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
@@ -294,19 +296,11 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         if exists(self.bias) and self.bias.shape[-1] >= j:
             bias = self.bias[..., :i, :j]
         else:
-            i_arange = torch.arange(i, device = device)
-            j_arange = torch.arange(j, device = device)
-            bias = rearrange(j_arange, 'j -> 1 1 1 j') - rearrange(i_arange, 'i -> 1 1 i 1')
+            bias = self.get_bias(i, j, device)
             self.register_buffer('bias', bias, persistent = False)
 
-        if self.bidirectional:
-            past_slopes = get_slopes(self.learned_logslopes)
-            future_slopes = get_slopes(self.learned_logslopes_future)
-            bias = bias.abs()
-            bias = torch.tril(bias * past_slopes) + torch.triu(bias * future_slopes)
-        else:
-            slopes = get_slopes(self.learned_logslopes)
-            bias = bias * slopes
+        slopes = get_slopes(self.learned_logslopes)
+        bias = bias * slopes
 
         return qk_dots + bias
 
