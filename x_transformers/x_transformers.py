@@ -293,12 +293,13 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         def get_slopes(param):
             return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[0]))
 
-        if exists(self.bias) and self.bias.shape[-1] >= j:
-            bias = self.bias[..., :i, :j]
-        else:
+        if not exists(self.bias):
             bias = self.get_bias(i, j, device)
             self.register_buffer('bias', bias, persistent = False)
-
+        if self.bias.shape[-1] >= j:
+            bias = self.bias[..., :i, :j]
+        else:
+            bias = self.bias
         slopes = get_slopes(self.learned_logslopes)
         bias = bias * slopes
 
@@ -788,8 +789,8 @@ class AttentionLayers(nn.Module):
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
-            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned or not causal else AlibiPositionalBias
-            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads, bidirectional = not causal)
+            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
+            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads)
 
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
         self.pre_norm = pre_norm
