@@ -250,7 +250,7 @@ class AlibiPositionalBias(nn.Module):
     def get_bias(self, i, j, device):
         i_arange = torch.arange(i, device = device)
         j_arange = torch.arange(j, device = device)
-        bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 1 j') - rearrange(i_arange, 'i -> 1 1 i 1'))
+        bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 j') - rearrange(i_arange, 'i -> 1 i 1'))
         return bias
 
     @staticmethod
@@ -270,15 +270,15 @@ class AlibiPositionalBias(nn.Module):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
-            return qk_dots + self.bias[..., :j]
-        
-        if not exists(self.bias):
-            bias = self.get_bias(i, j, device)
-            bias = bias * self.slopes
+            return qk_dots + self.bias[..., :i, :j]
 
-            num_heads_unalibied = h - bias.shape[-3]
-            bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
-            self.register_buffer('bias', bias, persistent = False)
+        bias = self.get_bias(i, j, device)
+        bias = bias * self.slopes
+
+        num_heads_unalibied = h - bias.shape[0]
+        bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
+        self.register_buffer('bias', bias, persistent=False)
+
         return qk_dots + self.bias
 
 class LearnedAlibiPositionalBias(AlibiPositionalBias):
@@ -293,13 +293,12 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         def get_slopes(param):
             return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[0]))
 
-        if not exists(self.bias):
-            bias = self.get_bias(i, j, device)
-            self.register_buffer('bias', bias, persistent = False)
-        if self.bias.shape[-1] >= j:
+        if exists(self.bias) and self.bias.shape[-1] >= j:
             bias = self.bias[..., :i, :j]
         else:
-            bias = self.bias
+            bias = self.get_bias(i, j, device)
+            self.register_buffer('bias', bias, persistent=False)
+
         slopes = get_slopes(self.learned_logslopes)
         bias = bias * slopes
 
