@@ -3,12 +3,13 @@ from setuptools import setup, find_packages
 setup(
   name = 'x-transformers',
   packages = find_packages(exclude=['examples']),
-  version = '0.28.3',
+  version = '0.28.4',
   license='MIT',
   description = 'X-Transformers - Pytorch',
   author = 'Phil Wang',
   author_email = 'lucidrains@gmail.com',
   url = 'https://github.com/lucidrains/x-transformers',
+  long_description_content_type = 'text/markdown',
   keywords = [
     'artificial intelligence',
     'attention mechanism',

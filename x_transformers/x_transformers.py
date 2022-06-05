@@ -506,6 +506,7 @@ class Attention(nn.Module):
         qk_norm = False,
         scale_init_value = None,
         one_kv_head = False,
+        shared_kv = False,
         value_dim_head = None,
     ):
         super().__init__()
@@ -527,8 +528,12 @@ class Attention(nn.Module):
 
         self.to_q = nn.Linear(dim, q_dim, bias = False)
         self.to_k = nn.Linear(dim, k_dim, bias = False)
-        self.to_v = nn.Linear(dim, v_dim, bias = False)
 
+        # shared key / values, for further memory savings during inference
+        assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
+        self.to_v = nn.Linear(dim, v_dim, bias = False) if not shared_kv else None
+
+        # dropout
         self.dropout = nn.Dropout(dropout)
 
         # add GLU gating for aggregated values, from alphafold2
@@ -607,7 +612,7 @@ class Attention(nn.Module):
 
         q = self.to_q(q_input)
         k = self.to_k(k_input)
-        v = self.to_v(v_input)
+        v = self.to_v(v_input) if exists(self.to_v) else k
 
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
