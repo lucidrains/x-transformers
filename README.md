@@ -310,7 +310,7 @@ model = TransformerWrapper(
 )
 ```
 
-The <a href="https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html">PaLM</a> language model also reported even better results than GEGLU using the Swish GLU variant. You can turn this on by setting two flags
+The <a href="https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html">PaLM</a> language model also chose to use the Swish GLU variant. You can turn this on by setting two flags
 
 ```python
 import torch

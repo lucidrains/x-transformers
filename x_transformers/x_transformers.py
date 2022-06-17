@@ -466,7 +466,7 @@ class FeedForward(nn.Module):
             activation = nn.GELU()
 
         project_in = nn.Sequential(
-            nn.Linear(dim, inner_dim, bias = not no_bias),
+            # nn.Linear(dim, inner_dim, bias = not no_bias),
             activation
         ) if not glu else GLU(dim, inner_dim, activation)
 
@@ -482,6 +482,7 @@ class FeedForward(nn.Module):
             init_zero_(self.net[-1])
 
     def forward(self, x):
+        x = x @ self.net[-1].weight
         return self.net(x)
 
 # attention.
@@ -527,11 +528,10 @@ class Attention(nn.Module):
             out_dim = v_dim * heads
 
         self.to_q = nn.Linear(dim, q_dim, bias = False)
-        self.to_k = nn.Linear(dim, k_dim, bias = False)
+        self.to_k = nn.Linear(dim, k_dim * 2, bias = False)
 
         # shared key / values, for further memory savings during inference
-        assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
-        self.to_v = nn.Linear(dim, v_dim, bias = False) if not shared_kv else None
+        self.to_v = nn.Linear(dim, v_dim, bias = False)
 
         # dropout
         self.dropout = nn.Dropout(dropout)
@@ -612,7 +612,7 @@ class Attention(nn.Module):
 
         q = self.to_q(q_input)
         k = self.to_k(k_input)
-        v = self.to_v(v_input) if exists(self.to_v) else k
+        v = self.to_v(v_input)
 
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
@@ -647,7 +647,13 @@ class Attention(nn.Module):
 
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
-        dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+        k = rearrange(k, 'b h n (r d) -> b h n r d', r = 2)
+        dots = einsum(f'b h i d, b h j r d -> b h i j r', q, k) * scale
+
+        # dots, dots_gate = dots.unbind(dim = -1)
+        dots = dots[..., 0]
+        # dots = dots * dots_gate.sigmoid()
+
         mask_value = max_neg_value(dots)
 
         if exists(prev_attn):
