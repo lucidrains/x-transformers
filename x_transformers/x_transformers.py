@@ -1001,6 +1001,7 @@ class ViTransformerWrapper(nn.Module):
         channels = 3,
         num_classes = None,
         dropout = 0.,
+        post_emb_norm = False,
         emb_dropout = 0.
     ):
         super().__init__()
@@ -1014,6 +1015,7 @@ class ViTransformerWrapper(nn.Module):
 
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
         self.patch_to_embedding = nn.Linear(patch_dim, dim)
+        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.dropout = nn.Dropout(emb_dropout)
 
         self.attn_layers = attn_layers
@@ -1032,6 +1034,8 @@ class ViTransformerWrapper(nn.Module):
         n = x.shape[1]
 
         x = x + self.pos_embedding[:, :n]
+
+        x = self.post_emb_norm(x)
         x = self.dropout(x)
 
         x = self.attn_layers(x)
@@ -1173,6 +1177,7 @@ class ContinuousTransformerWrapper(nn.Module):
         dim_in = None,
         dim_out = None,
         emb_dim = None,
+        post_emb_norm = False,
         emb_dropout = 0.,
         use_abs_pos_emb = True
     ):
@@ -1184,6 +1189,8 @@ class ContinuousTransformerWrapper(nn.Module):
         self.max_seq_len = max_seq_len
 
         self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len) if (use_abs_pos_emb and not attn_layers.has_pos_emb) else always(0)
+
+        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
@@ -1208,6 +1215,7 @@ class ContinuousTransformerWrapper(nn.Module):
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
 
+        x = self.post_emb_norm(x)
         x = self.emb_dropout(x)
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
