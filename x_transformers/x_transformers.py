@@ -508,7 +508,7 @@ class Attention(nn.Module):
         scale_init_value = None,
         one_kv_head = False,
         shared_kv = False,
-        value_dim_head = None,
+        value_dim_head = None
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -1054,6 +1054,7 @@ class TransformerWrapper(nn.Module):
         max_mem_len = 0.,
         shift_mem_down = 0,
         emb_dropout = 0.,
+        post_emb_norm = False,
         num_memory_tokens = None,
         tie_embedding = False,
         use_abs_pos_emb = True,
@@ -1073,6 +1074,7 @@ class TransformerWrapper(nn.Module):
         self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
         self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed = l2norm_embed) if (use_abs_pos_emb and not attn_layers.has_pos_emb) else always(0)
 
+        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
@@ -1117,6 +1119,10 @@ class TransformerWrapper(nn.Module):
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
+
+        # post embedding norm, purportedly leads to greater stabilization
+
+        x = self.post_emb_norm(x)
 
         # embedding dropout
 
@@ -1201,6 +1207,7 @@ class ContinuousTransformerWrapper(nn.Module):
 
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
+
         x = self.emb_dropout(x)
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)

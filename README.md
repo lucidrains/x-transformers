@@ -264,6 +264,26 @@ model = TransformerWrapper(
 )
 ```
 
+Along the same lines of l2 normalized embeddings, Huggingface's <a href="https://huggingface.co/bigscience/bloom">175B parameter BLOOM</a> also places a layernorm right after the embeddings and just before the tokens enter the attention layers. This was corroborated by Yandex's <a href="https://github.com/yandex/YaLM-100B">100B parameter YaLM</a> to stabilize training.
+
+It is recommended you either have either `l2norm_embed` or `post_emb_norm` set to `True` but not both, as they probably serve the same purpose.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    post_emb_norm = True,    # set this to True to layernorm summed token + pos embeddings
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8
+    )
+)
+```
+
 ### Root Mean Square Layer Normalization
 
 https://arxiv.org/abs/1910.07467
