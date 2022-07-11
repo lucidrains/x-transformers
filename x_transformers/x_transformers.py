@@ -504,7 +504,7 @@ class Attention(nn.Module):
         zero_init_output = False,
         max_attend_past = None,
         qk_norm = False,
-        scale_init_value = None,
+        qk_norm_max_scale = 20,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None
@@ -546,8 +546,8 @@ class Attention(nn.Module):
         # cosine sim attention
         self.qk_norm = qk_norm
         if qk_norm:
-            scale_init_value = default(scale_init_value, -3) # if not provided, initialize as though it were sequence length of 1024
-            self.scale = nn.Parameter(torch.ones(1, heads, 1, 1) * scale_init_value)
+            self.scale = nn.Parameter(torch.ones(1, heads, 1, 1))
+            self.qk_norm_max_scale = qk_norm_max_scale
 
         # talking heads
         self.talking_heads = talking_heads
@@ -643,7 +643,7 @@ class Attention(nn.Module):
 
         if self.qk_norm:
             q, k = map(l2norm, (q, k))
-            scale = 1 / (self.scale.exp().clamp(min = 1e-2))
+            scale = self.scale.sigmoid() * self.qk_norm_max_scale
 
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
@@ -760,7 +760,6 @@ class AttentionLayers(nn.Module):
         shift_tokens = 0,
         sandwich_norm = False,
         use_qk_norm_attn = False,
-        qk_norm_attn_seq_len = None,
         zero_init_branch_output = False,
         **kwargs
     ):
@@ -821,8 +820,7 @@ class AttentionLayers(nn.Module):
         # qk normalization
 
         if use_qk_norm_attn:
-            attn_scale_init_value = -math.log(math.log2(qk_norm_attn_seq_len ** 2 - qk_norm_attn_seq_len)) if exists(qk_norm_attn_seq_len) else None
-            attn_kwargs = {**attn_kwargs, 'qk_norm': True, 'scale_init_value': attn_scale_init_value}
+            attn_kwargs = {**attn_kwargs, 'qk_norm': True}
 
         # zero init
 

@@ -996,6 +996,8 @@ I have validated that this works just as well as dot product attention in an aut
 
 This flavor of attention also has <a href="https://arxiv.org/abs/2111.05498">a connection</a> to sparse distributed memory. <a href="https://www.youtube.com/watch?v=THIIk7LR9_8">[youtube talk]</a>
 
+Update: In my own experiments, simply bounding the scale from a range from 0 to 20 using a sigmoid performed better.
+
 You can use it as follows
 
 ```python
@@ -1009,8 +1011,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        use_qk_norm_attn = True, # set this to True
-        qk_norm_attn_seq_len = 1024 # set this to max_seq_len from above
+        use_qk_norm_attn = True # set this to True
     )
 )
 
