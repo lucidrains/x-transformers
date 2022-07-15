@@ -61,8 +61,10 @@ class equals():
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
-def l2norm(t):
-    return F.normalize(t, p = 2, dim = -1)
+def l2norm(t, groups = 1):
+    t = rearrange(t, '... (g d) -> ... g d', g = groups)
+    t = F.normalize(t, p = 2, dim = -1)
+    return rearrange(t, '... g d -> ... (g d)')
 
 def stable_softmax(t, dim = -1):
     t = t - t.amax(dim = dim, keepdim = True).detach()
@@ -504,7 +506,7 @@ class Attention(nn.Module):
         zero_init_output = False,
         max_attend_past = None,
         qk_norm = False,
-        qk_norm_max_scale = 20,
+        qk_norm_groups = 1,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None
@@ -545,9 +547,9 @@ class Attention(nn.Module):
 
         # cosine sim attention
         self.qk_norm = qk_norm
-        if qk_norm:
-            self.scale = nn.Parameter(torch.ones(1, heads, 1, 1))
-            self.qk_norm_max_scale = qk_norm_max_scale
+        self.qk_norm_groups = qk_norm_groups
+        assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
+        assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
 
         # talking heads
         self.talking_heads = talking_heads
@@ -642,8 +644,9 @@ class Attention(nn.Module):
                 input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
 
         if self.qk_norm:
-            q, k = map(l2norm, (q, k))
-            scale = self.scale.sigmoid() * self.qk_norm_max_scale
+            qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
+            q, k = map(qk_l2norm, (q, k))
+            scale = 1.
 
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
