@@ -762,7 +762,6 @@ class AttentionLayers(nn.Module):
         scale_residual_constant = 1.,
         shift_tokens = 0,
         sandwich_norm = False,
-        use_qk_norm_attn = False,
         zero_init_branch_output = False,
         **kwargs
     ):
@@ -819,11 +818,6 @@ class AttentionLayers(nn.Module):
 
         if macaron:
             default_block = ('f',) + default_block
-
-        # qk normalization
-
-        if use_qk_norm_attn:
-            attn_kwargs = {**attn_kwargs, 'qk_norm': True}
 
         # zero init
 
@@ -882,10 +876,8 @@ class AttentionLayers(nn.Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
-            layer_uses_qk_norm = use_qk_norm_attn and layer_type in ('a', 'c')
-
-            pre_branch_norm = norm_fn() if pre_norm and not layer_uses_qk_norm else None
-            post_branch_norm = norm_fn() if sandwich_norm or layer_uses_qk_norm else None
+            pre_branch_norm = norm_fn() if pre_norm else None
+            post_branch_norm = norm_fn() if sandwich_norm else None
             post_main_norm = norm_fn() if not pre_norm and not is_last_layer else None
 
             norms = nn.ModuleList([
