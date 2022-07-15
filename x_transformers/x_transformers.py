@@ -61,8 +61,10 @@ class equals():
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
-def l2norm(t):
-    return F.normalize(t, p = 2, dim = -1)
+def l2norm(t, groups = 1):
+    t = rearrange(t, '... (g d) -> ... g d', g = groups)
+    t = F.normalize(t, p = 2, dim = -1)
+    return rearrange(t, '... g d -> ... (g d)')
 
 def stable_softmax(t, dim = -1):
     t = t - t.amax(dim = dim, keepdim = True).detach()
@@ -504,7 +506,7 @@ class Attention(nn.Module):
         zero_init_output = False,
         max_attend_past = None,
         qk_norm = False,
-        qk_norm_max_scale = 20,
+        qk_norm_groups = 1,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None
@@ -545,9 +547,9 @@ class Attention(nn.Module):
 
         # cosine sim attention
         self.qk_norm = qk_norm
-        if qk_norm:
-            self.scale = nn.Parameter(torch.ones(1, heads, 1, 1))
-            self.qk_norm_max_scale = qk_norm_max_scale
+        self.qk_norm_groups = qk_norm_groups
+        assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
+        assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
 
         # talking heads
         self.talking_heads = talking_heads
@@ -642,12 +644,14 @@ class Attention(nn.Module):
                 input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
 
         if self.qk_norm:
-            q, k = map(l2norm, (q, k))
-            scale = self.scale.sigmoid() * self.qk_norm_max_scale
+            qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
+            q, k = map(qk_l2norm, (q, k))
+            scale = 1.
 
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
         dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+
         mask_value = max_neg_value(dots)
 
         if exists(prev_attn):
@@ -759,7 +763,6 @@ class AttentionLayers(nn.Module):
         scale_residual_constant = 1.,
         shift_tokens = 0,
         sandwich_norm = False,
-        use_qk_norm_attn = False,
         zero_init_branch_output = False,
         **kwargs
     ):
@@ -816,11 +819,6 @@ class AttentionLayers(nn.Module):
 
         if macaron:
             default_block = ('f',) + default_block
-
-        # qk normalization
-
-        if use_qk_norm_attn:
-            attn_kwargs = {**attn_kwargs, 'qk_norm': True}
 
         # zero init
 
@@ -879,10 +877,8 @@ class AttentionLayers(nn.Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
-            layer_uses_qk_norm = use_qk_norm_attn and layer_type in ('a', 'c')
-
-            pre_branch_norm = norm_fn() if pre_norm and not layer_uses_qk_norm else None
-            post_branch_norm = norm_fn() if sandwich_norm or layer_uses_qk_norm else None
+            pre_branch_norm = norm_fn() if pre_norm else None
+            post_branch_norm = norm_fn() if sandwich_norm else None
             post_main_norm = norm_fn() if not pre_norm and not is_last_layer else None
 
             norms = nn.ModuleList([

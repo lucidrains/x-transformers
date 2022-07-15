@@ -984,11 +984,11 @@ model(x)
 
 The last change is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
 
-### Query-Key Normalization
+### Grouped Query-Key L2 Normalization
 
 <img src="./images/cosine-sim-attention.png" width="400px"></img>
 
-This <a href="https://arxiv.org/abs/2010.04245">paper</a> proposes to l2 normalize the queries and keys along the head dimension before the dot product (cosine similarity), with the additional change of the scale being learned rather than static. The normalization prevents the attention operation from overflowing, a perennial problem when training transformers.
+This <a href="https://arxiv.org/abs/2010.04245">paper</a> proposes to l2 normalize the queries and keys along the head dimension before the dot product (cosine similarity), with the additional change of the scale being learned rather than static. The normalization prevents the attention operation from overflowing, and removes any need for numerical stability measures prior to softmax. Both are perennial problems when training transformers.
 
 This was validated at scale recently by the training of <a href="https://arxiv.org/abs/2111.09883">a 3B parameter vision transformer</a>. The SwinV2 paper also proposes to change the pre-layernorm to a post-layernorm for further stability.
 
@@ -996,7 +996,7 @@ I have validated that this works just as well as dot product attention in an aut
 
 This flavor of attention also has <a href="https://arxiv.org/abs/2111.05498">a connection</a> to sparse distributed memory. <a href="https://www.youtube.com/watch?v=THIIk7LR9_8">[youtube talk]</a>
 
-Update: In my own experiments, simply bounding the scale from a range from 0 to 20 using a sigmoid performed better.
+Update: I have discovered a way to remove the learned temperature altogether, by grouping the feature dimension and doing l2-normalization on each group. This allows the queries and keys to have a similarity that is upper bounded by the number of groups. A group size of 8 or 16 was sufficient in my tests. Decided to name this technique "Grouped QK Normalization". The drawback is that I believe an attention head dimension 32 is too small to use this tactic (a dimension often used in vision)
 
 You can use it as follows
 
@@ -1011,7 +1011,8 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        use_qk_norm_attn = True # set this to True
+        attn_qk_norm = True,       # set this to True
+        attn_qk_norm_groups = 8    # number of groups in the feature dimension for l2norm, similarity scores will be bounded between [-group, group]. determines how sharp the attention can be
     )
 )
 
