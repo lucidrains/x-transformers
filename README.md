@@ -996,7 +996,8 @@ I have validated that this works just as well as dot product attention in an aut
 
 This flavor of attention also has <a href="https://arxiv.org/abs/2111.05498">a connection</a> to sparse distributed memory. <a href="https://www.youtube.com/watch?v=THIIk7LR9_8">[youtube talk]</a>
 
-Update: I have discovered a way to remove the learned temperature altogether, by grouping the feature dimension and doing l2-normalization on each group. This allows the queries and keys to have a similarity that ranges from 0 to the number of groups. A group size of 8 or 16 was sufficient in my tests. Decided to name this technique "Grouped QK Normalization"
+Update: I have discovered a way to remove the learned temperature altogether, by grouping the feature dimension and doing l2-normalization on each group. This allows the queries and keys to have a similarity that ranges from 0 to the number of groups. A group size of 8 or 16 was sufficient in my tests. Decided to name this technique "Grouped QK Normalization". The drawback is that I believe an attention head dimension 32 is too small to use this tactic (a dimension often used in vision)
+
 
 You can use it as follows
 
@@ -1012,7 +1013,7 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         attn_qk_norm = True,       # set this to True
-        attn_qk_norm_groups = 8    # number of groups in the feature dimension for l2norm, similarity scores will be bounded from 0 to this value. determines how sharp the attention can be
+        attn_qk_norm_groups = 8    # number of groups in the feature dimension for l2norm, similarity scores will be bounded from 0 to this value. determines how sharp the attention can be (e ^ groups)
     )
 )
 
