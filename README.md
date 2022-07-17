@@ -1020,6 +1020,28 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
+Another update: Simply scaling the cosine similarity (group of 1) with a fixed constant (16) may work too
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_qk_norm = True,       # set to True
+        attn_qk_norm_scale = 16    # new scale on the similarity, with groups of 1
+    )
+)
+
+x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
 ### Turning off absolute positional embedding
 
 A number of papers have hinted that causal transformers (`Decoder`) can learn absolute positions in the absence of added embeddings of any sort. This was recently thoroughly investigated <a href="https://arxiv.org/abs/2203.16634">here</a>. You can turn off the absolute positional embedding by setting `use_abs_pos_emb = False` in the `TransformerWrapper`

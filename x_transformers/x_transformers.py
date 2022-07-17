@@ -507,6 +507,7 @@ class Attention(nn.Module):
         max_attend_past = None,
         qk_norm = False,
         qk_norm_groups = 1,
+        qk_norm_scale = 1,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None
@@ -548,6 +549,8 @@ class Attention(nn.Module):
         # cosine sim attention
         self.qk_norm = qk_norm
         self.qk_norm_groups = qk_norm_groups
+        self.qk_norm_scale = qk_norm_scale
+
         assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
 
@@ -646,7 +649,7 @@ class Attention(nn.Module):
         if self.qk_norm:
             qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
             q, k = map(qk_l2norm, (q, k))
-            scale = 1.
+            scale = self.qk_norm_scale
 
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
