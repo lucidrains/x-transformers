@@ -510,7 +510,9 @@ class Attention(nn.Module):
         qk_norm_scale = 1,
         one_kv_head = False,
         shared_kv = False,
-        value_dim_head = None
+        value_dim_head = None,
+        scale_log_seq = False,
+        scale_log_seq_base = 512
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -553,6 +555,10 @@ class Attention(nn.Module):
 
         assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
+
+        # whether to scale similarity rows by log(number of tokens attended to)
+        self.scale_log_seq = scale_log_seq
+        self.scale_log_seq_denom = math.log(scale_log_seq_base)
 
         # talking heads
         self.talking_heads = talking_heads
@@ -703,6 +709,11 @@ class Attention(nn.Module):
             mask = dots < vk
             dots.masked_fill_(mask, mask_value)
             del mask
+
+        if self.scale_log_seq:
+            num_tokens_attended = (dots > mask_value).sum(dim = -1, keepdims = True)
+            log_seq_scale = torch.log(num_tokens_attended + 1) / self.scale_log_seq_denom
+            dots = dots * log_seq_scale
 
         attn = self.attn_fn(dots, dim = -1)
         post_softmax_attn = attn.clone()

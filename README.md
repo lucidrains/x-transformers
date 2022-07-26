@@ -842,6 +842,38 @@ model = TransformerWrapper(
 )
 ```
 
+
+### Scale for Improved Length Extrapolation
+
+<img src="./images/length-extrapolation-scale.png" width="300px"></img>
+
+<a href="https://scholar.google.com.hk/citations?user=cdbdaksAAAAJ&hl=en">Jianlin Su</a> of <a href="https://github.com/lucidrains/x-transformers#rotary-positional-embeddings">Rotary Embeddings</a> fame proposed in a <a href="https://kexue.fm/archives/8823">blog post</a> his solution for improving length extrapolation in attention and transformers. This solution was adopted by the recent <a href="https://www.biorxiv.org/content/10.1101/2022.07.21.500999v1">OmegaFold</a> paper.
+
+His proposed solution consists of scaling the attention logits by the log of the sequence length, keeping the amount of uncertainty from changing as a function of sequence length.
+
+This repository extends it to autoregressive, as well as count the number of tokens in the case of masking, etc
+
+You can use / experiment with it as follows
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_scale_log_seq = True
+    )
+)
+
+x = torch.randint(0, 20000, (1, 512))
+out = model(x)
+```
+
 ### Shifted Tokens
 
 An <a href="https://github.com/BlinkDL">independent researcher</a> has found that shifting a subset of the feature dimension along the sequence dimension by 1 token helps with convergence (<a href="https://zhuanlan.zhihu.com/p/191393788">Time-mixing</a>). I have tested this for the autoregressive case and can confirm that it leads to greatly improved convergence. This also lines up with <a href="https://arxiv.org/abs/2106.07477">the results</a> of some papers in the vision domain.
@@ -1540,6 +1572,16 @@ generated = model.generate(start_emb, 17) # (17, 777)
     journal = {ArXiv},
     year    = {2019},
     volume  = {abs/1911.02150}
+}
+```
+
+```bibtex
+@online{kexuefm-8823,
+    title   = {从熵不变性看Attention的Scale操作},
+    author  = {苏剑林},
+    year    = {2021},
+    month   = {Dec},
+    url     = {\url{https://kexue.fm/archives/8823}},
 }
 ```
 
