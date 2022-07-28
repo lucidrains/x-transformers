@@ -874,6 +874,8 @@ x = torch.randint(0, 20000, (1, 512))
 out = model(x)
 ```
 
+Update: It does not seem to work for me. I'll let other researchers play around with it a bit more, or potentially find a bug with my implementation, before removing it. For anyone who needs length extrapolation, just use ALiBi or dynamic positional bias.
+
 ### Shifted Tokens
 
 An <a href="https://github.com/BlinkDL">independent researcher</a> has found that shifting a subset of the feature dimension along the sequence dimension by 1 token helps with convergence (<a href="https://zhuanlan.zhihu.com/p/191393788">Time-mixing</a>). I have tested this for the autoregressive case and can confirm that it leads to greatly improved convergence. This also lines up with <a href="https://arxiv.org/abs/2106.07477">the results</a> of some papers in the vision domain.
