@@ -1057,7 +1057,8 @@ class TransformerWrapper(nn.Module):
         num_memory_tokens = None,
         tie_embedding = False,
         use_abs_pos_emb = True,
-        l2norm_embed = False
+        l2norm_embed = False,
+        emb_frac_gradient = 1. # GLM-130B and Cogview successfully used this, set at 0.1
     ):
         super().__init__()
         assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
@@ -1072,6 +1073,8 @@ class TransformerWrapper(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
         self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed = l2norm_embed) if (use_abs_pos_emb and not attn_layers.has_pos_emb) else always(0)
+
+        self.emb_frac_gradient = emb_frac_gradient # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
 
         self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
@@ -1110,7 +1113,7 @@ class TransformerWrapper(nn.Module):
         pos = None,
         **kwargs
     ):
-        b, n, device, num_mem = *x.shape, x.device, self.num_memory_tokens
+        b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
         return_hiddens = return_mems | return_attn
 
         # absolute positional embedding
@@ -1122,6 +1125,12 @@ class TransformerWrapper(nn.Module):
         # post embedding norm, purportedly leads to greater stabilization
 
         x = self.post_emb_norm(x)
+
+        # whether to reduce the gradient going to the embedding, from cogview paper, corroborated by GLM-130B model
+
+        if emb_frac_gradient < 1:
+            assert emb_frac_gradient > 0
+            x = x * emb_frac_gradient + x.detach() * (1 - emb_frac_gradient)
 
         # embedding dropout
 
