@@ -66,10 +66,6 @@ def l2norm(t, groups = 1):
     t = F.normalize(t, p = 2, dim = -1)
     return rearrange(t, '... g d -> ... (g d)')
 
-def stable_softmax(t, dim = -1):
-    t = t - t.amax(dim = dim, keepdim = True).detach()
-    return F.softmax(t, dim = dim)
-
 # init helpers
 
 def init_zero_(layer):
@@ -573,7 +569,7 @@ class Attention(nn.Module):
         self.sparse_topk = sparse_topk
 
         # entmax
-        self.attn_fn = entmax15 if use_entmax15 else stable_softmax
+        self.attn_fn = entmax15 if use_entmax15 else partial(F.softmax, dtype = torch.float32)
 
         # add memory key / values
         self.num_mem_kv = num_mem_kv
