@@ -660,6 +660,33 @@ model = XTransformer(
 )
 ```
 
+### Deepnorm
+
+<img src="./images/deepnorm.png" width="450px"></img>
+
+It is well known that post-normalization transformers have trouble with stability, prompting the move to <a href="https://arxiv.org/abs/2002.04745">pre-normalization</a> in recent years, even though the latter sacrifices performance.
+
+This paper out of Microsoft research proposes a way to fix post-normalization stability. They achieve this by simply scaling the residual and proper initialization. They show they can train an one thousand layer transformer without stability issues, and achieve better results than pre-normalization.
+
+This was recently validated in a <a href="https://keg.cs.tsinghua.edu.cn/glm-130b/">130B GLM model</a> out of Tsinghua.
+
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        deepnorm = True,     # set this to True to use deepnorm post-normalization configuration
+        dim = 512,
+        depth = 6,
+        heads = 8
+    )
+)
+```
+
 ### Transformer-XL recurrence
 
 You can also do Transformer-XL recurrence, by simply passing in a `max_mem_len` in the `TransformerWrapper` class, and then making sure your `Decoder` has `rel_pos_bias` set to `True`.
@@ -1540,6 +1567,16 @@ generated = model.generate(start_emb, 17) # (17, 777)
     journal = {ArXiv},
     year    = {2019},
     volume  = {abs/1911.02150}
+}
+```
+
+```bibtex
+@article{Wang2022DeepNetST,
+    title   = {DeepNet: Scaling Transformers to 1, 000 Layers},
+    author  = {Hongyu Wang and Shuming Ma and Li Dong and Shaohan Huang and Dongdong Zhang and Furu Wei},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2203.00555}
 }
 ```
 

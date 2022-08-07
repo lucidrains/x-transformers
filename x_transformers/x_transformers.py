@@ -98,6 +98,24 @@ def groupby_prefix_and_trim(prefix, d):
     kwargs_without_prefix = dict(map(lambda x: (x[0][len(prefix):], x[1]), tuple(kwargs_with_prefix.items())))
     return kwargs_without_prefix, kwargs
 
+# initializations
+
+def deepnorm_init(
+    transformer,
+    beta,
+    module_name_match_list = ['.ff.', '.to_v', '.to_out']
+):
+    for name, module in transformer.named_modules():
+        if type(module) != nn.Linear:
+            continue
+
+        needs_beta_gain = any(map(lambda substr: substr in name, module_name_match_list))
+        gain = beta if needs_beta_gain else 1
+        nn.init.xavier_normal_(module.weight.data, gain = gain)
+
+        if exists(module.bias):
+            nn.init.constant_(module.bias.data, 0)
+
 # activations
 
 class ReluSquared(nn.Module):
@@ -472,7 +490,7 @@ class FeedForward(nn.Module):
             activation
         ) if not glu else GLU(dim, inner_dim, activation)
 
-        self.net = nn.Sequential(
+        self.ff = nn.Sequential(
             project_in,
             nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
             nn.Dropout(dropout),
@@ -481,10 +499,10 @@ class FeedForward(nn.Module):
 
         # init last linear layer to 0
         if zero_init_output:
-            init_zero_(self.net[-1])
+            init_zero_(self.ff[-1])
 
     def forward(self, x):
-        return self.net(x)
+        return self.ff(x)
 
 # attention.
 
@@ -764,6 +782,7 @@ class AttentionLayers(nn.Module):
         gate_residual = False,
         scale_residual = False,
         scale_residual_constant = 1.,
+        deepnorm = False,
         shift_tokens = 0,
         sandwich_norm = False,
         zero_init_branch_output = False,
@@ -800,6 +819,14 @@ class AttentionLayers(nn.Module):
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
             alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
             self.rel_pos = alibi_pos_klass(heads = alibi_num_heads)
+
+        # determine deepnorm and residual scale
+
+        if deepnorm:
+            assert scale_residual_constant == 1, 'scale residual constant is being overridden by deep norm settings'
+            pre_norm = sandwich_norm = False
+            scale_residual = True
+            scale_residual_constant = (2 * depth) ** 0.25
 
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
         self.pre_norm = pre_norm
@@ -895,6 +922,10 @@ class AttentionLayers(nn.Module):
                 layer,
                 residual
             ]))
+
+        if deepnorm:
+            init_gain = (8 * depth) ** -0.25
+            deepnorm_init(self, init_gain)
 
     def forward(
         self,
@@ -1237,6 +1268,7 @@ class XTransformer(nn.Module):
         tie_token_emb = False,
         ignore_index=-100,
         pad_value=0,
+        deepnorm = False,
         **kwargs
     ):
         super().__init__()
@@ -1251,6 +1283,16 @@ class XTransformer(nn.Module):
         dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
         dec_transformer_kwargs['emb_dropout'] = dec_kwargs.pop('emb_dropout', 0)
 
+        if deepnorm:
+            enc_kwargs['scale_residual'] = True
+            dec_kwargs['scale_residual'] = True
+
+            enc_depth = enc_kwargs['depth']
+            dec_depth = dec_kwargs['depth']
+
+            enc_kwargs['scale_residual_constant'] = 0.81 * ((enc_depth ** 4) * dec_depth) ** .0625
+            dec_kwargs['scale_residual_constant'] = (3 * dec_depth) ** 0.25
+
         self.encoder = TransformerWrapper(
             **enc_transformer_kwargs,
             attn_layers = Encoder(dim = dim, **enc_kwargs)
@@ -1260,6 +1302,10 @@ class XTransformer(nn.Module):
             **dec_transformer_kwargs,
             attn_layers = Decoder(dim = dim, cross_attend = True, **dec_kwargs)
         )
+
+        if deepnorm:
+            deepnorm_init(self.encoder, 0.87 * ((enc_depth ** 4) * dec_depth) ** -0.0625)
+            deepnorm_init(self.decoder, (12 * dec_depth) ** -0.25)
 
         if tie_token_emb:
             self.decoder.token_emb = self.encoder.token_emb
