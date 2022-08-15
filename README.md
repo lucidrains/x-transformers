@@ -1580,4 +1580,13 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@misc{schlag2020enhancing,
+    title   = {Enhancing the Transformer with explicit relational encoding for math problem solving},
+    author  = {Imanol Schlag and Paul Smolensky and Roland Fernandez and Nebojsa Jojic and J{\"u}rgen Schmidhuber and Jianfeng Gao},
+    year    = {2020},
+    url     = {https://openreview.net/forum?id=B1xfElrKPr}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

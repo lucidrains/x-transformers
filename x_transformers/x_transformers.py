@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
-from functools import partial
+from functools import partial, wraps
 from inspect import isfunction
 from collections import namedtuple
 
@@ -39,6 +39,14 @@ def default(val, d):
 
 def cast_tuple(val, depth):
     return val if isinstance(val, tuple) else (val,) * depth
+
+def maybe(fn):
+    @wraps(fn)
+    def inner(x, *args, **kwargs):
+        if not exists(x):
+            return x
+        return fn(x, *args, **kwargs)
+    return inner
 
 class always():
     def __init__(self, val):
@@ -527,7 +535,8 @@ class Attention(nn.Module):
         qk_norm_scale = 1,
         one_kv_head = False,
         shared_kv = False,
-        value_dim_head = None
+        value_dim_head = None,
+        tensor_product = False   # https://arxiv.org/abs/2208.06061
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -552,6 +561,9 @@ class Attention(nn.Module):
         # shared key / values, for further memory savings during inference
         assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
         self.to_v = nn.Linear(dim, v_dim, bias = False) if not shared_kv else None
+
+        # relations projection from tp-attention
+        self.to_r = nn.Linear(dim, v_dim, bias = False) if tensor_product else None
 
         # dropout
         self.dropout = nn.Dropout(dropout)
@@ -636,10 +648,12 @@ class Attention(nn.Module):
         k = self.to_k(k_input)
         v = self.to_v(v_input) if exists(self.to_v) else k
 
+        r = self.to_r(v_input) if exists(self.to_r) else None
+
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
         if not self.one_kv_head:
-            k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (k, v))
+            k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = h), (k, v, r))
 
         if exists(rotary_pos_emb) and not has_context:
             l = rotary_pos_emb.shape[-1]
@@ -708,8 +722,8 @@ class Attention(nn.Module):
 
         if self.causal:
             i, j = dots.shape[-2:]
-            r = torch.arange(i, device = device)
-            mask = rearrange(r, 'i -> 1 1 i 1') < rearrange(r, 'j -> 1 1 1 j')
+            range_i = torch.arange(i, device = device)
+            mask = rearrange(range_i, 'i -> 1 1 i 1') < rearrange(range_i, 'j -> 1 1 1 j')
             mask = F.pad(mask, (j - i, 0), value = False)
             dots.masked_fill_(mask, mask_value)
             del mask
@@ -730,6 +744,10 @@ class Attention(nn.Module):
             attn = self.post_softmax_talking_heads(attn)
 
         out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn, v)
+
+        if exists(r):
+            # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
+            out = out * r + out
 
         if head_scale:
             out = out * self.head_scale_params
