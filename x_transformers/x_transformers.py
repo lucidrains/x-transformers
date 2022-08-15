@@ -633,6 +633,7 @@ class Attention(nn.Module):
         q_input = x
         k_input = kv_input
         v_input = kv_input
+        r_input = x
 
         if exists(mem):
             k_input = torch.cat((mem, k_input), dim = -2)
@@ -647,8 +648,7 @@ class Attention(nn.Module):
         q = self.to_q(q_input)
         k = self.to_k(k_input)
         v = self.to_v(v_input) if exists(self.to_v) else k
-
-        r = self.to_r(v_input) if exists(self.to_r) else None
+        r = self.to_r(r_input) if exists(self.to_r) else None
 
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
