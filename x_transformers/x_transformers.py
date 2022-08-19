@@ -212,7 +212,7 @@ class RelativePositionBias(nn.Module):
     def forward(self, qk_dots):
         i, j, device = *qk_dots.shape[-2:], qk_dots.device
         q_pos = torch.arange(i, dtype = torch.long, device = device)
-        k_pos = torch.arange(j, dtype = torch.long, device = device)
+        k_pos = torch.arange(j, dtype = torch.long, device = device) - (j-i) # shift by (j-i) since keys at j>i are past keys
         rel_pos = k_pos[None, :] - q_pos[:, None]
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
@@ -277,7 +277,7 @@ class AlibiPositionalBias(nn.Module):
     
     def get_bias(self, i, j, device):
         i_arange = torch.arange(i, device = device)
-        j_arange = torch.arange(j, device = device)
+        j_arange = torch.arange(j, device = device) - (j-i) # shift by (j-i) since keys at j>i are past keys
         bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 j') - rearrange(i_arange, 'i -> 1 i 1'))
         return bias
 
