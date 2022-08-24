@@ -298,7 +298,7 @@ class AlibiPositionalBias(nn.Module):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
-            return qk_dots + self.bias[..., :i, :j]
+            return qk_dots + self.bias[..., -i:, -j:]
 
         bias = self.get_bias(i, j, device)
         bias = bias * self.slopes
@@ -322,7 +322,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
             return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[0]))
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
-            bias = self.bias[..., :i, :j]
+            bias = self.bias[..., -i:, -j:]
         else:
             bias = self.get_bias(i, j, device)
             self.register_buffer('bias', bias, persistent=False)
