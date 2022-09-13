@@ -395,24 +395,6 @@ model = TransformerWrapper(
 )
 ```
 
-Alternatively, if you would like to use `entmax15`, you can also do so with one setting as shown below.
-
-```python
-import torch
-from x_transformers import TransformerWrapper, Decoder
-
-model = TransformerWrapper(
-    num_tokens = 20000,
-    max_seq_len = 1024,
-    attn_layers = Decoder(
-        dim = 512,
-        depth = 6,
-        heads = 8,
-        attn_use_entmax15 = True  # use entmax15 for attention step
-    )
-)
-```
-
 ### Talking-Heads Attention
 
 <img src="./images/talking-heads.png" width="500px"></img>
@@ -1047,7 +1029,7 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
-Another update: Simply scaling the cosine similarity (group of 1) with a fixed constant (16) may work too
+Another update: Simply scaling the cosine similarity (group of 1) with a fixed constant (10) may work too
 
 ```python
 import torch
@@ -1061,7 +1043,7 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         attn_qk_norm = True,       # set to True
-        attn_qk_norm_scale = 16    # new scale on the similarity, with groups of 1
+        attn_qk_norm_scale = 10    # new scale on the similarity, with groups of 1
     )
 )
 

@@ -9,8 +9,6 @@ from collections import namedtuple
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
-from entmax import entmax15
-
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # constants
@@ -523,7 +521,6 @@ class Attention(nn.Module):
         talking_heads = False,
         head_scale = False,
         sparse_topk = None,
-        use_entmax15 = False,
         num_mem_kv = 0,
         dropout = 0.,
         on_attn = False,
@@ -532,7 +529,7 @@ class Attention(nn.Module):
         max_attend_past = None,
         qk_norm = False,
         qk_norm_groups = 1,
-        qk_norm_scale = 1,
+        qk_norm_scale = 10,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None,
@@ -597,8 +594,8 @@ class Attention(nn.Module):
         # explicit topk sparse attention
         self.sparse_topk = sparse_topk
 
-        # entmax
-        self.attn_fn = entmax15 if use_entmax15 else partial(F.softmax, dtype = torch.float32)
+        # attention softmax function
+        self.attn_fn = partial(F.softmax, dtype = torch.float32) if not qk_norm else F.softmax
 
         # add memory key / values
         self.num_mem_kv = num_mem_kv
@@ -735,7 +732,11 @@ class Attention(nn.Module):
             dots.masked_fill_(mask, mask_value)
             del mask
 
+        dtype = dots.dtype
+
         attn = self.attn_fn(dots, dim = -1)
+        attn = attn.type(dtype)
+
         post_softmax_attn = attn.clone()
 
         attn = self.dropout(attn)

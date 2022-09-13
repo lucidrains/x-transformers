@@ -2,7 +2,6 @@ from math import ceil
 import torch
 from torch import nn
 import torch.nn.functional as F
-from entmax import entmax_bisect
 
 def exists(val):
     return val is not None
@@ -38,10 +37,7 @@ def top_a(logits, min_p_pow=2.0, min_p_ratio=0.02):
     logits[probs >= limit] = 1
     return logits
 
-# entmax
-
-ENTMAX_ALPHA = 1.3
-entmax = entmax_bisect
+# autoregressive wrapper class
 
 class AutoregressiveWrapper(nn.Module):
     def __init__(self, net, ignore_index = -100, pad_value = 0):
@@ -83,9 +79,6 @@ class AutoregressiveWrapper(nn.Module):
             elif filter_logits_fn is top_a:
                 filtered_logits = filter_logits_fn(logits, min_p_pow = min_p_pow, min_p_ratio= min_p_ratio)
                 probs = F.softmax(filtered_logits / temperature, dim=-1)
-
-            elif filter_logits_fn is entmax:
-                probs = entmax(logits / temperature, alpha = ENTMAX_ALPHA, dim=-1)
 
             sample = torch.multinomial(probs, 1)
 
