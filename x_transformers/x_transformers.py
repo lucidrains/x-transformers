@@ -1156,6 +1156,7 @@ class TransformerWrapper(nn.Module):
         return_attn = False,
         mems = None,
         pos = None,
+        prepend_embeds = None,
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
@@ -1170,6 +1171,14 @@ class TransformerWrapper(nn.Module):
         # post embedding norm, purportedly leads to greater stabilization
 
         x = self.post_emb_norm(x)
+
+        # whether to append embeds, as in PaLI, for image embeddings
+
+        if exists(prepend_embeds):
+            prepend_seq, prepend_dim = prepend_embeds.shape[1:]
+            assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as text model dimensions'
+
+            x = torch.cat((prepend_embeds, x), dim = -2)
 
         # whether to reduce the gradient going to the embedding, from cogview paper, corroborated by GLM-130B model
 
@@ -1199,6 +1208,7 @@ class TransformerWrapper(nn.Module):
             x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
         else:
             x = self.attn_layers(x, mask = mask, mems = mems, **kwargs)
+
         x = self.norm(x)
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
@@ -1335,7 +1345,11 @@ class XTransformer(nn.Module):
         encodings = self.encoder(seq_in, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
         return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask, **kwargs)
 
-    def forward(self, src, tgt, src_mask = None, tgt_mask = None, src_attn_mask = None):
-        enc = self.encoder(src, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
+    def forward(self, src, tgt, src_mask = None, src_prepend_embeds = None, tgt_mask = None, src_attn_mask = None):
+
+        if exists(src_prepend_embeds) and exists(src_mask):
+            src_mask = F.pad(src_mask, (src_prepend_embeds.shape[-2], 0), value = True)
+
+        enc = self.encoder(src, mask = src_mask, attn_mask = src_attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
         out = self.decoder(tgt, context = enc, mask = tgt_mask, context_mask = src_mask)
         return out
