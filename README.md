@@ -154,6 +154,65 @@ encoded = encoder(img, return_embeddings = True)
 decoder(caption, context = encoded) # (1, 1024, 20000)
 ```
 
+<a href="https://arxiv.org/abs/2209.06794">PaLI</a>, state of the art language-vision model
+
+```python
+import torch
+from x_transformers import ViTransformerWrapper, XTransformer, Encoder
+
+# PaLI composes of
+# 1. vision transformer (ViTransformerWrapper) +
+# 2. encoder-decoder transformer (XTransformer)
+
+vit = ViTransformerWrapper(
+    image_size = 256,
+    patch_size = 32,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 6,
+        heads = 8
+    )
+)
+
+pali = XTransformer(
+    dim = 512,
+    enc_num_tokens = 256,
+    enc_depth = 6,
+    enc_heads = 8,
+    enc_max_seq_len = 1024,
+    dec_num_tokens = 256,
+    dec_depth = 6,
+    dec_heads = 8,
+    dec_max_seq_len = 1024
+)
+
+# training data
+
+img = torch.randn(1, 3, 256, 256)               # images
+prompt = torch.randint(0, 256, (1, 1024))       # prompt
+prompt_mask = torch.ones(1, 1024).bool()        # prompt text mask
+output_text = torch.randint(0, 256, (1, 1024))  # target output text
+
+# train
+
+img_embeds = vit(
+    img,
+    return_embeddings = True
+)
+
+loss = pali(
+    prompt,
+    output_text,
+    src_prepend_embeds = img_embeds,            # will preprend image embeddings to encoder text embeddings before attention
+    src_mask = prompt_mask
+)
+
+loss.backward()
+
+# do the above for many steps on a 17B parameter model
+# attention is all you need
+```
+
 ## Dropouts
 
 ```python
@@ -391,24 +450,6 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         attn_sparse_topk = 8 # keep only the top 8 values before attention (softmax)
-    )
-)
-```
-
-Alternatively, if you would like to use `entmax15`, you can also do so with one setting as shown below.
-
-```python
-import torch
-from x_transformers import TransformerWrapper, Decoder
-
-model = TransformerWrapper(
-    num_tokens = 20000,
-    max_seq_len = 1024,
-    attn_layers = Decoder(
-        dim = 512,
-        depth = 6,
-        heads = 8,
-        attn_use_entmax15 = True  # use entmax15 for attention step
     )
 )
 ```
@@ -1047,7 +1088,7 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
-Another update: Simply scaling the cosine similarity (group of 1) with a fixed constant (16) may work too
+Another update: Simply scaling the cosine similarity (group of 1) with a fixed constant (10) may work too
 
 ```python
 import torch
@@ -1061,7 +1102,7 @@ model = TransformerWrapper(
         depth = 6,
         heads = 8,
         attn_qk_norm = True,       # set to True
-        attn_qk_norm_scale = 16    # new scale on the similarity, with groups of 1
+        attn_qk_norm_scale = 10    # new scale on the similarity, with groups of 1
     )
 )
 

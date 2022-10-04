@@ -9,8 +9,6 @@ from collections import namedtuple
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
-from entmax import entmax15
-
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # constants
@@ -211,7 +209,7 @@ class RelativePositionBias(nn.Module):
 
     def forward(self, qk_dots):
         i, j, device = *qk_dots.shape[-2:], qk_dots.device
-        q_pos = torch.arange(i, dtype = torch.long, device = device)
+        q_pos = torch.arange(j - i, j, dtype = torch.long, device = device)
         k_pos = torch.arange(j, dtype = torch.long, device = device)
         rel_pos = k_pos[None, :] - q_pos[:, None]
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
@@ -276,7 +274,7 @@ class AlibiPositionalBias(nn.Module):
         self.register_buffer('bias', None, persistent = False)
     
     def get_bias(self, i, j, device):
-        i_arange = torch.arange(i, device = device)
+        i_arange = torch.arange(j - i, j, device = device)
         j_arange = torch.arange(j, device = device)
         bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 j') - rearrange(i_arange, 'i -> 1 i 1'))
         return bias
@@ -523,7 +521,6 @@ class Attention(nn.Module):
         talking_heads = False,
         head_scale = False,
         sparse_topk = None,
-        use_entmax15 = False,
         num_mem_kv = 0,
         dropout = 0.,
         on_attn = False,
@@ -532,7 +529,7 @@ class Attention(nn.Module):
         max_attend_past = None,
         qk_norm = False,
         qk_norm_groups = 1,
-        qk_norm_scale = 1,
+        qk_norm_scale = 10,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None,
@@ -597,8 +594,8 @@ class Attention(nn.Module):
         # explicit topk sparse attention
         self.sparse_topk = sparse_topk
 
-        # entmax
-        self.attn_fn = entmax15 if use_entmax15 else partial(F.softmax, dtype = torch.float32)
+        # attention softmax function
+        self.attn_fn = partial(F.softmax, dtype = torch.float32) if not qk_norm else F.softmax
 
         # add memory key / values
         self.num_mem_kv = num_mem_kv
@@ -735,7 +732,11 @@ class Attention(nn.Module):
             dots.masked_fill_(mask, mask_value)
             del mask
 
+        dtype = dots.dtype
+
         attn = self.attn_fn(dots, dim = -1)
+        attn = attn.type(dtype)
+
         post_softmax_attn = attn.clone()
 
         attn = self.dropout(attn)
@@ -1155,6 +1156,7 @@ class TransformerWrapper(nn.Module):
         return_attn = False,
         mems = None,
         pos = None,
+        prepend_embeds = None,
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
@@ -1169,6 +1171,14 @@ class TransformerWrapper(nn.Module):
         # post embedding norm, purportedly leads to greater stabilization
 
         x = self.post_emb_norm(x)
+
+        # whether to append embeds, as in PaLI, for image embeddings
+
+        if exists(prepend_embeds):
+            prepend_seq, prepend_dim = prepend_embeds.shape[1:]
+            assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as text model dimensions'
+
+            x = torch.cat((prepend_embeds, x), dim = -2)
 
         # whether to reduce the gradient going to the embedding, from cogview paper, corroborated by GLM-130B model
 
@@ -1198,6 +1208,7 @@ class TransformerWrapper(nn.Module):
             x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
         else:
             x = self.attn_layers(x, mask = mask, mems = mems, **kwargs)
+
         x = self.norm(x)
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
@@ -1334,7 +1345,11 @@ class XTransformer(nn.Module):
         encodings = self.encoder(seq_in, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
         return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask, **kwargs)
 
-    def forward(self, src, tgt, src_mask = None, tgt_mask = None, src_attn_mask = None):
-        enc = self.encoder(src, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
+    def forward(self, src, tgt, src_mask = None, src_prepend_embeds = None, tgt_mask = None, src_attn_mask = None):
+
+        if exists(src_prepend_embeds) and exists(src_mask):
+            src_mask = F.pad(src_mask, (src_prepend_embeds.shape[-2], 0), value = True)
+
+        enc = self.encoder(src, mask = src_mask, attn_mask = src_attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
         out = self.decoder(tgt, context = enc, mask = tgt_mask, context_mask = src_mask)
         return out
