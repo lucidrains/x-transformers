@@ -532,6 +532,7 @@ class Attention(nn.Module):
         qk_norm_scale = 10,
         one_kv_head = False,
         shared_kv = False,
+        sub_ln = False,          # sub-layernorm from https://arxiv.org/abs/2210.06423
         value_dim_head = None,
         tensor_product = False   # https://arxiv.org/abs/2208.06061
     ):
@@ -602,6 +603,9 @@ class Attention(nn.Module):
         if num_mem_kv > 0:
             self.mem_k = nn.Parameter(torch.randn(heads, num_mem_kv, dim_head))
             self.mem_v = nn.Parameter(torch.randn(heads, num_mem_kv, dim_head))
+
+        # "sub" layernorm, layernorm before final attention projection
+        self.sub_ln = nn.LayerNorm(out_dim) if sub_ln else None
 
         # attention on attention
         self.attn_on_attn = on_attn
@@ -763,6 +767,9 @@ class Attention(nn.Module):
             pre_softmax_attn = pre_softmax_attn,
             post_softmax_attn = post_softmax_attn
         )
+
+        if exists(self.sub_ln):
+            out = self.sub_ln(out)
 
         return self.to_out(out), intermediates
 
