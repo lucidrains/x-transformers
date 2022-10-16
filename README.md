@@ -1630,4 +1630,12 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@inproceedings{Wang2022FoundationT,
+    title   = {Foundation Transformers},
+    author  = {Hong-Yi Wang and Shuming Ma and Shaohan Huang and Li Dong and Wenhui Wang and Zhiliang Peng and Yu Wu and Payal Bajaj and Saksham Singhal and Alon Benhaim and Barun Patra and Zhun Liu and Vishrav Chaudhary and Xia Song and Furu Wei},
+    year    = {2022}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
