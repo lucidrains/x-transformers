@@ -1135,6 +1135,43 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
+## Forgetful Causal Mask
+
+<a href="https://arxiv.org/abs/2210.13432">This paper</a> shows convincing results that one can combine masking (from masked language modeling) with autoregressive training, leading to significantly better results in decoder-only training
+
+You can use this by setting the `mask_prob` on the `AutoregressiveWrapper` class
+
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 12,
+        heads = 8
+    )
+)
+
+model = AutoregressiveWrapper(
+    model,
+    mask_prob = 0.15  # in paper, they use 15%, same as BERT
+).cuda()
+
+# mock data
+
+x = torch.randint(0, 20000, (1, 1024)).cuda()
+
+# derive cross entropy loss, masking all taken care of
+
+loss = model(x)
+loss.backward()
+```
+
+
 ## Miscellaneous
 
 Cross Attention
@@ -1175,9 +1212,8 @@ model = ContinuousTransformerWrapper(
 )
 
 x = torch.randn((1, 1024, 32))
-mask = torch.ones(1, 1024).bool()
 
-model(x, mask = mask) # (1, 1024, 100)
+model(x) # (1, 1024, 100)
 ```
 
 You can also train a transformer that accepts continuous values autoregressively easily, in the same scheme as done successfully in <a href="https://arxiv.org/abs/2112.05329">this paper</a>
@@ -1627,6 +1663,16 @@ generated = model.generate(start_emb, 17) # (17, 777)
     author  = {Imanol Schlag and Paul Smolensky and Roland Fernandez and Nebojsa Jojic and J{\"u}rgen Schmidhuber and Jianfeng Gao},
     year    = {2020},
     url     = {https://openreview.net/forum?id=B1xfElrKPr}
+}
+```
+
+```bibtex
+@article{Liu2022FCMFC,
+    title   = {FCM: Forgetful Causal Masking Makes Causal Language Models Better Zero-Shot Learners},
+    author  = {Hao Liu and Xinyang Geng and Lisa Lee and Igor Mordatch and Sergey Levine and Sharan Narang and P. Abbeel},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2210.13432}
 }
 ```
 
