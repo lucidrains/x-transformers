@@ -2,6 +2,9 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+def exists(val):
+    return val is not None
+
 class ContinuousAutoregressiveWrapper(nn.Module):
     def __init__(self, net, ignore_index = -100, pad_value = 0):
         super().__init__()
@@ -23,18 +26,12 @@ class ContinuousAutoregressiveWrapper(nn.Module):
 
         self.net.eval()
         out = start_tokens
-        mask = kwargs.pop('mask', None)
-
-        if mask is None:
-            mask = torch.full((b, t), True, dtype = torch.bool, device = device)
 
         for _ in range(seq_len):
             x = out[:, -self.max_seq_len:]
-            mask = mask[:, -self.max_seq_len:]
 
-            last = self.net(x, mask = mask, **kwargs)[:, -1:, :]
+            last = self.net(x, **kwargs)[:, -1:]
             out = torch.cat((out, last), dim = -2)
-            mask = F.pad(mask, (0, 1), value=True)
 
         out = out[:, t:]
 
@@ -45,16 +42,17 @@ class ContinuousAutoregressiveWrapper(nn.Module):
         return out
 
     def forward(self, x, **kwargs):
-        xi = x[:, :-1]
-        xo = x[:, 1:]
+        inp, target = x[:, :-1], x[:, 1:]
 
-        # help auto-solve a frequent area of confusion around input masks in auto-regressive
-        # if user supplies a mask that is only off by one from the source sequence, resolve it for them
         mask = kwargs.get('mask', None)
-        if mask is not None and mask.shape[1] == x.shape[1]:
+        if exists(mask) and mask.shape[1] == x.shape[1]:
             mask = mask[:, :-1]
             kwargs['mask'] = mask
 
-        out = self.net(xi, **kwargs)
-        loss = F.mse_loss(out, xo)
-        return loss
+        out = self.net(inp, **kwargs)
+        loss = F.mse_loss(out, target, reduction = 'none')
+
+        if exists(mask):
+            loss = loss[mask]
+
+        return loss.mean()
