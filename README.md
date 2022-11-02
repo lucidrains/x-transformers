@@ -1137,6 +1137,8 @@ model(x)
 
 ### Forgetful Causal Mask
 
+<img src="./images/fcm.png" width="450px"></img>
+
 <a href="https://arxiv.org/abs/2210.13432">This paper</a> shows convincing results that one can combine masking (from masked language modeling) with autoregressive training, leading to significantly better results.
 
 You can use this by setting the `mask_prob` on the `AutoregressiveWrapper` class
