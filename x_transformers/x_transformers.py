@@ -665,7 +665,7 @@ class Attention(nn.Module):
             k_mask = default(k_mask, lambda: torch.ones((b, k.shape[-2]), device = device).bool())
             q_mask = rearrange(q_mask, 'b i -> b 1 i 1')
             k_mask = rearrange(k_mask, 'b j -> b 1 1 j')
-            input_mask = q_mask * k_mask
+            input_mask = q_mask & k_mask
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
