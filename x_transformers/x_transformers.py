@@ -1268,14 +1268,22 @@ class ContinuousTransformerWrapper(nn.Module):
         return_attn = False,
         mems = None,
         pos = None,
+        prepend_embeds = None,
         **kwargs
     ):
-        b, n, _, device = *x.shape, x.device
-
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
 
         x = self.post_emb_norm(x)
+
+        # whether to append embeds, as in PaLI, for image embeddings
+
+        if exists(prepend_embeds):
+            _, prepend_dim = prepend_embeds.shape[1:]
+            assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as model dimensions'
+
+            x = torch.cat((prepend_embeds, x), dim = -2)
+
         x = self.emb_dropout(x)
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
