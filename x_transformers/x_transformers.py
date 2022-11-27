@@ -172,7 +172,7 @@ class FixedPositionalEmbedding(nn.Module):
             pos = torch.arange(x.shape[seq_dim], device = x.device)
 
         pos = pos.type_as(self.inv_freq) + offset
-        sinusoid_inp = pos.unsqueeze(-1) * self.inv_freq
+        sinusoid_inp = rearrange(pos, '... -> ... 1') * self.inv_freq
         emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
         return emb
 
@@ -658,19 +658,13 @@ class Attention(nn.Module):
             ql, kl, vl = map(lambda t: apply_rotary_pos_emb(t, rotary_pos_emb), (ql, kl, vl))
             q, k, v = map(lambda t: torch.cat(t, dim = -1), ((ql, qr), (kl, kr), (vl, vr)))
 
-        input_mask = None
-        if any(map(exists, (mask, context_mask))):
-            q_mask = default(mask, lambda: torch.ones((b, n), device = device).bool())
-            k_mask = q_mask if not exists(context) else context_mask
-            k_mask = default(k_mask, lambda: torch.ones((b, k.shape[-2]), device = device).bool())
-            q_mask = rearrange(q_mask, 'b i -> b 1 i 1')
-            k_mask = rearrange(k_mask, 'b j -> b 1 1 j')
-            input_mask = q_mask & k_mask
+        input_mask = default(context_mask, mask)
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
             k = torch.cat((mem_k, k), dim = -2)
             v = torch.cat((mem_v, v), dim = -2)
+
             if exists(input_mask):
                 input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
 
@@ -697,7 +691,8 @@ class Attention(nn.Module):
             dots = rel_pos(dots)
 
         if exists(input_mask):
-            dots.masked_fill_(~input_mask, mask_value)
+            input_mask = rearrange(input_mask, 'b j -> b 1 1 j')
+            dots = dots.masked_fill(~input_mask, mask_value)
             del input_mask
 
         if exists(attn_mask):
@@ -706,31 +701,29 @@ class Attention(nn.Module):
                 attn_mask = rearrange(attn_mask, 'i j -> 1 1 i j')
             elif attn_mask.ndim == 3:
                 attn_mask = rearrange(attn_mask, 'h i j -> 1 h i j')
-            dots.masked_fill_(~attn_mask, mask_value)
+            dots = dots.masked_fill(~attn_mask, mask_value)
 
         if exists(self.max_attend_past):
             i, j = dots.shape[-2:]
             range_q = torch.arange(j - i, j, device = device)
             range_k = torch.arange(j, device = device)
             dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
-            mask = dist > self.max_attend_past
-            dots.masked_fill_(mask, mask_value)
-            del mask
+            max_attend_past_mask = dist > self.max_attend_past
+            dots = dots.masked_fill(max_attend_past_mask, mask_value)
+            del max_attend_past_mask
 
         if self.causal:
             i, j = dots.shape[-2:]
-            range_i = torch.arange(i, device = device)
-            mask = rearrange(range_i, 'i -> 1 1 i 1') < rearrange(range_i, 'j -> 1 1 1 j')
-            mask = F.pad(mask, (j - i, 0), value = False)
-            dots.masked_fill_(mask, mask_value)
-            del mask
+            causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
+            dots = dots.masked_fill(causal_mask, mask_value)
+            del causal_mask
 
         if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
             top, _ = dots.topk(self.sparse_topk, dim = -1)
-            vk = top[..., -1].unsqueeze(-1).expand_as(dots)
-            mask = dots < vk
-            dots.masked_fill_(mask, mask_value)
-            del mask
+            vk = rearrange(top[..., -1], '... -> ... 1')
+            sparse_topk_mask = dots < vk
+            dots = dots.masked_fill(sparse_topk_mask, mask_value)
+            del sparse_topk_mask
 
         dtype = dots.dtype
 
@@ -764,7 +757,13 @@ class Attention(nn.Module):
             post_softmax_attn = post_softmax_attn
         )
 
-        return self.to_out(out), intermediates
+        out = self.to_out(out)
+
+        if exists(mask):
+            mask = rearrange(mask, 'b n -> b n 1')
+            out = out.masked_fill(~mask, 0.)
+
+        return out, intermediates
 
 class AttentionLayers(nn.Module):
     def __init__(
@@ -1350,15 +1349,15 @@ class XTransformer(nn.Module):
         self.decoder = AutoregressiveWrapper(self.decoder, ignore_index=ignore_index, pad_value=pad_value)
 
     @torch.no_grad()
-    def generate(self, seq_in, seq_out_start, seq_len, src_mask = None, src_attn_mask = None, **kwargs):
-        encodings = self.encoder(seq_in, mask = src_mask, attn_mask = src_attn_mask, return_embeddings = True)
-        return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = src_mask, **kwargs)
+    def generate(self, seq_in, seq_out_start, seq_len, mask = None, attn_mask = None, **kwargs):
+        encodings = self.encoder(seq_in, mask = mask, attn_mask = attn_mask, return_embeddings = True)
+        return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = mask, **kwargs)
 
-    def forward(self, src, tgt, src_mask = None, src_prepend_embeds = None, tgt_mask = None, src_attn_mask = None):
+    def forward(self, src, tgt, mask = None, attn_mask = None, src_prepend_embeds = None):
 
-        if exists(src_prepend_embeds) and exists(src_mask):
-            src_mask = F.pad(src_mask, (src_prepend_embeds.shape[-2], 0), value = True)
+        if exists(src_prepend_embeds) and exists(mask):
+            mask = F.pad(mask, (src_prepend_embeds.shape[-2], 0), value = True)
 
-        enc = self.encoder(src, mask = src_mask, attn_mask = src_attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
-        out = self.decoder(tgt, context = enc, mask = tgt_mask, context_mask = src_mask)
+        enc = self.encoder(src, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
+        out = self.decoder(tgt, context = enc, context_mask = mask)
         return out

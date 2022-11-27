@@ -34,9 +34,8 @@ model = XTransformer(
 src = torch.randint(0, 256, (1, 1024))
 src_mask = torch.ones_like(src).bool()
 tgt = torch.randint(0, 256, (1, 1024))
-tgt_mask = torch.ones_like(tgt).bool()
 
-loss = model(src, tgt, src_mask = src_mask, tgt_mask = tgt_mask) # (1, 1024, 512)
+loss = model(src, tgt, mask = src_mask) # (1, 1024, 512)
 loss.backward()
 ```
 
@@ -203,8 +202,8 @@ img_embeds = vit(
 loss = pali(
     prompt,
     output_text,
-    src_prepend_embeds = img_embeds,            # will preprend image embeddings to encoder text embeddings before attention
-    src_mask = prompt_mask
+    mask = prompt_mask,
+    src_prepend_embeds = img_embeds             # will preprend image embeddings to encoder text embeddings before attention
 )
 
 loss.backward()

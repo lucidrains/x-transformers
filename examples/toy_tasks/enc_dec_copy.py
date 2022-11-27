@@ -21,8 +21,7 @@ def cycle():
         src = torch.randint(2, NUM_TOKENS, (BATCH_SIZE, ENC_SEQ_LEN)).long().cuda()
         tgt = torch.cat((prefix, src, src), 1)
         src_mask = torch.ones(BATCH_SIZE, src.shape[1]).bool().cuda()
-        tgt_mask = torch.ones(BATCH_SIZE, tgt.shape[1]).bool().cuda()
-        yield (src, tgt, src_mask, tgt_mask)
+        yield (src, tgt, src_mask)
 
 # instantiate model
 
@@ -49,9 +48,9 @@ optim = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     model.train()
 
-    src, tgt, src_mask, tgt_mask = next(cycle())
+    src, tgt, src_mask = next(cycle())
 
-    loss = model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
+    loss = model(src, tgt, mask=src_mask)
     loss.backward()
     print(f'{i}: {loss.item()}')
 
@@ -60,11 +59,11 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
 
     if i != 0 and i % GENERATE_EVERY == 0:
         model.eval()
-        src, _, src_mask, _ = next(cycle())
+        src, _, src_mask = next(cycle())
         src, src_mask = src[:1], src_mask[:1]
         start_tokens = (torch.ones((1, 1)) * 1).long().cuda()
 
-        sample = model.generate(src, start_tokens, ENC_SEQ_LEN, src_mask=src_mask)
+        sample = model.generate(src, start_tokens, ENC_SEQ_LEN, mask = src_mask)
         incorrects = (src != sample).abs().sum()
 
         print(f"input:  ", src)
