@@ -64,6 +64,8 @@ class equals():
     def __call__(self, x, *args, **kwargs):
         return x == self.val
 
+# tensor helpers
+
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
@@ -71,6 +73,11 @@ def l2norm(t, groups = 1):
     t = rearrange(t, '... (g d) -> ... g d', g = groups)
     t = F.normalize(t, p = 2, dim = -1)
     return rearrange(t, '... g d -> ... (g d)')
+
+def pad_at_dim(t, pad, dim = -1, value = 0.):
+    dims_from_right = (- dim - 1) if dim < 0 else (t.ndim - dim - 1)
+    zeros = ((0, 0) * dims_from_right)
+    return F.pad(t, (*zeros, *pad), value = value)
 
 # init helpers
 
@@ -302,7 +309,7 @@ class AlibiPositionalBias(nn.Module):
         bias = bias * self.slopes
 
         num_heads_unalibied = h - bias.shape[0]
-        bias = F.pad(bias, (0, 0, 0, 0, 0, num_heads_unalibied))
+        bias = pad_at_dim(bias, (0, num_heads_unalibied), dim = 0)
         self.register_buffer('bias', bias, persistent=False)
 
         return qk_dots + self.bias
@@ -317,7 +324,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
 
         def get_slopes(param):
-            return F.pad(param.exp(), (0, 0, 0, 0, 0, h - param.shape[0]))
+            return pad_at_dim(param.exp(), (0, h - param.shape[0]), dim = -2)
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
             bias = self.bias[..., :i, :j]
@@ -434,7 +441,7 @@ def shift(t, amount, mask = None):
     if exists(mask):
         t = t.masked_fill(~mask[..., None], 0.)
 
-    return F.pad(t, (0, 0, amount, -amount), value = 0.)
+    return pad_at_dim(t, (amount, -amount), dim = - 2, value = 0.)
 
 class ShiftTokens(nn.Module):
     def __init__(self, shifts, fn):
@@ -666,7 +673,7 @@ class Attention(nn.Module):
             v = torch.cat((mem_v, v), dim = -2)
 
             if exists(input_mask):
-                input_mask = F.pad(input_mask, (self.num_mem_kv, 0), value = True)
+                input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
 
         if self.qk_norm:
             qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
@@ -1198,7 +1205,7 @@ class TransformerWrapper(nn.Module):
 
             # auto-handle masking after appending memory tokens
             if exists(mask):
-                mask = F.pad(mask, (num_mem, 0), value = True)
+                mask = pad_at_dim(mask, (num_mem, 0), dim = -1, value = True)
 
         if self.shift_mem_down and exists(mems):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
@@ -1302,7 +1309,7 @@ class XTransformer(nn.Module):
         *,
         dim,
         tie_token_emb = False,
-        ignore_index=-100,
+        ignore_index =-100,
         pad_value=0,
         deepnorm = False,
         **kwargs
@@ -1356,7 +1363,7 @@ class XTransformer(nn.Module):
     def forward(self, src, tgt, mask = None, attn_mask = None, src_prepend_embeds = None):
 
         if exists(src_prepend_embeds) and exists(mask):
-            mask = F.pad(mask, (src_prepend_embeds.shape[-2], 0), value = True)
+            mask = pad_at_dim(mask, (src_prepend_embeds.shape[-2], 0), dim = -1, value = True)
 
         enc = self.encoder(src, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
         out = self.decoder(tgt, context = enc, context_mask = mask)
