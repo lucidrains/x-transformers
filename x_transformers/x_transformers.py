@@ -1,7 +1,10 @@
 import math
+from random import random
+
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
+
 from functools import partial, wraps
 from inspect import isfunction
 from collections import namedtuple
@@ -810,6 +813,7 @@ class AttentionLayers(nn.Module):
         shift_tokens = 0,
         sandwich_norm = False,
         zero_init_branch_output = False,
+        layer_dropout = 0.,
         **kwargs
     ):
         super().__init__()
@@ -904,6 +908,10 @@ class AttentionLayers(nn.Module):
         self.layer_types = layer_types
         self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
 
+        # stochastic depth
+
+        self.layer_dropouts = cast_tuple(layer_dropout, len(layer_types))
+
         # calculate token shifting
 
         shift_tokens = cast_tuple(shift_tokens, len(layer_types))
@@ -976,8 +984,11 @@ class AttentionLayers(nn.Module):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
             rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, x.device)
 
-        for ind, (layer_type, (norm, block, residual_fn)) in enumerate(zip(self.layer_types, self.layers)):
+        for ind, (layer_type, (norm, block, residual_fn), layer_dropout) in enumerate(zip(self.layer_types, self.layers, self.layer_dropouts)):
             is_last = ind == (len(self.layers) - 1)
+
+            if self.training and layer_dropout > 0. and random() < layer_dropout:
+                continue
 
             if layer_type == 'a':
                 if return_hiddens:

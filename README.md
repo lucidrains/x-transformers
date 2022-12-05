@@ -226,6 +226,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
+        layer_dropout = 0.1,   # stochastic depth - dropout entire layer
         attn_dropout = 0.1,    # dropout post-attention
         ff_dropout = 0.1       # feedforward dropout
     )
@@ -1674,6 +1675,15 @@ generated = model.generate(start_emb, 17) # (17, 777)
     journal = {ArXiv},
     year    = {2022},
     volume  = {abs/2210.13432}
+}
+```
+
+```bibtex
+@inproceedings{Huang2016DeepNW,
+    title   = {Deep Networks with Stochastic Depth},
+    author  = {Gao Huang and Yu Sun and Zhuang Liu and Daniel Sedra and Kilian Q. Weinberger},
+    booktitle = {European Conference on Computer Vision},
+    year    = {2016}
 }
 ```
 
