@@ -132,6 +132,34 @@ def deepnorm_init(
         if exists(module.bias):
             nn.init.constant_(module.bias.data, 0)
 
+# structured dropout, more effective than traditional attention dropouts
+
+def dropout_seq(seq, mask, dropout):
+    b, n, *_, device = *seq.shape, seq.device
+    logits = torch.randn(b, n, device = device)
+
+    if exists(mask):
+        mask_value = max_neg_value(logits)
+        logits = logits.masked_fill(~mask, mask_value)
+
+    keep_prob = 1. - dropout
+    num_keep = max(1,  int(keep_prob * n))
+    keep_indices = logits.topk(num_keep, dim = 1).indices
+
+    batch_indices = torch.arange(b, device = device)
+    batch_indices = rearrange(batch_indices, 'b -> b 1')
+
+    seq = seq[batch_indices, keep_indices]
+
+    if exists(mask):
+        seq_counts = mask.sum(dim = -1)
+        seq_keep_counts = torch.ceil(seq_counts * keep_prob).int()
+        keep_mask = torch.arange(num_keep, device = device) < rearrange(seq_keep_counts, 'b -> b 1')
+
+        mask = mask[batch_indices, keep_indices] & keep_mask
+
+    return seq, mask
+
 # activations
 
 class ReluSquared(nn.Module):
@@ -814,6 +842,7 @@ class AttentionLayers(nn.Module):
         sandwich_norm = False,
         zero_init_branch_output = False,
         layer_dropout = 0.,
+        cross_attn_tokens_dropout = 0.,
         **kwargs
     ):
         super().__init__()
@@ -912,6 +941,10 @@ class AttentionLayers(nn.Module):
 
         self.layer_dropouts = cast_tuple(layer_dropout, len(layer_types))
 
+        # structured dropout for cross attending
+
+        self.cross_attn_tokens_dropout = cross_attn_tokens_dropout
+
         # calculate token shifting
 
         shift_tokens = cast_tuple(shift_tokens, len(layer_types))
@@ -994,6 +1027,10 @@ class AttentionLayers(nn.Module):
                 if return_hiddens:
                     hiddens.append(x)
                 layer_mem = mems.pop(0) if mems else None
+
+            if layer_type == 'c':
+                if self.training and self.cross_attn_tokens_dropout > 0.:
+                    context, context_mask = dropout_seq(context, context_mask, self.cross_attn_tokens_dropout)
 
             residual = x
 
@@ -1320,9 +1357,10 @@ class XTransformer(nn.Module):
         *,
         dim,
         tie_token_emb = False,
-        ignore_index =-100,
-        pad_value=0,
+        ignore_index = -100,
+        pad_value = 0,
         deepnorm = False,
+        cross_attn_tokens_dropout = 0.,
         **kwargs
     ):
         super().__init__()
@@ -1336,6 +1374,8 @@ class XTransformer(nn.Module):
 
         dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
         dec_transformer_kwargs['emb_dropout'] = dec_kwargs.pop('emb_dropout', 0)
+
+        self.cross_attn_tokens_dropout = cross_attn_tokens_dropout  # how many tokens from the encoder to dropout when cross attending from decoder - seen in a couple papers, including Perceiver AR - this will also be very effective regularization when cross attending to very long memories
 
         if deepnorm:
             enc_kwargs['scale_residual'] = True
@@ -1377,5 +1417,9 @@ class XTransformer(nn.Module):
             mask = pad_at_dim(mask, (src_prepend_embeds.shape[-2], 0), dim = -1, value = True)
 
         enc = self.encoder(src, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
+
+        if self.training and self.cross_attn_tokens_dropout > 0:
+            enc, mask = dropout_seq(enc, mask, self.cross_attn_tokens_dropout)
+
         out = self.decoder(tgt, context = enc, context_mask = mask)
         return out
