@@ -1206,6 +1206,7 @@ class TransformerWrapper(nn.Module):
         self,
         x,
         return_embeddings = False,
+        return_intermediates = False,
         mask = None,
         return_mems = False,
         return_attn = False,
@@ -1270,6 +1271,9 @@ class TransformerWrapper(nn.Module):
 
         out = self.to_logits(x) if not return_embeddings else x
 
+        if return_intermediates:
+            return out, intermediates
+
         if return_mems:
             hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
@@ -1318,6 +1322,7 @@ class ContinuousTransformerWrapper(nn.Module):
         self,
         x,
         return_embeddings = False,
+        return_intermediates = False,
         mask = None,
         return_attn = False,
         mems = None,
@@ -1344,6 +1349,9 @@ class ContinuousTransformerWrapper(nn.Module):
         x = self.norm(x)
 
         out = self.project_out(x) if not return_embeddings else x
+
+        if return_intermediates:
+            return out, intermediates
 
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
