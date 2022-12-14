@@ -533,19 +533,28 @@ class FeedForward(nn.Module):
             activation
         ) if not glu else GLU(dim, inner_dim, activation)
 
-        self.ff = nn.Sequential(
-            project_in,
-            nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
-            nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim_out, bias = not no_bias)
-        )
+        # self.ff = nn.Sequential(
+        #     project_in,
+        #     nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
+        #     nn.Dropout(dropout),
+        #     nn.Linear(inner_dim, dim_out, bias = not no_bias)
+        # )
+        heads = dim // 64
+        self.project_in = nn.Parameter(torch.randn(heads, dim * 4, 64))
+        self.project_out = nn.Parameter(torch.randn(heads, dim * 4, 64))
 
         # init last linear layer to 0
         if zero_init_output:
             init_zero_(self.ff[-1])
 
     def forward(self, x):
-        return self.ff(x)
+        # print(x.shape)
+        h = x.shape[-1] // 64
+        x = rearrange(x, 'b n (h d) -> b h n d', h = h)
+        x = einsum('b h i d, h j d -> b h i j', x, self.project_in)
+        x = F.gelu(x)
+        x = einsum('b h i j, h j d -> b h i d', x, self.project_out)
+        return rearrange(x, 'b h n d -> b n (h d)')
 
 # attention.
 
@@ -1209,6 +1218,7 @@ class TransformerWrapper(nn.Module):
         mask = None,
         return_mems = False,
         return_attn = False,
+        return_intermediates = False,
         mems = None,
         pos = None,
         prepend_embeds = None,
@@ -1270,6 +1280,9 @@ class TransformerWrapper(nn.Module):
 
         out = self.to_logits(x) if not return_embeddings else x
 
+        if return_intermediates:
+            return out, intermediates
+
         if return_mems:
             hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
@@ -1318,6 +1331,7 @@ class ContinuousTransformerWrapper(nn.Module):
         self,
         x,
         return_embeddings = False,
+        return_intermediates = False,
         mask = None,
         return_attn = False,
         mems = None,
@@ -1344,6 +1358,9 @@ class ContinuousTransformerWrapper(nn.Module):
         x = self.norm(x)
 
         out = self.project_out(x) if not return_embeddings else x
+
+        if return_intermediates:
+            return out, intermediates
 
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
