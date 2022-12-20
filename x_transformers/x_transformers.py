@@ -1284,6 +1284,10 @@ class TransformerWrapper(nn.Module):
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
             return out, attn_maps
 
+        if return_intermediates and return_attn:
+            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
+            return out, intermediates, attn_maps
+
         return out
 
 class ContinuousTransformerWrapper(nn.Module):
@@ -1356,6 +1360,10 @@ class ContinuousTransformerWrapper(nn.Module):
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
             return out, attn_maps
+
+        if return_intermediates and return_attn:
+            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
+            return out, intermediates, attn_maps
 
         return out
 
