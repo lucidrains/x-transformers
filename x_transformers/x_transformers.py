@@ -20,7 +20,8 @@ DEFAULT_DIM_HEAD = 64
 
 Intermediates = namedtuple('Intermediates', [
     'pre_softmax_attn',
-    'post_softmax_attn'
+    'post_softmax_attn',
+    'values'
 ])
 
 LayerIntermediates = namedtuple('Intermediates', [
@@ -660,6 +661,7 @@ class Attention(nn.Module):
         sinusoidal_emb = None,
         rotary_pos_emb = None,
         prev_attn = None,
+        prev_value = None,
         mem = None
     ):
         b, n, _, h, talking_heads, head_scale, scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.head_scale, self.scale, x.device, exists(context)
@@ -792,8 +794,12 @@ class Attention(nn.Module):
 
         intermediates = Intermediates(
             pre_softmax_attn = pre_softmax_attn,
-            post_softmax_attn = post_softmax_attn
+            post_softmax_attn = post_softmax_attn,
+            values = out.clone()
         )
+
+        if exists(prev_value):
+            out = out + prev_value * 0.9
 
         out = self.to_out(out)
 
@@ -1008,6 +1014,7 @@ class AttentionLayers(nn.Module):
         hiddens = []
         intermediates = []
         prev_attn = None
+        prev_value = None
         prev_cross_attn = None
 
         mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
@@ -1040,7 +1047,7 @@ class AttentionLayers(nn.Module):
                 x = pre_branch_norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, prev_value = prev_value, mem = layer_mem)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
@@ -1053,6 +1060,9 @@ class AttentionLayers(nn.Module):
 
             if layer_type in ('a', 'c') and return_hiddens:
                 intermediates.append(inter)
+
+            if layer_type == 'a':
+                prev_value = inter.values
 
             if layer_type == 'a' and self.residual_attn:
                 prev_attn = inter.pre_softmax_attn
