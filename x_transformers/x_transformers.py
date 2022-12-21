@@ -792,14 +792,14 @@ class Attention(nn.Module):
             gates = self.to_v_gate(x)
             out = out * gates.sigmoid()
 
+        if exists(prev_value):
+            out = out + prev_value * 0.9
+
         intermediates = Intermediates(
             pre_softmax_attn = pre_softmax_attn,
             post_softmax_attn = post_softmax_attn,
             values = out.clone()
         )
-
-        if exists(prev_value):
-            out = out + prev_value * 0.9
 
         out = self.to_out(out)
 
