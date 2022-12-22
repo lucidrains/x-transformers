@@ -199,21 +199,6 @@ class AbsolutePositionalEmbedding(nn.Module):
         pos_emb = pos_emb * self.scale
         return l2norm(pos_emb) if self.l2norm_embed else pos_emb
 
-class FixedPositionalEmbedding(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
-        self.register_buffer('inv_freq', inv_freq)
-
-    def forward(self, x, pos = None, seq_dim = 1, offset = 0):
-        if not exists(pos):
-            pos = torch.arange(x.shape[seq_dim], device = x.device)
-
-        pos = pos.type_as(self.inv_freq) + offset
-        sinusoid_inp = rearrange(pos, '... -> ... 1') * self.inv_freq
-        emb = torch.cat((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
-        return emb
-
 class RelativePositionBias(nn.Module):
     def __init__(self, scale, causal = False, num_buckets = 32, max_distance = 128, heads = 8):
         super().__init__()
@@ -369,25 +354,49 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         return qk_dots + bias
 
 class RotaryEmbedding(nn.Module):
-    def __init__(self, dim):
+    def __init__(
+        self,
+        dim,
+        use_xpos = False,
+        scale_base = 512
+    ):
         super().__init__()
         inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
 
-    def forward(self, max_seq_len, device):
-        t = torch.arange(max_seq_len, device = device).type_as(self.inv_freq)
+        if not use_xpos:
+            self.register_buffer('scale', None)
+            return
+
+        scale = (torch.arange(0, dim, 2) + 0.4 * dim) / (1.4 * dim)
+
+        self.scale_base = scale_base
+        self.register_buffer('scale', scale)
+
+    def forward(self, seq_len, device):
+        t = torch.arange(seq_len, device = device).type_as(self.inv_freq)
         freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
-        return torch.cat((freqs, freqs), dim=-1)
+        freqs = torch.cat((freqs, freqs), dim = -1)
+
+        if not exists(self.scale):
+            return freqs, 1.
+
+        power = (torch.arange(seq_len, device = device) - (seq_len // 2)) / self.scale_base
+        scale = self.scale ** rearrange(power, 'n -> n 1')
+        scale = torch.cat((scale, scale), dim = -1)
+
+        return freqs, scale
+
 
 def rotate_half(x):
     x = rearrange(x, '... (j d) -> ... j d', j = 2)
     x1, x2 = x.unbind(dim = -2)
     return torch.cat((-x2, x1), dim = -1)
 
-def apply_rotary_pos_emb(t, freqs):
+def apply_rotary_pos_emb(t, freqs, scale = 1):
     seq_len = t.shape[-2]
     freqs = freqs[-seq_len:, :]
-    return (t * freqs.cos()) + (rotate_half(t) * freqs.sin())
+    return (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
 
 # norms
 
@@ -657,7 +666,6 @@ class Attention(nn.Module):
         context_mask = None,
         attn_mask = None,
         rel_pos = None,
-        sinusoidal_emb = None,
         rotary_pos_emb = None,
         prev_attn = None,
         mem = None
@@ -674,12 +682,6 @@ class Attention(nn.Module):
             k_input = torch.cat((mem, k_input), dim = -2)
             v_input = torch.cat((mem, v_input), dim = -2)
 
-        if exists(sinusoidal_emb):
-            # in shortformer, the query would start at a position offset depending on the past cached memory
-            offset = k_input.shape[-2] - q_input.shape[-2]
-            q_input = q_input + sinusoidal_emb(q_input, offset = offset)
-            k_input = k_input + sinusoidal_emb(k_input)
-
         q = self.to_q(q_input)
         k = self.to_k(k_input)
         v = self.to_v(v_input) if exists(self.to_v) else k
@@ -691,9 +693,13 @@ class Attention(nn.Module):
             k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = h), (k, v, r))
 
         if exists(rotary_pos_emb) and not has_context:
-            l = rotary_pos_emb.shape[-1]
+            freqs, xpos_scale = rotary_pos_emb
+            l = freqs.shape[-1]
+
+            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.) if exists(xpos_scale) else (1., 1.)
             (ql, qr), (kl, kr), (vl, vr) = map(lambda t: (t[..., :l], t[..., l:]), (q, k, v))
-            ql, kl, vl = map(lambda t: apply_rotary_pos_emb(t, rotary_pos_emb), (ql, kl, vl))
+
+            ql, kl, vl = map(lambda arg: apply_rotary_pos_emb(arg[0], freqs, arg[1]), ((ql, q_xpos_scale), (kl, k_xpos_scale), (vl, k_xpos_scale)))
             q, k, v = map(lambda t: torch.cat(t, dim = -1), ((ql, qr), (kl, kr), (vl, vr)))
 
         input_mask = default(context_mask, mask)
@@ -824,9 +830,10 @@ class AttentionLayers(nn.Module):
         dynamic_pos_bias_log_distance = False,
         dynamic_pos_bias_mlp_depth = 2,
         dynamic_pos_bias_norm = False,
-        position_infused_attn = False,
         rotary_pos_emb = False,
         rotary_emb_dim = None,
+        rotary_xpos = False,
+        rotary_xpos_scale_base = 512,
         custom_layers = None,
         sandwich_coef = None,
         par_ratio = None,
@@ -846,6 +853,8 @@ class AttentionLayers(nn.Module):
         **kwargs
     ):
         super().__init__()
+        rotary_pos_emb = rotary_pos_emb or rotary_xpos
+
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
 
@@ -855,11 +864,10 @@ class AttentionLayers(nn.Module):
         self.depth = depth
         self.layers = nn.ModuleList([])
 
-        self.has_pos_emb = position_infused_attn or rel_pos_bias or rotary_pos_emb
-        self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
+        self.has_pos_emb = rel_pos_bias or rotary_pos_emb
 
         rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
-        self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim) if rotary_pos_emb else None
+        self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base) if rotary_pos_emb else None
 
         assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
@@ -1040,7 +1048,7 @@ class AttentionLayers(nn.Module):
                 x = pre_branch_norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, sinusoidal_emb = self.pia_pos_emb, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
             elif layer_type == 'f':
