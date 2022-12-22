@@ -839,7 +839,9 @@ model = TransformerWrapper(
 )
 ```
 
-Update (12/2022): Rotary embedding has been since hugely successful, widely adopted in many large language models, including the largest in the world, PaLM. However, it has been uncovered in the ALiBi paper that rotary embeddings cannot length extrapolate well. This was recently addressed in <a href="https://arxiv.org/abs/2212.10554v1">a Microsoft research paper</a>. They propose a way to unobtrusively add the same decay as in ALiBi, and found that this resolves the extrapolation problem. You can use it in this repository by setting `rotary_xpos = True`
+Update (12/2022): Rotary embedding has since been hugely successful, widely adopted in many large language models, including the largest in the world, PaLM. However, it has been uncovered in the ALiBi paper that rotary embeddings cannot length extrapolate well. This was recently addressed in <a href="https://arxiv.org/abs/2212.10554v1">a Microsoft research paper</a>. They propose a way to unobtrusively add the same decay as in ALiBi, and found that this resolves the extrapolation problem. You can use it in this repository by setting `rotary_xpos = True`
+
+I may also default to this variant for all works going forward if there are no catches, as this fix would essentially leave no reason not to use rotary embeddings.
 
 ```python
 import torch
@@ -852,8 +854,7 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        rotary_pos_emb = True,  # turns on rotary positional embeddings
-        rotary_xpos = True      # modifies rotary to extrapolate well beyond length at which it was trained
+        rotary_xpos = True   # modified rotary to extrapolate well beyond length at which it was trained
     )
 )
 ```
