@@ -877,7 +877,7 @@ model = TransformerWrapper(
 
 <a href="https://ofir.io/train_short_test_long.pdf">This paper</a> proposes to simply apply a static linear bias to the attention matrix. The authors show this is not only effective as a relative positional encoding, but also allows the attention net to extrapolate to greater sequences length than what it was trained on, for autoregressive language models.
 
-This repository also offers a bidirectional variant (nonsymmetric), proposed by the authors <a href="https://github.com/ofirpress/attention_with_linear_biases/issues/5">here</a>.
+This repository also offers a bidirectional variant (nonsymmetric), proposed by the authors <a href="https://github.com/ofirpress/attention_with_linear_biases/issues/5">here</a>. However, this is untested. If you need bidirectional length extrapolation, the safest option would be Dynamic Position Bias
 
 Update: It may be that ALiBi enforces a strong local attention across the heads, and may hinder it from attending at distances greater than 1k. To avoid any issues with global message passing, I've decided to introduce another hyperparameter `alibi_num_heads`, so one can specify less heads for the ALiBi bias
 
