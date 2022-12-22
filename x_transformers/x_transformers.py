@@ -867,6 +867,8 @@ class AttentionLayers(nn.Module):
         self.has_pos_emb = rel_pos_bias or rotary_pos_emb
 
         rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
+
+        assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base) if rotary_pos_emb else None
 
         assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
