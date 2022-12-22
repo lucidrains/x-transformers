@@ -628,34 +628,6 @@ model = TransformerWrapper(
 )
 ```
 
-### Position Infused Attention
-
-<img src="./images/pia.png" width="500px"></img>
-
-https://arxiv.org/abs/2005.12872
-
-https://ofir.io/shortformer.pdf
-
-In these two papers, the authors independently figured out a new technique where fixed sinusoidal positional embeddings are injected into the input prior to the queries and keys projection for all layers, leading to "position infused" attention, but leaving the actual tokens (values) uncolored by positional embedding. The Shortformer paper uses this property to cache the tokens for simplified recurrent type of transformer that bested Transformer-XL.
-
-I have tested this, and found that it produces better results than plain absolute positional encoding, even in the absence of recurrence. However, I have found that the T5 relative positional bias (also injected into all layers and has the same properties as PIA) performs even better. So given the option, you should just go with T5's `rel_pos_bias` above.
-
-```python
-import torch
-from x_transformers import TransformerWrapper, Decoder
-
-model = TransformerWrapper(
-    num_tokens = 20000,
-    max_seq_len = 1024,
-    attn_layers = Decoder(
-        dim = 512,
-        depth = 6,
-        heads = 8,
-        position_infused_attn = True  # turns on position infused attention
-    )
-)
-```
-
 ### Residual Attention
 
 <img src="./images/residual_attn.png" width="500px"></img>
@@ -839,9 +811,7 @@ model = TransformerWrapper(
 )
 ```
 
-Update (12/2022): Rotary embedding has since been hugely successful, widely adopted in many large language models, including the largest in the world, PaLM. However, it has been uncovered in the ALiBi paper that rotary embeddings cannot length extrapolate well. This was recently addressed in <a href="https://arxiv.org/abs/2212.10554v1">a Microsoft research paper</a>. They propose a way to unobtrusively add the same decay as in ALiBi, and found that this resolves the extrapolation problem. You can use it in this repository by setting `rotary_xpos = True`
-
-I may also default to this variant for all works going forward if there are no catches, as this fix would essentially leave no reason not to use rotary embeddings.
+Update (12/2022): Rotary embedding has since been hugely successful, widely adopted in many large language models, including the largest in the world, PaLM. However, it has been uncovered in the ALiBi paper that rotary embeddings cannot length extrapolate well. This was recently addressed in <a href="https://arxiv.org/abs/2212.10554v1">a Microsoft research paper</a>. They propose a way to unobtrusively add the same decay as in ALiBi, and found that this resolves the extrapolation problem. You can use it in this repository by setting `rotary_xpos = True`. Like ALiBi, it would enforce the attention to be local. You can set the receptive field with `rotary_xpos_scale_base` value, which defaults to `512`
 
 ```python
 import torch
@@ -1476,14 +1446,6 @@ generated = model.generate(start_emb, 17) # (17, 777)
     eprint  = {2005.12872},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV}
-}
-```
-
-```bibtex
-@misc{press2020shortformer,
-    title   = {Shortformer: Better Language Modeling using Shorter Inputs},
-    author  = {Ofir Press and Noah A. Smith and Mike Lewis},
-    year    = {2020}
 }
 ```
 
