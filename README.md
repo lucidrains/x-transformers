@@ -839,6 +839,25 @@ model = TransformerWrapper(
 )
 ```
 
+Update (12/2022): Rotary embedding has been since hugely successful, widely adopted in many large language models, including the largest in the world, PaLM. However, it has been uncovered in the ALiBi paper that rotary embeddings cannot length extrapolate well. This was recently addressed in <a href="https://arxiv.org/abs/2212.10554v1">a Microsoft research paper</a>. They propose a way to unobtrusively add the same decay as in ALiBi, and found that this resolves the extrapolation problem. You can use it in this repository by setting `rotary_xpos = True`
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        rotary_pos_emb = True,  # turns on rotary positional embeddings
+        rotary_xpos = True      # modifies rotary to extrapolate well beyond length at which it was trained
+    )
+)
+```
+
 ### Dynamic Positional Bias
 
 <img src="./images/dynamic-pos-bias.png" width="150px"></img>
@@ -1517,6 +1536,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
     eprint  = {2104.09864},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
+}
+```
+
+```bibtex
+@inproceedings{Sun2022ALT,
+  title     = {A Length-Extrapolatable Transformer},
+  author    = {Yutao Sun and Li Dong and Barun Patra and Shuming Ma and Shaohan Huang and Alon Benhaim and Vishrav Chaudhary and Xia Song and Furu Wei},
+  year      = {2022}
 }
 ```
 
