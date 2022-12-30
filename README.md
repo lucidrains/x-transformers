@@ -1699,4 +1699,13 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@inproceedings{Hua2022TransformerQI,
+    title   = {Transformer Quality in Linear Time},
+    author  = {Weizhe Hua and Zihang Dai and Hanxiao Liu and Quoc V. Le},
+    booktitle = {International Conference on Machine Learning},
+    year    = {2022}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
