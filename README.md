@@ -408,6 +408,28 @@ model = TransformerWrapper(
 )
 ``````
 
+### No Bias in Feedforward
+
+Starting with <a href="https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html">PaLM</a>, there begun a trend to remove biases from the transformer all together. <a href="https://github.com/borisdayma">Boris Dayma</a> has run a number of experiments that showed removing biases from feedforwards led to increased throughput without any loss of accuracy. This was corroborated by <a href="https://arxiv.org/abs/2212.14034">yet another paper</a> investigating transformer architecture variants.
+
+You can turn off the feedforward bias as follows
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        ff_no_bias = True  # set this to True
+    )
+)
+```
+
 ### ReLU²
 
 https://arxiv.org/abs/2109.08668
