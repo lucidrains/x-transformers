@@ -13,6 +13,7 @@ from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+from x_transformers.non_autoregressive_wrapper import NonAutoregressiveWrapper
 
 # constants
 
@@ -1475,3 +1476,98 @@ class XTransformer(nn.Module):
 
         out = self.decoder(tgt, context = enc, context_mask = mask)
         return out
+
+class NATransformer(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        mask_index,
+        tie_token_emb = False,
+        ignore_index = -100,
+        pad_value = 0,
+        deepnorm = False,
+        cross_attn_tokens_dropout = 0.,
+        **kwargs
+    ):
+        super().__init__()
+        enc_kwargs, kwargs = groupby_prefix_and_trim('enc_', kwargs)
+        dec_kwargs, kwargs = groupby_prefix_and_trim('dec_', kwargs)
+
+        assert 'dim' not in enc_kwargs and 'dim' not in dec_kwargs, 'dimension of either encoder or decoder must be set with `dim` keyword'
+        enc_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], enc_kwargs)
+        enc_transformer_kwargs['emb_dropout'] = enc_kwargs.pop('emb_dropout', 0)
+        enc_transformer_kwargs['num_memory_tokens'] = enc_kwargs.pop('num_memory_tokens', None)
+
+        dec_transformer_kwargs = pick_and_pop(['num_tokens', 'max_seq_len'], dec_kwargs)
+        dec_transformer_kwargs['emb_dropout'] = dec_kwargs.pop('emb_dropout', 0)
+
+        self.cross_attn_tokens_dropout = cross_attn_tokens_dropout  # how many tokens from the encoder to dropout when cross attending from decoder - seen in a couple papers, including Perceiver AR - this will also be very effective regularization when cross attending to very long memories
+
+        if deepnorm:
+            enc_kwargs['scale_residual'] = True
+            dec_kwargs['scale_residual'] = True
+
+            enc_depth = enc_kwargs['depth']
+            dec_depth = dec_kwargs['depth']
+
+            enc_kwargs['scale_residual_constant'] = 0.81 * ((enc_depth ** 4) * dec_depth) ** .0625
+            dec_kwargs['scale_residual_constant'] = (3 * dec_depth) ** 0.25
+
+        self.encoder = TransformerWrapper(
+            **enc_transformer_kwargs,
+            attn_layers = Encoder(dim = dim, **enc_kwargs)
+        )
+
+        self.length_predictor = nn.Linear(dim, dec_transformer_kwargs['max_seq_len']+1)
+        
+        self.decoder = TransformerWrapper(
+            **dec_transformer_kwargs,
+            attn_layers = Encoder(dim = dim, cross_attend = True, **dec_kwargs)
+        )
+
+        if deepnorm:
+            deepnorm_init(self.encoder, 0.87 * ((enc_depth ** 4) * dec_depth) ** -0.0625)
+            deepnorm_init(self.decoder, (12 * dec_depth) ** -0.25)
+
+        if tie_token_emb:
+            self.decoder.token_emb = self.encoder.token_emb
+
+        self.decoder = NonAutoregressiveWrapper(self.decoder, mask_index, ignore_index=ignore_index, pad_value=pad_value)
+
+        self.mask_index = mask_index
+
+    @torch.no_grad()
+    def generate(self, seq_in, mask = None, attn_mask = None, **kwargs):
+        encodings = self.encoder(seq_in, mask = mask, attn_mask = attn_mask, return_embeddings = True)        
+        length_logit = self.length_predictor(encodings[:,0,:])
+        length_prob = F.softmax(length_logit, dim=-1)
+        length_max_prob, length = length_prob.max(dim=-1)
+        start_tokens = [self.mask_index] * length
+        return self.decoder.generate(start_tokens, context = encodings[:,0:,:], context_mask = mask[:,0:], **kwargs)
+
+    def forward(self, src, tgt, mask = None, attn_mask = None, src_prepend_embeds = None):
+
+        if exists(src_prepend_embeds) and exists(mask):
+            mask = pad_at_dim(mask, (src_prepend_embeds.shape[-2], 0), dim = -1, value = True)
+
+        enc = self.encoder(src, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
+        
+        length_logit = self.length_predictor(enc[:,0,:])
+
+        length_labels = torch.where(tgt==-100, 0, 100)
+        length_labels = length_labels.count_nonzero(dim=-1)
+        length_loss = F.cross_entropy(
+            length_logit,
+            length_labels
+        )
+        
+        
+        if self.training and self.cross_attn_tokens_dropout > 0:
+            enc, mask = dropout_seq(enc, mask, self.cross_attn_tokens_dropout)
+        
+        out = self.decoder(tgt, context = enc[:,0:,:], context_mask = mask[:,0:])
+        out = out + length_loss
+
+        return out
+  
