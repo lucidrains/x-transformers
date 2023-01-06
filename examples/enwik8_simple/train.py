@@ -68,8 +68,8 @@ class TextSamplerDataset(Dataset):
 
 train_dataset = TextSamplerDataset(data_train, SEQ_LEN)
 val_dataset   = TextSamplerDataset(data_val, SEQ_LEN)
-train_loader  = cycle(DataLoader(train_dataset, batch_size = BATCH_SIZE))
-val_loader    = cycle(DataLoader(val_dataset, batch_size = BATCH_SIZE))
+train_loader  = cycle(DataLoader(train_dataset, batch_size = BATCH_SIZE, drop_last = True))
+val_loader    = cycle(DataLoader(val_dataset, batch_size = BATCH_SIZE, drop_last = True))
 
 # optimizer
 

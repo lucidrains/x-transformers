@@ -1214,7 +1214,7 @@ class TransformerWrapper(nn.Module):
 
         self.emb_frac_gradient = emb_frac_gradient # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
 
-        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = nn.LayerNorm(emb_dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
