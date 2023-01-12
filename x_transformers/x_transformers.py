@@ -272,14 +272,14 @@ class DynamicPositionBias(nn.Module):
         self.mlp.append(nn.Sequential(
             nn.Linear(1, dim),
             nn.LayerNorm(dim) if norm else nn.Identity(),
-            nn.ReLU()
+            nn.SiLU()
         ))
 
         for _ in range(depth - 1):
             self.mlp.append(nn.Sequential(
                 nn.Linear(dim, dim),
                 nn.LayerNorm(dim) if norm else nn.Identity(),
-                nn.ReLU()
+                nn.SiLU()
             ))
 
         self.mlp.append(nn.Linear(dim, heads))
