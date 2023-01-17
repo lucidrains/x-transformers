@@ -1253,6 +1253,7 @@ class TransformerWrapper(nn.Module):
         mems = None,
         pos = None,
         prepend_embeds = None,
+        sum_embeds = None,
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
@@ -1263,6 +1264,11 @@ class TransformerWrapper(nn.Module):
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
+
+        # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
+
+        if exists(sum_embeds):
+            x = x + sum_embeds
 
         # post embedding norm, purportedly leads to greater stabilization
 
