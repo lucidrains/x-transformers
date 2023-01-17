@@ -1,6 +1,5 @@
 import math
 from random import random
-from typing import Callable
 
 import torch
 import torch.nn.functional as F
@@ -50,7 +49,7 @@ class NonAutoregressiveWrapper(nn.Module):
         steps = 18,
         self_cond = False,
         self_cond_train_prob = 0.75,
-        schedule_fn: Callable = cosine_schedule
+        schedule = 'linear'
     ):
         super().__init__()
         self.net = net
@@ -62,7 +61,15 @@ class NonAutoregressiveWrapper(nn.Module):
 
         self.max_seq_len = net.max_seq_len
         self.steps = steps
-        self.schedule_fn = schedule_fn
+
+        if callable(schedule):
+            self.schedule_fn = schedule
+        if schedule == 'linear':
+            self.schedule_fn = linear_schedule
+        elif schedule == 'cosine':
+            self.schedule_fn = cosine_schedule
+        else:
+            raise ValueError(f'invalid schedule {schedule}')
     
         self.self_cond = self_cond
 
@@ -76,7 +83,7 @@ class NonAutoregressiveWrapper(nn.Module):
         self,
         batch_size = None,
         start_temperature = 1.,
-        filter_thres = None,
+        filter_thres = 0.9,
         **kwargs
     ):
         sample_one = not exists(batch_size)
