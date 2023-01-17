@@ -103,7 +103,7 @@ class NonAutoregressiveWrapper(nn.Module):
         # self conditioning
 
         has_self_cond = self.self_cond
-        last_embed = repeat(self.null_embed, 'd -> b n d', b = batch_size, n = self.max_seq_len) if has_self_cond else None
+        last_embed = self.null_embed if has_self_cond else None
 
         for mask_num_tokens, steps_until_x0 in zip(all_mask_num_tokens.tolist(), reversed(range(self.steps))):
 
@@ -174,14 +174,17 @@ class NonAutoregressiveWrapper(nn.Module):
 
         if self.self_cond:
             if random() > self.self_cond_train_prob:
-                self_cond = repeat(self.null_embed, 'd -> b n d', b = b, n = n)
+                self_cond = self.null_embed
             else:
-                prev_rand_times = (rand_times - (1 / self.steps)).clamp(min = 0.)
+                prev_rand_times = (rand_times - (1. / self.steps))
+                is_null_embed = rearrange(prev_rand_times <= 0., 'b -> b 1 1')
                 self_cond_masked = get_mask_from_times(prev_rand_times, batched_randperm)
                 self_cond_masked = torch.where(self_cond_masked, self.mask_id, x)
 
                 with torch.no_grad():
                     self_cond = self.net(self_cond_masked, return_embeddings = True, **kwargs).detach()
+
+                self_cond = torch.where(is_null_embed, rearrange(self.null_embed, 'd -> 1 1 d'), self_cond)
 
             kwargs.update(sum_embeds = self.to_self_cond(self_cond))
 
