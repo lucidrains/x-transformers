@@ -49,7 +49,7 @@ class NonAutoregressiveWrapper(nn.Module):
         mask_id,
         steps = 18,
         self_cond = False,
-        self_cond_train_prob = 0.5,
+        self_cond_train_prob = 0.75,
         schedule_fn: Callable = cosine_schedule
     ):
         super().__init__()
@@ -162,20 +162,26 @@ class NonAutoregressiveWrapper(nn.Module):
         assert n == self.max_seq_len
 
         rand_times = torch.empty(b, device = device).uniform_(0, 1)
-        rand_probs = self.schedule_fn(rand_times)
-        num_tokens_mask = (rand_probs * n).clamp(min = 1.)
-
         batched_randperm = torch.rand((b, n), device = device).argsort(dim = -1).float()
-        mask = batched_randperm < rearrange(num_tokens_mask, 'b -> b 1')
 
+        def get_mask_from_times(rand_times, randperm):
+            rand_probs = self.schedule_fn(rand_times)
+            num_tokens_mask = (rand_probs * n).clamp(min = 1.)
+            return randperm < rearrange(num_tokens_mask, 'b -> b 1')
+
+        mask = get_mask_from_times(rand_times, batched_randperm)
         masked = torch.where(mask, self.mask_id, x)
 
         if self.self_cond:
             if random() > self.self_cond_train_prob:
                 self_cond = repeat(self.null_embed, 'd -> b n d', b = b, n = n)
             else:
+                prev_rand_times = (rand_times - (1 / self.steps)).clamp(min = 0.)
+                self_cond_masked = get_mask_from_times(prev_rand_times, batched_randperm)
+                self_cond_masked = torch.where(self_cond_masked, self.mask_id, x)
+
                 with torch.no_grad():
-                    self_cond = self.net(masked, return_embeddings = True, **kwargs).detach()
+                    self_cond = self.net(self_cond_masked, return_embeddings = True, **kwargs).detach()
 
             kwargs.update(sum_embeds = self.to_self_cond(self_cond))
 
