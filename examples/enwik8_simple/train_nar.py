@@ -39,6 +39,7 @@ def decode_tokens(tokens):
 
 model = TransformerWrapper(
     num_tokens = 256 + 1,
+    logits_dim = 256,
     max_seq_len = SEQ_LEN,
     attn_layers = Encoder(
         dim = 512,

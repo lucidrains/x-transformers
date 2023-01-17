@@ -1187,6 +1187,7 @@ class TransformerWrapper(nn.Module):
         post_emb_norm = False,
         num_memory_tokens = None,
         tie_embedding = False,
+        logits_dim = None,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         l2norm_embed = False,
@@ -1223,7 +1224,8 @@ class TransformerWrapper(nn.Module):
 
         self.init_()
 
-        self.to_logits = nn.Linear(dim, num_tokens) if not tie_embedding else lambda t: t @ self.token_emb.weight.t()
+        logits_dim = default(logits_dim, num_tokens)
+        self.to_logits = nn.Linear(dim, logits_dim) if not tie_embedding else lambda t: t @ self.token_emb.weight.t()
 
         # memory tokens (like [cls]) from Memory Transformers paper
         num_memory_tokens = default(num_memory_tokens, 0)

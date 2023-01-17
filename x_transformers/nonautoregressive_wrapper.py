@@ -26,6 +26,9 @@ def top_k(logits, thres = 0.9):
 
 # schedules
 
+def linear_schedule(t):
+    return 1 - t
+
 def cosine_schedule(t):
     """ https://arxiv.org/abs/2202.04200 """
     return torch.cos(t * math.pi / 2)
@@ -59,7 +62,8 @@ class NonAutoregressiveWrapper(nn.Module):
         self,
         batch_size = None,
         start_temperature = 1.,
-        filter_thres = 0.9
+        filter_thres = None,
+        **kwargs
     ):
         sample_one = not exists(batch_size)
         batch_size = default(batch_size, 1)
@@ -80,13 +84,13 @@ class NonAutoregressiveWrapper(nn.Module):
 
         # slowly demask
 
-        for rand_prob, steps_until_x0 in zip(self.schedule_fn(times[1:]), reversed(range(self.steps))):
-            logits = self.net(seq)
+        all_mask_num_tokens = (self.schedule_fn(times[1:]) * self.max_seq_len).long()
 
-            max_neg_value = -torch.finfo(logits.dtype).max
-            logits[..., -1] = max_neg_value
+        for mask_num_tokens, steps_until_x0 in zip(all_mask_num_tokens.tolist(), reversed(range(self.steps))):
+            logits = self.net(seq, **kwargs)
 
-            logits = top_k(logits, filter_thres)
+            if exists(filter_thres):
+                logits = top_k(logits, filter_thres)
 
             temperature = start_temperature * (steps_until_x0 / self.steps)
 
@@ -104,14 +108,12 @@ class NonAutoregressiveWrapper(nn.Module):
             scores = (1 - probs).gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
             scores = rearrange(scores, 'b n 1 -> b n')
 
-            num_tokens_mask = int((rand_prob * self.max_seq_len).item())
-
-            if num_tokens_mask == 0:
+            if mask_num_tokens == 0:
                 pass
 
-            scores = scores.masked_fill(~mask, max_neg_value)
-            mask_indices = scores.topk(num_tokens_mask, dim = -1).indices
-            mask = torch.zeros_like(scores).scatter(1, mask_indices, 1.).bool()
+            scores = scores.masked_fill(~mask, -torch.finfo(scores.dtype).max)
+            mask_indices = scores.topk(mask_num_tokens, dim = -1).indices
+            mask = torch.zeros_like(scores, dtype = torch.bool).scatter(1, mask_indices, True)
             seq = seq.masked_fill(mask, self.mask_id)
 
         self.net.train(was_training)
@@ -137,7 +139,7 @@ class NonAutoregressiveWrapper(nn.Module):
 
         masked = torch.where(mask, self.mask_id, x)
 
-        logits = self.net(masked)
+        logits = self.net(masked, **kwargs)
 
         loss = F.cross_entropy(
             logits[mask],
