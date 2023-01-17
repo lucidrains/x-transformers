@@ -1198,6 +1198,7 @@ class TransformerWrapper(nn.Module):
 
         dim = attn_layers.dim
         emb_dim = default(emb_dim, dim)
+        self.emb_dim = emb_dim
 
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
@@ -1246,6 +1247,7 @@ class TransformerWrapper(nn.Module):
         self,
         x,
         return_embeddings = False,
+        return_logits_and_embeddings = False,
         return_intermediates = False,
         mask = None,
         return_mems = False,
@@ -1253,6 +1255,7 @@ class TransformerWrapper(nn.Module):
         mems = None,
         pos = None,
         prepend_embeds = None,
+        sum_embeds = None,
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
@@ -1263,6 +1266,11 @@ class TransformerWrapper(nn.Module):
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
+
+        # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
+
+        if exists(sum_embeds):
+            x = x + sum_embeds
 
         # post embedding norm, purportedly leads to greater stabilization
 
@@ -1309,7 +1317,12 @@ class TransformerWrapper(nn.Module):
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
 
-        out = self.to_logits(x) if not return_embeddings else x
+        if return_logits_and_embeddings:
+            out = (self.to_logits(x), x)
+        elif return_embeddings:
+            out = x
+        else:
+            out = self.to_logits(x)
 
         if return_intermediates:
             return out, intermediates
