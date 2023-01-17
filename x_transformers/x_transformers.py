@@ -1246,6 +1246,7 @@ class TransformerWrapper(nn.Module):
         self,
         x,
         return_embeddings = False,
+        return_logits_and_embeddings = False,
         return_intermediates = False,
         mask = None,
         return_mems = False,
@@ -1315,7 +1316,12 @@ class TransformerWrapper(nn.Module):
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
 
-        out = self.to_logits(x) if not return_embeddings else x
+        if return_logits_and_embeddings:
+            out = (self.to_logits(x), x)
+        elif return_embeddings:
+            out = x
+        else:
+            out = self.to_logits(x)
 
         if return_intermediates:
             return out, intermediates
