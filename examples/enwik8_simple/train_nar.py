@@ -20,8 +20,7 @@ BATCH_SIZE = 4
 GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 2e-4
 VALIDATE_EVERY  = 100
-GENERATE_EVERY  = 500
-GENERATE_LENGTH = 512
+GENERATE_EVERY  = 250
 SEQ_LEN = 256
 
 # helpers
@@ -39,6 +38,7 @@ def decode_tokens(tokens):
 
 model = TransformerWrapper(
     num_tokens = 256 + 1,
+    logits_dim = 256,
     max_seq_len = SEQ_LEN,
     attn_layers = Encoder(
         dim = 512,
