@@ -20,8 +20,7 @@ BATCH_SIZE = 4
 GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 2e-4
 VALIDATE_EVERY  = 100
-GENERATE_EVERY  = 500
-GENERATE_LENGTH = 512
+GENERATE_EVERY  = 250
 SEQ_LEN = 256
 
 # helpers
@@ -39,6 +38,7 @@ def decode_tokens(tokens):
 
 model = TransformerWrapper(
     num_tokens = 256 + 1,
+    logits_dim = 256,
     max_seq_len = SEQ_LEN,
     attn_layers = Encoder(
         dim = 512,
@@ -48,7 +48,12 @@ model = TransformerWrapper(
     )
 )
 
-model = NonAutoregressiveWrapper(model, mask_id = 256) # mask id is last token
+model = NonAutoregressiveWrapper(
+    model,
+    steps = 10,
+    mask_id = 256  # mask id is last token, which is why num_tokens above has a +1 (special token)
+)
+
 model.cuda()
 
 # prepare enwik8 data
@@ -88,7 +93,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
 
     for __ in range(GRADIENT_ACCUMULATE_EVERY):
         loss = model(next(train_loader))
-        loss.backward()
+        (loss / GRADIENT_ACCUMULATE_EVERY).backward()
 
     print(f'training loss: {loss.item()}')
     torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
