@@ -1708,4 +1708,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@article{Chang2022MaskGITMG,
+    title   = {MaskGIT: Masked Generative Image Transformer},
+    author  = {Huiwen Chang and Han Zhang and Lu Jiang and Ce Liu and William T. Freeman},
+    journal = {2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year    = {2022},
+    pages   = {11305-11315}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

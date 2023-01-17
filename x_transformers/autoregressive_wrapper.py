@@ -72,7 +72,6 @@ class AutoregressiveWrapper(nn.Module):
         **kwargs
     ):
         device = start_tokens.device
-        was_training = self.net.training
         num_dims = len(start_tokens.shape)
 
         if num_dims == 1:
@@ -80,7 +79,9 @@ class AutoregressiveWrapper(nn.Module):
 
         b, t = start_tokens.shape
 
+        was_training = self.net.training
         self.net.eval()
+
         out = start_tokens
 
         for _ in range(seq_len):

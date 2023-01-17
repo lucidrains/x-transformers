@@ -1,5 +1,8 @@
-from x_transformers import TransformerWrapper, Decoder
-from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+from x_transformers import (
+    TransformerWrapper,
+    Encoder,
+    NonAutoregressiveWrapper
+)
 
 import random
 import tqdm
@@ -12,14 +15,14 @@ from torch.utils.data import DataLoader, Dataset
 
 # constants
 
-NUM_BATCHES = int(1e5)
+NUM_BATCHES = int(1e8)
 BATCH_SIZE = 4
 GRADIENT_ACCUMULATE_EVERY = 4
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 2e-4
 VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
-GENERATE_LENGTH = 1024
-SEQ_LEN = 1024
+GENERATE_LENGTH = 512
+SEQ_LEN = 256
 
 # helpers
 
@@ -34,15 +37,18 @@ def decode_token(token):
 def decode_tokens(tokens):
     return ''.join(list(map(decode_token, tokens)))
 
-# instantiate GPT-like decoder model
-
 model = TransformerWrapper(
-    num_tokens = 256,
+    num_tokens = 256 + 1,
     max_seq_len = SEQ_LEN,
-    attn_layers = Decoder(dim = 512, depth = 6, heads = 8)
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 8,
+        heads = 8,
+        dynamic_pos_bias = True
+    )
 )
 
-model = AutoregressiveWrapper(model)
+model = NonAutoregressiveWrapper(model, mask_id = 256) # mask id is last token
 model.cuda()
 
 # prepare enwik8 data
@@ -59,8 +65,8 @@ class TextSamplerDataset(Dataset):
         self.seq_len = seq_len
 
     def __getitem__(self, index):
-        rand_start = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
-        full_seq = self.data[rand_start: rand_start + self.seq_len + 1].long()
+        rand_start = torch.randint(0, self.data.size(0) - self.seq_len, (1,))
+        full_seq = self.data[rand_start: rand_start + self.seq_len].long()
         return full_seq.cuda()
 
     def __len__(self):
@@ -68,8 +74,8 @@ class TextSamplerDataset(Dataset):
 
 train_dataset = TextSamplerDataset(data_train, SEQ_LEN)
 val_dataset   = TextSamplerDataset(data_val, SEQ_LEN)
-train_loader  = cycle(DataLoader(train_dataset, batch_size = BATCH_SIZE, drop_last = True))
-val_loader    = cycle(DataLoader(val_dataset, batch_size = BATCH_SIZE, drop_last = True))
+train_loader  = cycle(DataLoader(train_dataset, batch_size = BATCH_SIZE))
+val_loader    = cycle(DataLoader(val_dataset, batch_size = BATCH_SIZE))
 
 # optimizer
 
@@ -92,15 +98,12 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     if i % VALIDATE_EVERY == 0:
         model.eval()
         with torch.no_grad():
-            loss = model(next(val_loader))
+            val_data = next(val_loader)
+            loss = model(val_data)
             print(f'validation loss: {loss.item()}')
 
     if i % GENERATE_EVERY == 0:
         model.eval()
-        inp = random.choice(val_dataset)[:-1]
-        prime = decode_tokens(inp)
-        print(f'%s \n\n %s', (prime, '*' * 100))
-
-        sample = model.generate(inp, GENERATE_LENGTH)
+        sample = model.generate()
         output_str = decode_tokens(sample)
         print(output_str)
