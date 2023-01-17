@@ -1,11 +1,12 @@
 import math
+from random import random
 from typing import Callable
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-from einops import rearrange, pack, unpack
+from einops import rearrange, repeat, pack, unpack
 
 # helper functions
 
@@ -47,16 +48,29 @@ class NonAutoregressiveWrapper(nn.Module):
         *,
         mask_id,
         steps = 18,
+        self_cond = False,
+        self_cond_train_prob = 0.5,
         schedule_fn: Callable = cosine_schedule
     ):
         super().__init__()
         self.net = net
+
+        dim = net.emb_dim
+        self.dim = dim
+
         self.mask_id = mask_id
 
         self.max_seq_len = net.max_seq_len
         self.steps = steps
         self.schedule_fn = schedule_fn
     
+        self.self_cond = self_cond
+
+        if self_cond:
+            self.null_embed = nn.Parameter(torch.randn(dim))
+            self.to_self_cond = nn.Linear(dim, dim, bias = False) if self_cond else None
+            self.self_cond_train_prob = self_cond_train_prob
+
     @torch.no_grad()
     def generate(
         self,
@@ -70,8 +84,8 @@ class NonAutoregressiveWrapper(nn.Module):
 
         device = next(self.net.parameters()).device
 
-        was_training = self.net.training
-        self.net.eval()
+        was_training = self.training
+        self.eval()
 
         times = torch.linspace(0., 1., self.steps + 1)
 
@@ -86,8 +100,24 @@ class NonAutoregressiveWrapper(nn.Module):
 
         all_mask_num_tokens = (self.schedule_fn(times[1:]) * self.max_seq_len).long()
 
+        # self conditioning
+
+        has_self_cond = self.self_cond
+        last_embed = repeat(self.null_embed, 'd -> b n d', b = batch_size, n = self.max_seq_len) if has_self_cond else None
+
         for mask_num_tokens, steps_until_x0 in zip(all_mask_num_tokens.tolist(), reversed(range(self.steps))):
-            logits = self.net(seq, **kwargs)
+
+            self_cond = self.to_self_cond(last_embed) if has_self_cond else None
+
+            logits, embeds = self.net(
+                seq,
+                sum_embeds = self_cond,
+                return_logits_and_embeddings = True,
+                **kwargs
+            )
+
+            if has_self_cond:
+                last_embed = embeds
 
             if exists(filter_thres):
                 logits = top_k(logits, filter_thres)
@@ -116,7 +146,7 @@ class NonAutoregressiveWrapper(nn.Module):
             mask = torch.zeros_like(scores, dtype = torch.bool).scatter(1, mask_indices, True)
             seq = seq.masked_fill(mask, self.mask_id)
 
-        self.net.train(was_training)
+        self.train(was_training)
 
         if sample_one:
             seq = rearrange(seq, '1 n -> n')
@@ -139,6 +169,15 @@ class NonAutoregressiveWrapper(nn.Module):
         mask = batched_randperm < rearrange(num_tokens_mask, 'b -> b 1')
 
         masked = torch.where(mask, self.mask_id, x)
+
+        if self.self_cond:
+            if random() > self.self_cond_train_prob:
+                self_cond = repeat(self.null_embed, 'd -> b n d', b = b, n = n)
+            else:
+                with torch.no_grad():
+                    self_cond = self.net(masked, return_embeddings = True, **kwargs).detach()
+
+            kwargs.update(sum_embeds = self.to_self_cond(self_cond))
 
         logits = self.net(masked, **kwargs)
 
