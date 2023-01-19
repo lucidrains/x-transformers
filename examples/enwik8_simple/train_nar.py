@@ -51,7 +51,10 @@ model = TransformerWrapper(
 model = NonAutoregressiveWrapper(
     model,
     steps = 10,
-    mask_id = 256  # mask id is last token, which is why num_tokens above has a +1 (special token)
+    schedule = 'cosine',
+    mask_id = 256,                      # mask id is last token, which is why num_tokens above has a +1 (special token)
+    self_cond = True,                   # self conditioning, from Analog Bits paper
+    can_mask_prev_unmasked = True,
 )
 
 model.cuda()
