@@ -24,6 +24,31 @@ def top_k(logits, thres = 0.9):
     probs.scatter_(2, ind, val)
     return probs
 
+# prob helpers
+
+def sample_prob(prob):
+    return random() < prob
+
+def coin_flip():
+    return sample_prob(0.5)
+
+# tensor helpers
+
+def get_mask_subset_prob(mask, prob, min_mask = 0):
+    batch, seq, device = *mask.shape, mask.device
+    num_to_mask = (mask.sum(dim = -1, keepdim = True) * prob).clamp(min = min_mask)
+    logits = torch.rand((batch, seq), device = device)
+    logits = logits.masked_fill(~mask, -1)
+
+    randperm = logits.argsort(dim = -1).float()
+
+    num_padding = (~mask).sum(dim = -1, keepdim = True)
+    randperm -= num_padding
+
+    subset_mask = randperm < num_to_mask
+    subset_mask.masked_fill_(~mask, False)
+    return subset_mask
+
 # schedules
 
 def linear_schedule(t):
@@ -49,6 +74,8 @@ class NonAutoregressiveWrapper(nn.Module):
         steps = 18,
         self_cond = False,
         self_cond_train_prob = 0.75,
+        no_replace_prob = 0.15,       # which percentage of the tokens masked will stay the same, done in original MLM paper
+        random_token_prob = 0.05,     # which percentage of tokens to be replaced with random token, done in original MLM paper
         schedule = 'linear'
     ):
         super().__init__()
@@ -56,8 +83,15 @@ class NonAutoregressiveWrapper(nn.Module):
 
         dim = net.emb_dim
         self.dim = dim
+        self.num_tokens = net.num_tokens
 
         self.mask_id = mask_id
+
+        # afaict, maskgit paper did not do this
+        # but may help for self conditioning, as used successfully in original BERT
+
+        self.no_replace_prob = no_replace_prob
+        self.random_token_prob = random_token_prob
 
         self.max_seq_len = net.max_seq_len
         self.steps = steps
@@ -142,7 +176,7 @@ class NonAutoregressiveWrapper(nn.Module):
 
             seq = torch.where(mask, sampled_ids, seq)
 
-            scores = (1 - probs).gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
+            scores = (1 - logits.softmax(dim = -1)).gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
             scores = rearrange(scores, 'b n 1 -> b n')
 
             if mask_num_tokens == 0:
@@ -171,28 +205,53 @@ class NonAutoregressiveWrapper(nn.Module):
         rand_times = torch.empty(b, device = device).uniform_(0, 1)
         batched_randperm = torch.rand((b, n), device = device).argsort(dim = -1).float()
 
-        def get_mask_from_times(rand_times, randperm):
-            rand_probs = self.schedule_fn(rand_times)
-            num_tokens_mask = (rand_probs * n).clamp(min = 1.)
-            return randperm < rearrange(num_tokens_mask, 'b -> b 1')
+        rand_probs = self.schedule_fn(rand_times)
+        num_tokens_mask = (rand_probs * n).clamp(min = 1.)
+        mask = batched_randperm < rearrange(num_tokens_mask, 'b -> b 1')
 
-        mask = get_mask_from_times(rand_times, batched_randperm)
-        masked = torch.where(mask, self.mask_id, x)
+        labels = x[mask]
+
+        # to ensure all tokens produce embeddings, instead of just the ones with [mask] input, as done in seminal BERT MLM paper
+        # potentially needed for self-conditioning (on embedding) to work well
+
+        replace_mask_id_mask = mask.clone()
+        frac_seq_left = 1.
+
+        if self.no_replace_prob > 0. and coin_flip():
+            frac_seq_left -= self.no_replace_prob
+
+            no_replace_prob_mask = get_mask_subset_prob(mask, self.no_replace_prob)
+            replace_mask_id_mask &= ~no_replace_prob_mask
+
+        if self.random_token_prob > 0. and coin_flip():
+            random_token_prob_mask = get_mask_subset_prob(replace_mask_id_mask, self.random_token_prob * frac_seq_left)
+            random_tokens = torch.randint(0, self.num_tokens, (b, n), device = device)
+
+            x = torch.where(random_token_prob_mask, random_tokens, x)
+            replace_mask_id_mask &= ~random_token_prob_mask
+
+        masked = torch.where(replace_mask_id_mask, self.mask_id, x)
+
+        # self conditioning
 
         if self.self_cond:
-            if random() > self.self_cond_train_prob:
-                self_cond = self.null_embed
-            else:
+            self_cond = self.null_embed
+
+            if sample_prob(self.self_cond_train_prob):
                 with torch.no_grad():
                     self_cond = self.net(masked, return_embeddings = True, **kwargs).detach()
 
             kwargs.update(sum_embeds = self.to_self_cond(self_cond))
 
+        # logits
+
         logits = self.net(masked, **kwargs)
+
+        # cross entropy loss
 
         loss = F.cross_entropy(
             logits[mask],
-            x[mask]
+            labels
         )
 
         return loss

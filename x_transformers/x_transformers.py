@@ -1199,6 +1199,7 @@ class TransformerWrapper(nn.Module):
         dim = attn_layers.dim
         emb_dim = default(emb_dim, dim)
         self.emb_dim = emb_dim
+        self.num_tokens = num_tokens
 
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
