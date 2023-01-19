@@ -7,6 +7,9 @@ from torch import nn
 
 from einops import rearrange, repeat, pack, unpack
 
+from x_transformers.x_transformers import TransformerWrapper
+from typing import Optional
+
 # helper functions
 
 def exists(val):
@@ -23,6 +26,16 @@ def top_k(logits, thres = 0.9):
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(2, ind, val)
     return probs
+
+def log(t, eps = 1e-10):
+    return torch.log(t + eps)
+
+def gumbel_noise(t):
+    noise = torch.zeros_like(t).uniform_(0, 1)
+    return -log(-log(noise))
+
+def gumbel_sample(t, temperature = 1., dim = -1):
+    return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim = dim)
 
 # prob helpers
 
@@ -77,7 +90,9 @@ class NonAutoregressiveWrapper(nn.Module):
         no_replace_prob = 0.15,         # which percentage of the tokens masked will stay the same, done in original MLM paper
         random_token_prob = 0.1,        # which percentage of tokens to be replaced with random token, done in original MLM paper
         schedule = 'linear',
-        can_mask_prev_unmasked = False  # when unmasking, whether it can remask previously unmasked
+        can_mask_prev_unmasked = False,  # when unmasking, whether it can remask previously unmasked
+        token_critic: Optional[TransformerWrapper] = None,
+        critic_loss_weight = 1.
     ):
         super().__init__()
         self.net = net
@@ -108,12 +123,19 @@ class NonAutoregressiveWrapper(nn.Module):
 
         self.can_mask_prev_unmasked = can_mask_prev_unmasked
 
+        # self conditioning
+
         self.self_cond = self_cond
 
         if self_cond:
             self.null_embed = nn.Parameter(torch.randn(dim))
             self.to_self_cond = nn.Linear(dim, dim, bias = False) if self_cond else None
             self.self_cond_train_prob = self_cond_train_prob
+
+        # token critic
+
+        self.token_critic = token_critic
+        self.critic_loss_weight = critic_loss_weight
 
     @torch.no_grad()
     def generate(
@@ -170,18 +192,17 @@ class NonAutoregressiveWrapper(nn.Module):
 
             probs = (logits / max(temperature, 1e-3)).softmax(dim = -1)
 
-            packed_probs, packed_shape = pack([probs], '* c')
-
-            sampled_ids = torch.multinomial(packed_probs, 1)
-
-            sampled_ids = rearrange(sampled_ids, '... 1 -> ...')
-            sampled_ids, = unpack(sampled_ids, packed_shape, '*')
+            sampled_ids = gumbel_sample(logits, temperature = max(temperature, 1e-3))
 
             seq = torch.where(mask, sampled_ids, seq)
 
-            scores = 1 - logits.softmax(dim = -1)
-            scores = scores.gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
-            scores = rearrange(scores, 'b n 1 -> b n')
+            if exists(self.token_critic):
+                scores = self.token_critic(seq)
+                scores = rearrange(scores, 'b n 1 -> b n')
+            else:
+                scores = 1 - logits.softmax(dim = -1)
+                scores = scores.gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
+                scores = rearrange(scores, 'b n 1 -> b n')
 
             if mask_num_tokens == 0:
                 pass
@@ -208,14 +229,14 @@ class NonAutoregressiveWrapper(nn.Module):
         b, n, device = *x.shape, x.device
         assert n == self.max_seq_len
 
+        orig_seq = x.clone()
+
         rand_times = torch.empty(b, device = device).uniform_(0, 1)
         batched_randperm = torch.rand((b, n), device = device).argsort(dim = -1).float()
 
         rand_probs = self.schedule_fn(rand_times)
         num_tokens_mask = (rand_probs * n).clamp(min = 1.)
         mask = batched_randperm < rearrange(num_tokens_mask, 'b -> b 1')
-
-        labels = x[mask]
 
         # to ensure all tokens produce embeddings, instead of just the ones with [mask] input, as done in seminal BERT MLM paper
         # potentially needed for self-conditioning (on embedding) to work well
@@ -257,7 +278,21 @@ class NonAutoregressiveWrapper(nn.Module):
 
         loss = F.cross_entropy(
             logits[mask],
-            labels
+            orig_seq[mask]
         )
 
-        return loss
+        if not exists(self.token_critic):
+            return loss
+
+        sampled_ids = gumbel_sample(logits, temperature = random())
+        generated = torch.where(mask, sampled_ids, orig_seq)
+
+        critic_logits = self.token_critic(generated)
+        critic_labels = (sampled_ids != orig_seq).float()
+
+        critic_loss = F.binary_cross_entropy_with_logits(
+            rearrange(critic_logits, '... 1 -> ...'),
+            critic_labels
+        )
+
+        return loss + critic_loss * self.critic_loss_weight
