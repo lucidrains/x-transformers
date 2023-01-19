@@ -48,13 +48,24 @@ model = TransformerWrapper(
     )
 )
 
+critic = TransformerWrapper(
+    num_tokens = 256 + 1,
+    max_seq_len = SEQ_LEN,
+    logits_dim = 1,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 12,
+        heads = 8,
+        dynamic_pos_bias = True
+    )
+)
+
 model = NonAutoregressiveWrapper(
     model,
-    steps = 10,
+    token_critic = critic,
+    steps = 18,
     schedule = 'cosine',
-    mask_id = 256,                      # mask id is last token, which is why num_tokens above has a +1 (special token)
-    self_cond = True,                   # self conditioning, from Analog Bits paper
-    can_mask_prev_unmasked = True,
+    mask_id = 256                      # mask id is last token, which is why num_tokens above has a +1 (special token)
 )
 
 model.cuda()
