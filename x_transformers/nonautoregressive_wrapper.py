@@ -74,9 +74,10 @@ class NonAutoregressiveWrapper(nn.Module):
         steps = 18,
         self_cond = False,
         self_cond_train_prob = 0.75,
-        no_replace_prob = 0.15,       # which percentage of the tokens masked will stay the same, done in original MLM paper
-        random_token_prob = 0.05,     # which percentage of tokens to be replaced with random token, done in original MLM paper
-        schedule = 'linear'
+        no_replace_prob = 0.15,         # which percentage of the tokens masked will stay the same, done in original MLM paper
+        random_token_prob = 0.1,        # which percentage of tokens to be replaced with random token, done in original MLM paper
+        schedule = 'linear',
+        can_mask_prev_unmasked = False  # when unmasking, whether it can remask previously unmasked
     ):
         super().__init__()
         self.net = net
@@ -104,7 +105,9 @@ class NonAutoregressiveWrapper(nn.Module):
             self.schedule_fn = cosine_schedule
         else:
             raise ValueError(f'invalid schedule {schedule}')
-    
+
+        self.can_mask_prev_unmasked = can_mask_prev_unmasked
+
         self.self_cond = self_cond
 
         if self_cond:
@@ -117,7 +120,7 @@ class NonAutoregressiveWrapper(nn.Module):
         self,
         batch_size = None,
         start_temperature = 1.,
-        filter_thres = 0.9,
+        filter_thres = 0.7,
         **kwargs
     ):
         sample_one = not exists(batch_size)
@@ -160,8 +163,6 @@ class NonAutoregressiveWrapper(nn.Module):
             if has_self_cond:
                 last_embed = embeds
 
-            scores = 1 - logits.softmax(dim = -1)
-
             if exists(filter_thres):
                 logits = top_k(logits, filter_thres)
 
@@ -178,13 +179,16 @@ class NonAutoregressiveWrapper(nn.Module):
 
             seq = torch.where(mask, sampled_ids, seq)
 
+            scores = 1 - logits.softmax(dim = -1)
             scores = scores.gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
             scores = rearrange(scores, 'b n 1 -> b n')
 
             if mask_num_tokens == 0:
                 pass
 
-            scores = scores.masked_fill(~mask, -torch.finfo(scores.dtype).max)
+            if not self.can_mask_prev_unmasked:
+                scores = scores.masked_fill(~mask, -torch.finfo(scores.dtype).max)
+
             mask_indices = scores.topk(mask_num_tokens, dim = -1).indices
             mask = torch.zeros_like(scores, dtype = torch.bool).scatter(1, mask_indices, True)
             seq = seq.masked_fill(mask, self.mask_id)
