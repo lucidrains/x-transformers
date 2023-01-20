@@ -1,5 +1,7 @@
 import math
 from random import random
+from contextlib import nullcontext
+from collections import namedtuple
 
 import torch
 import torch.nn.functional as F
@@ -9,6 +11,10 @@ from einops import rearrange, repeat, pack, unpack
 
 from x_transformers.x_transformers import TransformerWrapper
 from typing import Optional
+
+# constants
+
+Losses = namedtuple('Losses', ['loss', 'generator_loss', 'critic_loss'])
 
 # helper functions
 
@@ -224,6 +230,9 @@ class NonAutoregressiveWrapper(nn.Module):
     def forward(
         self,
         x,
+        only_train_generator = False,
+        only_train_critic = False,
+        generator_sample_temperature = None,
         **kwargs
     ):
         b, n, device = *x.shape, x.device
@@ -272,7 +281,10 @@ class NonAutoregressiveWrapper(nn.Module):
 
         # logits
 
-        logits = self.net(masked, **kwargs)
+        context = torch.no_grad if only_train_critic else nullcontext
+
+        with context():
+            logits = self.net(masked, **kwargs)
 
         # cross entropy loss
 
@@ -281,10 +293,10 @@ class NonAutoregressiveWrapper(nn.Module):
             orig_seq[mask]
         )
 
-        if not exists(self.token_critic):
-            return loss
+        if not exists(self.token_critic) or only_train_generator:
+            return Losses(loss, loss, None)
 
-        sampled_ids = gumbel_sample(logits, temperature = random())
+        sampled_ids = gumbel_sample(logits, temperature = default(generator_sample_temperature, random()))
         generated = torch.where(mask, sampled_ids, orig_seq)
 
         critic_logits = self.token_critic(generated)
@@ -295,4 +307,12 @@ class NonAutoregressiveWrapper(nn.Module):
             critic_labels
         )
 
-        return loss + critic_loss * self.critic_loss_weight
+        # determine losses to be returned based on what researcher wants to train
+
+        if only_train_critic:
+            total_loss = critic_loss
+            loss = None
+        else:
+            total_loss = loss + critic_loss * self.critic_loss_weight
+
+        return Losses(total_loss, loss,  critic_loss)
