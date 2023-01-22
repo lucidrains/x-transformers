@@ -77,7 +77,20 @@ def cosine_schedule(t):
     """ https://arxiv.org/abs/2202.04200 """
     return torch.cos(t * math.pi / 2)
 
-# wrapper class
+# self token critic
+# inspired by Nijkamp et al. - https://aclanthology.org/2021.naacl-main.409/
+
+class SelfCritic(nn.Module):
+    def __init__(self, net):
+        super().__init__()
+        self.net = net
+
+        dim = net.attn_layers.dim
+        self.to_logits = nn.Linear(dim, 1)
+
+    def forward(self, x):
+        embed = self.net(x, return_embeddings = True)
+        return self.to_logits(embed)
 
 class NonAutoregressiveWrapper(nn.Module):
     """
@@ -93,14 +106,17 @@ class NonAutoregressiveWrapper(nn.Module):
         steps = 18,
         self_cond = False,
         self_cond_train_prob = 0.75,
-        no_replace_prob = 0.15,         # which percentage of the tokens masked will stay the same, done in original MLM paper
-        random_token_prob = 0.1,        # which percentage of tokens to be replaced with random token, done in original MLM paper
+        no_replace_prob = 0.15,          # which percentage of the tokens masked will stay the same, done in original MLM paper
+        random_token_prob = 0.1,         # which percentage of tokens to be replaced with random token, done in original MLM paper
         schedule = 'linear',
         can_mask_prev_unmasked = False,  # when unmasking, whether it can remask previously unmasked
         token_critic: Optional[TransformerWrapper] = None,
+        self_token_critic = False,
         critic_loss_weight = 1.
     ):
         super().__init__()
+        assert not (self_token_critic and exists(token_critic))
+
         self.net = net
 
         dim = net.emb_dim
@@ -141,6 +157,10 @@ class NonAutoregressiveWrapper(nn.Module):
         # token critic
 
         self.token_critic = token_critic
+
+        if self_token_critic:
+            self.token_critic = SelfCritic(net)
+
         self.critic_loss_weight = critic_loss_weight
 
     @torch.no_grad()
