@@ -1140,7 +1140,13 @@ class ViTransformerWrapper(nn.Module):
         self.patch_size = patch_size
 
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
-        self.patch_to_embedding = nn.Linear(patch_dim, dim)
+
+        self.patch_to_embedding = nn.Sequential(
+            nn.LayerNorm(patch_dim),
+            nn.Linear(patch_dim, dim),
+            nn.LayerNorm(dim)
+        )
+
         self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.dropout = nn.Dropout(emb_dropout)
 
