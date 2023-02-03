@@ -169,6 +169,7 @@ class NonAutoregressiveWrapper(nn.Module):
         batch_size = None,
         start_temperature = 1.,
         filter_thres = 0.7,
+        noise_level_scale = 1.,
         **kwargs
     ):
         sample_one = not exists(batch_size)
@@ -214,7 +215,8 @@ class NonAutoregressiveWrapper(nn.Module):
             if exists(filter_thres):
                 logits = top_k(logits, filter_thres)
 
-            temperature = start_temperature * (steps_until_x0 / self.steps)
+            annealing_scale = steps_until_x0 / self.steps
+            temperature = start_temperature * annealing_scale
 
             probs = (logits / max(temperature, 1e-3)).softmax(dim = -1)
 
@@ -225,6 +227,7 @@ class NonAutoregressiveWrapper(nn.Module):
             if exists(self.token_critic):
                 scores = self.token_critic(seq)
                 scores = rearrange(scores, 'b n 1 -> b n')
+                scores = scores + noise_level_scale * gumbel_noise(scores) * annealing_scale
             else:
                 scores = 1 - logits.softmax(dim = -1)
                 scores = scores.gather(2, rearrange(sampled_ids, 'b n -> b n 1'))
