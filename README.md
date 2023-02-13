@@ -1122,6 +1122,8 @@ x = torch.randint(0, 20000, (1, 1024))
 model(x)
 ```
 
+### QK RMSNorm
+
 <img src="./images/qknorm-analysis.png" width="450px"></img>
 
 Update: Google Brain has proven out something similar to cosine sim attention in <a href="https://arxiv.org/abs/2302.05442">a 22B parameter model</a>. In their papers, they have analysis showing that the normalization resulted in not only extra stability, but also better results in the end (due to less need to adjust learning rate when increasing parameter count).
