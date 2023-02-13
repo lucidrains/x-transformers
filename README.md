@@ -1064,7 +1064,7 @@ model(x)
 
 The last change is a layernorm right after the outwards projection in attention. This is actually identical to the sandwich norm proposed by the Coqview paper, so you can use this by simply setting `sandwich_norm = True`, although it would also add it to the feedforward layer.
 
-### Grouped Query-Key L2 Normalization
+### Cosine Sim Attention
 
 <img src="./images/cosine-sim-attention.png" width="400px"></img>
 
@@ -1119,6 +1119,32 @@ model = TransformerWrapper(
 )
 
 x = torch.randint(0, 20000, (1, 1024))
+model(x)
+```
+
+<img src="./images/qknorm-analysis.png" width="450px"></img>
+
+Update: Google Brain has proven out cosine sim attention in <a href="https://arxiv.org/abs/2302.05442">a 22B parameter model</a>. In their papers, they have analysis showing that the normalization resulted in not only extra stability, but also better results in the end (due to less need to adjust learning rate when increasing parameter count).
+
+We are nearing the point of wiping out a source of transformer training instability with one simple intervention, in my opinion. The only slight difference in the paper is that they still have a learned scale across the feature dimension (per use of rmsnorm). Not sure how critical this is, but just to make sure we don't miss anything, I will include this here. You can use this by setting `qk_norm_dim_scale = True`
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 12,
+        heads = 8,
+        attn_qk_norm = True,
+        attn_qk_norm_dim_scale = True # set this to True, in addition to `attn_qk_norm = True`
+    )
+)
+
+x = torch.randint(0, 256, (1, 1024))
 model(x)
 ```
 
@@ -1737,6 +1763,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
     publisher = {arXiv},
     year    = {2023},
     copyright = {Creative Commons Attribution 4.0 International}
+}
+```
+
+```bibtex
+@inproceedings{Dehghani2023ScalingVT,
+    title   = {Scaling Vision Transformers to 22 Billion Parameters},
+    author={Mostafa Dehghani and Josip Djolonga and Basil Mustafa and Piotr Padlewski and Jonathan Heek and Justin Gilmer and Andreas Steiner and Mathilde Caron and Robert Geirhos and Ibrahim M. Alabdulmohsin and Rodolphe Jenatton and Lucas Beyer and Michael Tschannen and Anurag Arnab and Xiao Wang and Carlos Riquelme and Matthias Minderer and Joan Puigcerver and Utku Evci and Manoj Kumar and Sjoerd van Steenkiste and Gamaleldin F. Elsayed and Aravindh Mahendran and Fisher Yu and Avital Oliver and Fantine Huot and Jasmijn Bastings and Mark Collier and Alexey A. Gritsenko and Vighnesh Birodkar and Cristina Nader Vasconcelos and Yi Tay and Thomas Mensink and Alexander Kolesnikov and Filip Paveti'c and Dustin Tran and Thomas Kipf and Mario Luvci'c and Xiaohua Zhai and Daniel Keysers and Jeremiah Harmsen and Neil Houlsby},
+    year    = {2023}
 }
 ```
 

@@ -577,7 +577,7 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.ff(x)
 
-# attention.
+# attention. it is all we need
 
 class Attention(nn.Module):
     def __init__(
@@ -598,6 +598,7 @@ class Attention(nn.Module):
         qk_norm = False,
         qk_norm_groups = 1,
         qk_norm_scale = 10,
+        qk_norm_dim_scale = False,
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None,
@@ -644,6 +645,14 @@ class Attention(nn.Module):
         self.qk_norm = qk_norm
         self.qk_norm_groups = qk_norm_groups
         self.qk_norm_scale = qk_norm_scale
+
+        # whether to use the rmsnorm (equivalent to cosine sim attention with learned scale on feature dimension) - https://arxiv.org/abs/2302.05442
+        self.qk_norm_dim_scale = qk_norm_dim_scale
+
+        if qk_norm and qk_norm_dim_scale:
+            self.qk_norm_q_scale = nn.Parameter(torch.ones(dim_head) * qk_norm_scale ** 0.5)
+            self.qk_norm_k_scale = nn.Parameter(torch.ones(dim_head) * qk_norm_scale ** 0.5)
+            self.qk_norm_scale = 1
 
         assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
@@ -713,6 +722,15 @@ class Attention(nn.Module):
         if not self.one_kv_head:
             k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = h), (k, v, r))
 
+        if self.qk_norm:
+            qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
+            q, k = map(qk_l2norm, (q, k))
+            scale = self.qk_norm_scale
+
+            if self.qk_norm_dim_scale:
+                q = q * self.qk_norm_q_scale
+                k = k * self.qk_norm_k_scale
+
         if exists(rotary_pos_emb) and not has_context:
             freqs, xpos_scale = rotary_pos_emb
             l = freqs.shape[-1]
@@ -727,16 +745,15 @@ class Attention(nn.Module):
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
+
+            if self.qk_norm:
+                mem_k = l2norm(mem_k)
+
             k = torch.cat((mem_k, k), dim = -2)
             v = torch.cat((mem_v, v), dim = -2)
 
             if exists(input_mask):
                 input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
-
-        if self.qk_norm:
-            qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
-            q, k = map(qk_l2norm, (q, k))
-            scale = self.qk_norm_scale
 
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
