@@ -646,14 +646,13 @@ class Attention(nn.Module):
         self.qk_norm_groups = qk_norm_groups
         self.qk_norm_scale = qk_norm_scale
 
-        # whether to use the rmsnorm (equivalent to cosine sim attention with learned scale on feature dimension) - https://arxiv.org/abs/2302.05442
+        # whether to use the rmsnorm (equivalent to cosine sim attention when scale is equal to 1) - https://arxiv.org/abs/2302.05442
         self.qk_norm_dim_scale = qk_norm_dim_scale
 
         self.qk_norm_q_scale = self.qk_norm_k_scale = 1
         if qk_norm and qk_norm_dim_scale:
-            self.qk_norm_q_scale = nn.Parameter(torch.ones(dim_head) * qk_norm_scale ** 0.5)
-            self.qk_norm_k_scale = nn.Parameter(torch.ones(dim_head) * qk_norm_scale ** 0.5)
-            self.qk_norm_scale = 1
+            self.qk_norm_q_scale = nn.Parameter(torch.ones(dim_head))
+            self.qk_norm_k_scale = nn.Parameter(torch.ones(dim_head))
 
         assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
