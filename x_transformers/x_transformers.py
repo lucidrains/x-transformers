@@ -649,6 +649,7 @@ class Attention(nn.Module):
         # whether to use the rmsnorm (equivalent to cosine sim attention with learned scale on feature dimension) - https://arxiv.org/abs/2302.05442
         self.qk_norm_dim_scale = qk_norm_dim_scale
 
+        self.qk_norm_q_scale = self.qk_norm_k_scale = 1
         if qk_norm and qk_norm_dim_scale:
             self.qk_norm_q_scale = nn.Parameter(torch.ones(dim_head) * qk_norm_scale ** 0.5)
             self.qk_norm_k_scale = nn.Parameter(torch.ones(dim_head) * qk_norm_scale ** 0.5)
@@ -727,9 +728,8 @@ class Attention(nn.Module):
             q, k = map(qk_l2norm, (q, k))
             scale = self.qk_norm_scale
 
-            if self.qk_norm_dim_scale:
-                q = q * self.qk_norm_q_scale
-                k = k * self.qk_norm_k_scale
+            q = q * self.qk_norm_q_scale
+            k = k * self.qk_norm_k_scale
 
         if exists(rotary_pos_emb) and not has_context:
             freqs, xpos_scale = rotary_pos_emb
@@ -748,6 +748,7 @@ class Attention(nn.Module):
 
             if self.qk_norm:
                 mem_k = l2norm(mem_k)
+                mem_k = mem_k * self.qk_norm_k_scale
 
             k = torch.cat((mem_k, k), dim = -2)
             v = torch.cat((mem_v, v), dim = -2)
