@@ -1778,4 +1778,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@article{Arora2023TheSE,
+    title   = {The Stable Entropy Hypothesis and Entropy-Aware Decoding: An Analysis and Algorithm for Robust Natural Language Generation},
+    author  = {Kushal Arora and Timothy J. O’Donnell and Doina Precup and Jason Weston and Jackie C.K.Cheung},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2302.06784}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
