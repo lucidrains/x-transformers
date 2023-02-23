@@ -27,7 +27,7 @@ def cycle():
 
 model = XTransformer(
     dim = 512,
-    tie_token_embeds = True,
+    tie_token_emb = True,
     return_tgt_loss = True,
     enc_num_tokens=NUM_TOKENS,
     enc_depth = 3,
