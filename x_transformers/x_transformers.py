@@ -19,6 +19,7 @@ from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 DEFAULT_DIM_HEAD = 64
 
 Intermediates = namedtuple('Intermediates', [
+    'qk_similarities',
     'pre_softmax_attn',
     'post_softmax_attn'
 ])
@@ -764,7 +765,7 @@ class Attention(nn.Module):
         if exists(prev_attn):
             dots = dots + prev_attn
 
-        pre_softmax_attn = dots.clone()
+        qk_similarities = dots.clone()
 
         if talking_heads:
             dots = self.pre_softmax_talking_heads(dots)
@@ -809,6 +810,8 @@ class Attention(nn.Module):
 
         dtype = dots.dtype
 
+        pre_softmax_attn = dots.clone()
+
         attn = self.attn_fn(dots, dim = -1)
         attn = attn.type(dtype)
 
@@ -835,6 +838,7 @@ class Attention(nn.Module):
             out = out * gates.sigmoid()
 
         intermediates = Intermediates(
+            qk_similarities = qk_similarities,
             pre_softmax_attn = pre_softmax_attn,
             post_softmax_attn = post_softmax_attn
         )
