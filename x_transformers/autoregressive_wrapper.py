@@ -3,8 +3,19 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from einops import rearrange, pack, unpack
+
 def exists(val):
     return val is not None
+
+def eval_decorator(fn):
+    def inner(self, *args, **kwargs):
+        was_training = self.training
+        self.eval()
+        out = fn(self, *args, **kwargs)
+        self.train(was_training)
+        return out
+    return inner
 
 # nucleus
 
@@ -59,6 +70,7 @@ class AutoregressiveWrapper(nn.Module):
         self.mask_prob = mask_prob
 
     @torch.no_grad()
+    @eval_decorator
     def generate(
         self,
         start_tokens,
@@ -72,15 +84,11 @@ class AutoregressiveWrapper(nn.Module):
         **kwargs
     ):
         device = start_tokens.device
-        num_dims = len(start_tokens.shape)
+        num_dims = start_tokens.ndim
 
-        if num_dims == 1:
-            start_tokens = start_tokens[None, :]
+        start_tokens, ps = pack([start_tokens], '* n')
 
         b, t = start_tokens.shape
-
-        was_training = self.net.training
-        self.net.eval()
 
         out = start_tokens
 
@@ -113,10 +121,8 @@ class AutoregressiveWrapper(nn.Module):
 
         out = out[:, t:]
 
-        if num_dims == 1:
-            out = out.squeeze(0)
+        out, = unpack(out, ps, '* n')
 
-        self.net.train(was_training)
         return out
 
     def forward(self, x, **kwargs):
@@ -132,12 +138,10 @@ class AutoregressiveWrapper(nn.Module):
             mask = ~torch.zeros_like(inp).scatter(1, indices, 1.).bool()
             kwargs.update(self_attn_context_mask = mask)
 
-        out = self.net(inp, **kwargs)
-
-        out = out.transpose(1, 2)
+        logits = self.net(inp, **kwargs)
 
         loss = F.cross_entropy(
-            out,
+            rearrange(logits, 'b n c -> b c n'),
             target,
             ignore_index = ignore_index
         )

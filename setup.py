@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'x-transformers',
   packages = find_packages(exclude=['examples']),
-  version = '1.10.0',
+  version = '1.11.0',
   license='MIT',
   description = 'X-Transformers - Pytorch',
   author = 'Phil Wang',
@@ -17,7 +17,7 @@ setup(
   ],
   install_requires=[
     'torch>=1.6',
-    'einops>=0.6'
+    'einops>=0.6.1'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',

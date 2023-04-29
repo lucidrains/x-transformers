@@ -753,6 +753,25 @@ logits2, mems2  = model_xl(seg2, mems = mems1, return_mems = True)
 logits3, mems3  = model_xl(seg3, mems = mems2, return_mems = True)
 ```
 
+Setting up the logic for training and sampling from transformer xl can be a bit overwhelming. This repository offers a simple wrapper that should make this easy, with the `XLAutoregressiveWrapper`.
+
+```python
+# pass in the above model_xl
+
+xl_wrapper = XLAutoregressiveWrapper(model_xl)
+
+seg = torch.randint(0, 20000, (1, 4096)).cuda()  # sequence exceeding max length, automatically segmented and memory managed
+
+loss = xl_wrapper(seg)
+loss.backward()
+
+# then, after much training
+
+prime = seg[:, :1024]   # if prime exceeds max length, memory will be caught up before generating
+
+generated = xl_wrapper.generate(prime, 4096)  # (1, 4096)
+```
+
 ### Enhanced recurrence
 
 <img src="./images/enhanced-recurrence.png" width="400px"/>
