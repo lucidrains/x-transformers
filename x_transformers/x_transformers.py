@@ -260,15 +260,19 @@ class RelativePositionBias(nn.Module):
         ret += torch.where(is_small, n, val_if_large)
         return ret
 
-    def forward(self, qk_dots):
-        i, j, device = *qk_dots.shape[-2:], qk_dots.device
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    def forward(self, i, j):
+        device = self.device
         q_pos = torch.arange(j - i, j, dtype = torch.long, device = device)
         k_pos = torch.arange(j, dtype = torch.long, device = device)
         rel_pos = k_pos[None, :] - q_pos[:, None]
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
         bias = rearrange(values, 'i j h -> h i j')
-        return qk_dots + (bias * self.scale)
+        return bias * self.scale
 
 class DynamicPositionBias(nn.Module):
     def __init__(self, dim, *, heads, depth, log_distance = False, norm = False):
@@ -293,8 +297,13 @@ class DynamicPositionBias(nn.Module):
 
         self.mlp.append(nn.Linear(dim, heads))
 
-    def forward(self, qk_dots):
-        n, device, dtype = qk_dots.shape[-1], qk_dots.device, qk_dots.dtype
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    def forward(self, i, j):
+        assert i == j
+        n, device = j, self.device
 
         # get the (n x n) matrix of distances
         seq_arange = torch.arange(n, device = device)
@@ -303,7 +312,7 @@ class DynamicPositionBias(nn.Module):
         indices += (n - 1)
 
         # input to continuous positions MLP
-        pos = torch.arange(-n + 1, n, device = device, dtype = dtype)
+        pos = torch.arange(-n + 1, n, device = device).float()
         pos = rearrange(pos, '... -> ... 1')
 
         if self.log_distance:
@@ -315,12 +324,14 @@ class DynamicPositionBias(nn.Module):
         # get position biases        
         bias = pos[indices]
         bias = rearrange(bias, 'i j h -> h i j')
-        return qk_dots + bias
+        return bias
 
 class AlibiPositionalBias(nn.Module):
-    def __init__(self, heads, **kwargs):
+    def __init__(self, heads, total_heads, **kwargs):
         super().__init__()
         self.heads = heads
+        self.total_heads = total_heads
+
         slopes = Tensor(self._get_slopes(heads))
         slopes = rearrange(slopes, 'h -> h 1 1')
         self.register_buffer('slopes', slopes, persistent = False)
@@ -345,8 +356,12 @@ class AlibiPositionalBias(nn.Module):
         closest_power_of_2 = 2 ** math.floor(math.log2(heads))
         return get_slopes_power_of_2(closest_power_of_2) + get_slopes_power_of_2(2 * closest_power_of_2)[0::2][:heads-closest_power_of_2]
 
-    def forward(self, qk_dots):
-        h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
+    @property
+    def device(self):
+        return next(self.buffers()).device
+
+    def forward(self, i, j):
+        h, device = self.total_heads, self.device
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
             return qk_dots + self.bias[..., :i, :j]
@@ -356,9 +371,9 @@ class AlibiPositionalBias(nn.Module):
 
         num_heads_unalibied = h - bias.shape[0]
         bias = pad_at_dim(bias, (0, num_heads_unalibied), dim = 0)
-        self.register_buffer('bias', bias, persistent=False)
+        self.register_buffer('bias', bias, persistent = False)
 
-        return qk_dots + self.bias
+        return self.bias
 
 class LearnedAlibiPositionalBias(AlibiPositionalBias):
     def __init__(self, heads):
@@ -376,12 +391,12 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
             bias = self.bias[..., :i, :j]
         else:
             bias = self.get_bias(i, j, device)
-            self.register_buffer('bias', bias, persistent=False)
+            self.register_buffer('bias', bias, persistent = False)
 
         slopes = get_slopes(self.learned_logslopes)
         bias = bias * slopes
 
-        return qk_dots + bias
+        return bias
 
 class RotaryEmbedding(nn.Module):
     def __init__(
@@ -807,6 +822,12 @@ class Attention(nn.Module):
         if len(masks) > 0:
             final_attn_mask = or_reduce(masks)
 
+        # prepare relative positional bias, if needed
+
+        attn_bias = None
+        if exists(rel_pos):
+            attn_bias = rel_pos(i, j)
+
         # similarities
 
         dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
@@ -819,11 +840,10 @@ class Attention(nn.Module):
         if talking_heads:
             dots = self.pre_softmax_talking_heads(dots)
 
-        if exists(rel_pos):
-            dots = rel_pos(dots)
+        if exists(attn_bias):
+            dots = dots + attn_bias
 
         dtype = dots.dtype
-
         pre_softmax_attn = dots.clone()
 
         if exists(final_attn_mask):
@@ -944,7 +964,7 @@ class AttentionLayers(nn.Module):
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
             alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
-            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads)
+            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads, total_heads = heads)
 
         # determine deepnorm and residual scale
 
