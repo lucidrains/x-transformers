@@ -83,6 +83,12 @@ def pad_at_dim(t, pad, dim = -1, value = 0.):
     zeros = ((0, 0) * dims_from_right)
     return F.pad(t, (*zeros, *pad), value = value)
 
+def or_reduce(masks):
+    head, *body = masks
+    for rest in body:
+        head = head | rest
+    return head
+
 # init helpers
 
 def init_zero_(layer):
@@ -756,11 +762,52 @@ class Attention(nn.Module):
             if exists(input_mask):
                 input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
 
+
+        i, j = map(lambda t: t.shape[-2], (q, k))
+
         kv_einsum_eq = 'b h j d' if not self.one_kv_head else 'b j d'
 
-        dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+        # determine masking
 
-        mask_value = max_neg_value(dots)
+        mask_value = max_neg_value(q)
+        masks = []
+        final_attn_mask = None
+
+        if exists(input_mask):
+            input_mask = rearrange(input_mask, 'b j -> b 1 1 j')
+            masks.append(~input_mask)
+
+        if exists(attn_mask):
+            assert 2 <= attn_mask.ndim <= 4, 'attention mask must have greater than 2 dimensions but less than or equal to 4'
+            if attn_mask.ndim == 2:
+                attn_mask = rearrange(attn_mask, 'i j -> 1 1 i j')
+            elif attn_mask.ndim == 3:
+                attn_mask = rearrange(attn_mask, 'h i j -> 1 h i j')
+            masks.append(~attn_mask)
+
+        if exists(self.max_attend_past):
+            range_q = torch.arange(j - i, j, device = device)
+            range_k = torch.arange(j, device = device)
+            dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
+            max_attend_past_mask = dist > self.max_attend_past
+            masks.append(max_attend_past_mask)
+
+        if self.causal:
+            causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
+            masks.append(causal_mask)
+
+        if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
+            top, _ = dots.topk(self.sparse_topk, dim = -1)
+            vk = rearrange(top[..., -1], '... -> ... 1')
+            sparse_topk_mask = dots < vk
+            masks.append(sparse_topk_mask)
+
+        if len(masks) > 0:
+            final_attn_mask = or_reduce(masks)
+
+        # similarities
+
+        dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
 
         if exists(prev_attn):
             dots = dots + prev_attn
@@ -773,44 +820,12 @@ class Attention(nn.Module):
         if exists(rel_pos):
             dots = rel_pos(dots)
 
-        if exists(input_mask):
-            input_mask = rearrange(input_mask, 'b j -> b 1 1 j')
-            dots = dots.masked_fill(~input_mask, mask_value)
-            del input_mask
-
-        if exists(attn_mask):
-            assert 2 <= attn_mask.ndim <= 4, 'attention mask must have greater than 2 dimensions but less than or equal to 4'
-            if attn_mask.ndim == 2:
-                attn_mask = rearrange(attn_mask, 'i j -> 1 1 i j')
-            elif attn_mask.ndim == 3:
-                attn_mask = rearrange(attn_mask, 'h i j -> 1 h i j')
-            dots = dots.masked_fill(~attn_mask, mask_value)
-
-        if exists(self.max_attend_past):
-            i, j = dots.shape[-2:]
-            range_q = torch.arange(j - i, j, device = device)
-            range_k = torch.arange(j, device = device)
-            dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
-            max_attend_past_mask = dist > self.max_attend_past
-            dots = dots.masked_fill(max_attend_past_mask, mask_value)
-            del max_attend_past_mask
-
-        if self.causal:
-            i, j = dots.shape[-2:]
-            causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
-            dots = dots.masked_fill(causal_mask, mask_value)
-            del causal_mask
-
-        if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
-            top, _ = dots.topk(self.sparse_topk, dim = -1)
-            vk = rearrange(top[..., -1], '... -> ... 1')
-            sparse_topk_mask = dots < vk
-            dots = dots.masked_fill(sparse_topk_mask, mask_value)
-            del sparse_topk_mask
-
         dtype = dots.dtype
 
         pre_softmax_attn = dots.clone()
+
+        if exists(final_attn_mask):
+            dots = dots.masked_fill(final_attn_mask, mask_value)
 
         attn = self.attn_fn(dots, dim = -1)
         attn = attn.type(dtype)
