@@ -2,12 +2,14 @@ import math
 from random import random
 
 import torch
-from torch import nn, einsum
+from torch import nn, einsum, Tensor
 import torch.nn.functional as F
 
 from functools import partial, wraps
 from inspect import isfunction
 from collections import namedtuple
+from dataclasses import dataclass
+from typing import List
 
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
@@ -18,16 +20,16 @@ from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 DEFAULT_DIM_HEAD = 64
 
-Intermediates = namedtuple('Intermediates', [
-    'qk_similarities',
-    'pre_softmax_attn',
-    'post_softmax_attn'
-])
+@dataclass
+class Intermediates:
+    qk_similarities: Tensor = None
+    pre_softmax_attn: Tensor = None
+    post_softmax_attn: Tensor = None
 
-LayerIntermediates = namedtuple('Intermediates', [
-    'hiddens',
-    'attn_intermediates'
-])
+@dataclass
+class LayerIntermediates:
+    hiddens: List[Tensor] = None,
+    attn_intermediates: List[Intermediates] = None
 
 # helpers
 
@@ -319,7 +321,7 @@ class AlibiPositionalBias(nn.Module):
     def __init__(self, heads, **kwargs):
         super().__init__()
         self.heads = heads
-        slopes = torch.Tensor(self._get_slopes(heads))
+        slopes = Tensor(self._get_slopes(heads))
         slopes = rearrange(slopes, 'h -> h 1 1')
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
