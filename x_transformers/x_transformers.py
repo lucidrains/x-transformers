@@ -14,17 +14,12 @@ from typing import List
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
+from x_transformers.attend import Attend, Intermediates
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # constants
 
 DEFAULT_DIM_HEAD = 64
-
-@dataclass
-class Intermediates:
-    qk_similarities: Tensor = None
-    pre_softmax_attn: Tensor = None
-    post_softmax_attn: Tensor = None
 
 @dataclass
 class LayerIntermediates:
@@ -364,7 +359,7 @@ class AlibiPositionalBias(nn.Module):
         h, device = self.total_heads, self.device
 
         if exists(self.bias) and self.bias.shape[-1] >= j:
-            return qk_dots + self.bias[..., :i, :j]
+            return self.bias[..., :i, :j]
 
         bias = self.get_bias(i, j, device)
         bias = bias * self.slopes
@@ -376,13 +371,13 @@ class AlibiPositionalBias(nn.Module):
         return self.bias
 
 class LearnedAlibiPositionalBias(AlibiPositionalBias):
-    def __init__(self, heads):
-        super().__init__(heads)
+    def __init__(self, heads, total_heads):
+        super().__init__(heads, total_heads)
         log_slopes = torch.log(self.slopes)
         self.learned_logslopes = nn.Parameter(log_slopes)
 
-    def forward(self, qk_dots):
-        h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
+    def forward(self, i, j):
+        h, i, j, device = self.heads, self.device
 
         def get_slopes(param):
             return pad_at_dim(param.exp(), (0, h - param.shape[0]), dim = -2)
@@ -610,6 +605,7 @@ class Attention(nn.Module):
         dim_head = DEFAULT_DIM_HEAD,
         heads = 8,
         causal = False,
+        flash = False,
         talking_heads = False,
         head_scale = False,
         sparse_topk = None,
@@ -655,9 +651,6 @@ class Attention(nn.Module):
         # relations projection from tp-attention
         self.to_r = nn.Linear(dim, v_dim, bias = False) if tensor_product else None
 
-        # dropout
-        self.dropout = nn.Dropout(dropout)
-
         # add GLU gating for aggregated values, from alphafold2
         self.to_v_gate = None
         if gate_values:
@@ -681,11 +674,17 @@ class Attention(nn.Module):
         assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
 
-        # talking heads
-        self.talking_heads = talking_heads
-        if talking_heads:
-            self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
-            self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
+        # attend class - includes core attention algorithm + talking heads
+
+        self.attend = Attend(
+            heads = heads,
+            causal = causal,
+            talking_heads = talking_heads,
+            dropout = dropout,
+            qk_norm = qk_norm,
+            scale = qk_norm_scale if qk_norm else self.scale,
+            flash = flash
+        )
 
         # head scaling
         self.head_scale = head_scale
@@ -694,9 +693,6 @@ class Attention(nn.Module):
 
         # explicit topk sparse attention
         self.sparse_topk = sparse_topk
-
-        # attention softmax function
-        self.attn_fn = partial(F.softmax, dtype = torch.float32) if not qk_norm else F.softmax
 
         # add memory key / values
         self.num_mem_kv = num_mem_kv
@@ -724,7 +720,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, talking_heads, head_scale, scale, device, has_context = *x.shape, self.heads, self.talking_heads, self.head_scale, self.scale, x.device, exists(context)
+        b, n, _, h, head_scale, device, has_context = *x.shape, self.heads, self.head_scale, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -809,10 +805,6 @@ class Attention(nn.Module):
             max_attend_past_mask = dist > self.max_attend_past
             masks.append(max_attend_past_mask)
 
-        if self.causal:
-            causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
-            masks.append(causal_mask)
-
         if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
             top, _ = dots.topk(self.sparse_topk, dim = -1)
             vk = rearrange(top[..., -1], '... -> ... 1')
@@ -828,57 +820,36 @@ class Attention(nn.Module):
         if exists(rel_pos):
             attn_bias = rel_pos(i, j)
 
-        # similarities
+        # attention is all we need
 
-        dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+        out, intermediates = self.attend(
+            q, k, v,
+            mask = final_attn_mask,
+            attn_bias = attn_bias,
+            prev_attn = prev_attn
+        )
 
-        if exists(prev_attn):
-            dots = dots + prev_attn
-
-        qk_similarities = dots.clone()
-
-        if talking_heads:
-            dots = self.pre_softmax_talking_heads(dots)
-
-        if exists(attn_bias):
-            dots = dots + attn_bias
-
-        dtype = dots.dtype
-        pre_softmax_attn = dots.clone()
-
-        if exists(final_attn_mask):
-            dots = dots.masked_fill(final_attn_mask, mask_value)
-
-        attn = self.attn_fn(dots, dim = -1)
-        attn = attn.type(dtype)
-
-        post_softmax_attn = attn.clone()
-
-        attn = self.dropout(attn)
-
-        if talking_heads:
-            attn = self.post_softmax_talking_heads(attn)
-
-        out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn, v)
+        # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
 
         if exists(r):
-            # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
             out = out * r + out
+
+        # normformer scaling of heads
 
         if head_scale:
             out = out * self.head_scale_params
 
+        # merge heads
+
         out = rearrange(out, 'b h n d -> b n (h d)')
+
+        # alphafold2 styled gating of the values
 
         if exists(self.to_v_gate):
             gates = self.to_v_gate(x)
             out = out * gates.sigmoid()
 
-        intermediates = Intermediates(
-            qk_similarities = qk_similarities,
-            pre_softmax_attn = pre_softmax_attn,
-            post_softmax_attn = post_softmax_attn
-        )
+        # combine the heads
 
         out = self.to_out(out)
 
@@ -955,10 +926,15 @@ class AttentionLayers(nn.Module):
 
         # relative positional bias
 
+        flash_attn = attn_kwargs.get('flash', False)
+        assert (int(rel_pos_bias) + int(dynamic_pos_bias) + int(alibi_pos_bias)) <= 1, 'you can only choose up to one of t5, alibi, or dynamic positional bias'
+
         self.rel_pos = None
         if rel_pos_bias:
+            assert not flash_attn, 'flash attention not compatible with t5 relative positional bias'
             self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance)
         elif dynamic_pos_bias:
+            assert not flash_attn, 'flash attention not compatible with dynamic positional bias'
             self.rel_pos = DynamicPositionBias(dim = dim // 4, heads = heads, log_distance = dynamic_pos_bias_log_distance, depth = dynamic_pos_bias_mlp_depth, norm = dynamic_pos_bias_norm)
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
