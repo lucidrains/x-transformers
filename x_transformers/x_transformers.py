@@ -895,6 +895,7 @@ class AttentionLayers(nn.Module):
         deepnorm = False,
         shift_tokens = 0,
         sandwich_norm = False,
+        resi_dual = False,
         zero_init_branch_output = False,
         layer_dropout = 0.,
         cross_attn_tokens_dropout = 0.,
@@ -944,13 +945,16 @@ class AttentionLayers(nn.Module):
 
         if deepnorm:
             assert scale_residual_constant == 1, 'scale residual constant is being overridden by deep norm settings'
-            pre_norm = sandwich_norm = False
+            pre_norm = sandwich_norm = resi_dual = False
             scale_residual = True
             scale_residual_constant = (2 * depth) ** 0.25
 
+        assert (int(sandwich_norm) + int(resi_dual)) <= 1, 'either sandwich norm or resiDual is selected, but not both'
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
+        assert not (not pre_norm and resi_dual), 'resiDualcannot be used when not using prenorm'
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
+        self.resi_dual = resi_dual
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
@@ -1037,7 +1041,7 @@ class AttentionLayers(nn.Module):
 
             pre_branch_norm = norm_fn() if pre_norm else None
             post_branch_norm = norm_fn() if sandwich_norm else None
-            post_main_norm = norm_fn() if not pre_norm and not is_last_layer else None
+            post_main_norm = norm_fn() if (resi_dual or not pre_norm) and not is_last_layer else None
 
             norms = nn.ModuleList([
                 pre_branch_norm,
@@ -1080,6 +1084,8 @@ class AttentionLayers(nn.Module):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
             rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, x.device)
 
+        outer_residual = x
+
         for ind, (layer_type, (norm, block, residual_fn), layer_dropout) in enumerate(zip(self.layer_types, self.layers, self.layer_dropouts)):
             is_last = ind == (len(self.layers) - 1)
 
@@ -1095,12 +1101,12 @@ class AttentionLayers(nn.Module):
                 if self.training and self.cross_attn_tokens_dropout > 0.:
                     context, context_mask = dropout_seq(context, context_mask, self.cross_attn_tokens_dropout)
 
-            residual = x
+            inner_residual = x
 
-            pre_branch_norm, post_branch_norm, post_main_norm = norm
+            pre_norm, post_branch_norm, post_main_norm = norm
 
-            if exists(pre_branch_norm):
-                x = pre_branch_norm(x)
+            if exists(pre_norm) and not self.resi_dual:
+                x = pre_norm(x)
 
             if layer_type == 'a':
                 out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
@@ -1109,10 +1115,13 @@ class AttentionLayers(nn.Module):
             elif layer_type == 'f':
                 out = block(x)
 
+            if self.resi_dual:
+                outer_residual = residual_fn(out, outer_residual)
+
             if exists(post_branch_norm):
                 out = post_branch_norm(out)
 
-            x = residual_fn(out, residual)
+            x = residual_fn(out, inner_residual)
 
             if layer_type in ('a', 'c') and return_hiddens:
                 intermediates.append(inter)
@@ -1124,6 +1133,9 @@ class AttentionLayers(nn.Module):
 
             if exists(post_main_norm):
                 x = post_main_norm(x)
+
+            if self.resi_dual:
+                x = x + pre_norm(outer_residual)
 
         if return_hiddens:
             intermediates = LayerIntermediates(
