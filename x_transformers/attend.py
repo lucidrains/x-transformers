@@ -13,7 +13,7 @@ from einops import rearrange
 
 # constants
 
-Config = namedtuple('EfficientAttentionConfig', ['enable_flash', 'enable_math', 'enable_mem_efficient'])
+EfficientAttentionConfig = namedtuple('EfficientAttentionConfig', ['enable_flash', 'enable_math', 'enable_mem_efficient'])
 
 @dataclass
 class Intermediates:
@@ -81,7 +81,7 @@ class Attend(nn.Module):
 
         # determine efficient attention configs for cuda and cpu
 
-        self.cpu_config = Config(True, True, True)
+        self.cpu_config = EfficientAttentionConfig(True, True, True)
         self.cuda_config = None
 
         if not torch.cuda.is_available() or not flash:
@@ -91,10 +91,10 @@ class Attend(nn.Module):
 
         if device_properties.major == 8 and device_properties.minor == 0:
             print_once('A100 GPU detected, using flash attention if input tensor is on cuda')
-            self.cuda_config = Config(True, False, False)
+            self.cuda_config = EfficientAttentionConfig(True, False, False)
         else:
             print_once('Non-A100 GPU detected, using math or mem efficient attention if input tensor is on cuda')
-            self.cuda_config = Config(False, True, True)
+            self.cuda_config = EfficientAttentionConfig(False, True, True)
 
     def flash_attn(
         self,
