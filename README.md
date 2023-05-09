@@ -238,6 +238,40 @@ model(x)
 
 ## Features
 
+### Flash Attention
+
+<img src="./images/flash-attention.png" width="500px"></img>
+
+What originally started off as <a href="https://arxiv.org/abs/2112.05682">a short paper</a> from Markus Rabe culminated as a practical fused attention CUDA kernel, named <a href="https://arxiv.org/abs/2205.14135">Flash Attention</a> by <a href="https://tridao.me/">Tri Dao</a>.
+
+The technique processes the attention matrix in tiles, only keeping track of the running softmax and exponentiated weighted sums. By recomputing on the backwards pass in a tiled fashion, one is able to keep the memory linear with respect to sequence length. This allows a lot of recent models  to be able to reach for longer context lengths without worrying about the memory bottleneck.
+
+Other engineering decisions made by Tri Dao led to its enormous success, namely minimizing HBM accesses so that both the forwards and backwards outperform naive attention. In other words, flash attention is not only more memory efficient, but faster as well, making it a necessity for training transformers.
+
+MetaAI has recently added the ability to use <a href="https://github.com/hazyresearch/flash-attention">Tri Dao's CUDA kernel</a> through the <a href="https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html">scaled_dot_product_attention</a> function in Pytorch 2.0. (They also have a `mem_efficient` attention, which is identical to flash attention design, just that the tiles are traversed differently)
+
+<a href="https://ai.facebook.com/blog/large-language-model-llama-meta-ai/">Llama</a> was trained using Flash Attention. The only reason to avoid it is if you require operating on the attention matrix (dynamic positional bias, talking heads, residual attention).
+
+You can use it in this repository by setting `attn_flash` to `True` and enjoy the immediate memory savings and increase in speed.
+
+ex.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_flash = True # just set this to True if you have pytorch 2.0 installed
+    )
+)
+```
+
 ### Augmenting Self-attention with Persistent Memory
 
 <img src="./images/all-attention.png" width="500px"></img>
@@ -912,7 +946,6 @@ model = TransformerWrapper(
     )
 )
 ```
-
 
 ### ALiBi Positional Embedding
 
@@ -1786,6 +1819,15 @@ generated = model.generate(start_emb, 17) # (17, 777)
     publisher = {arXiv},
     year    = {2023},
     copyright = {Creative Commons Attribution 4.0 International}
+}
+```
+
+```bibtex
+@inproceedings{dao2022flashattention,
+    title   = {Flash{A}ttention: Fast and Memory-Efficient Exact Attention with {IO}-Awareness},
+    author  = {Dao, Tri and Fu, Daniel Y. and Ermon, Stefano and Rudra, Atri and R{\'e}, Christopher},
+    booktitle = {Advances in Neural Information Processing Systems},
+    year    = {2022}
 }
 ```
 
