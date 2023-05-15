@@ -889,6 +889,7 @@ class AttentionLayers(nn.Module):
         cross_residual_attn = False,
         macaron = False,
         pre_norm = True,
+        pre_norm_has_final_norm = True,
         gate_residual = False,
         scale_residual = False,
         scale_residual_constant = 1.,
@@ -1016,6 +1017,11 @@ class AttentionLayers(nn.Module):
 
         shift_tokens = cast_tuple(shift_tokens, len(layer_types))
 
+        # whether it has post norm
+
+        has_post_main_norm = resi_dual or not pre_norm
+        self.final_norm = norm_fn() if not has_post_main_norm and pre_norm_has_final_norm else nn.Identity()
+
         # iterate and construct layers
 
         for ind, (layer_type, layer_shift_tokens) in enumerate(zip(self.layer_types, shift_tokens)):
@@ -1041,7 +1047,7 @@ class AttentionLayers(nn.Module):
 
             pre_branch_norm = norm_fn() if pre_norm else None
             post_branch_norm = norm_fn() if sandwich_norm else None
-            post_main_norm = norm_fn() if (resi_dual or not pre_norm) and not is_last_layer else None
+            post_main_norm = norm_fn() if has_post_main_norm else None
 
             norms = nn.ModuleList([
                 pre_branch_norm,
@@ -1137,6 +1143,8 @@ class AttentionLayers(nn.Module):
             if self.resi_dual:
                 x = x + pre_norm(outer_residual)
 
+        x = self.final_norm(x)
+
         if return_hiddens:
             intermediates = LayerIntermediates(
                 hiddens = hiddens,
@@ -1195,7 +1203,7 @@ class ViTransformerWrapper(nn.Module):
         self.dropout = nn.Dropout(emb_dropout)
 
         self.attn_layers = attn_layers
-        self.norm = nn.LayerNorm(dim)
+
         self.mlp_head = nn.Linear(dim, num_classes) if exists(num_classes) else nn.Identity()
 
     def forward(
@@ -1215,7 +1223,6 @@ class ViTransformerWrapper(nn.Module):
         x = self.dropout(x)
 
         x = self.attn_layers(x)
-        x = self.norm(x)
 
         if not exists(self.mlp_head) or return_embeddings:
             return x
@@ -1272,7 +1279,6 @@ class TransformerWrapper(nn.Module):
 
         self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
         self.attn_layers = attn_layers
-        self.norm = nn.LayerNorm(dim)
 
         self.init_()
 
@@ -1364,8 +1370,6 @@ class TransformerWrapper(nn.Module):
         else:
             x = self.attn_layers(x, mask = mask, mems = mems, **kwargs)
 
-        x = self.norm(x)
-
         mem, x = x[:, :num_mem], x[:, num_mem:]
 
         if return_logits_and_embeddings:
@@ -1424,7 +1428,6 @@ class ContinuousTransformerWrapper(nn.Module):
         self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
 
         self.attn_layers = attn_layers
-        self.norm = nn.LayerNorm(dim)
 
         self.project_out = nn.Linear(dim, dim_out) if exists(dim_out) else nn.Identity()
 
@@ -1456,7 +1459,6 @@ class ContinuousTransformerWrapper(nn.Module):
         x = self.emb_dropout(x)
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
-        x = self.norm(x)
 
         out = self.project_out(x) if not return_embeddings else x
 
