@@ -952,7 +952,10 @@ class AttentionLayers(nn.Module):
 
         assert (int(sandwich_norm) + int(resi_dual)) <= 1, 'either sandwich norm or resiDual is selected, but not both'
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
-        assert not (not pre_norm and resi_dual), 'resiDualcannot be used when not using prenorm'
+
+        if resi_dual:
+            pre_norm = False
+
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
         self.resi_dual = resi_dual
@@ -1019,8 +1022,7 @@ class AttentionLayers(nn.Module):
 
         # whether it has post norm
 
-        has_post_main_norm = resi_dual or not pre_norm
-        self.final_norm = norm_fn() if not has_post_main_norm and pre_norm_has_final_norm else nn.Identity()
+        self.final_norm = norm_fn() if pre_norm or resi_dual else nn.Identity()
 
         # iterate and construct layers
 
@@ -1047,7 +1049,7 @@ class AttentionLayers(nn.Module):
 
             pre_branch_norm = norm_fn() if pre_norm else None
             post_branch_norm = norm_fn() if sandwich_norm else None
-            post_main_norm = norm_fn() if has_post_main_norm else None
+            post_main_norm = norm_fn() if not pre_norm else None
 
             norms = nn.ModuleList([
                 pre_branch_norm,
@@ -1111,7 +1113,7 @@ class AttentionLayers(nn.Module):
 
             pre_norm, post_branch_norm, post_main_norm = norm
 
-            if exists(pre_norm) and not self.resi_dual:
+            if exists(pre_norm):
                 x = pre_norm(x)
 
             if layer_type == 'a':
@@ -1140,10 +1142,10 @@ class AttentionLayers(nn.Module):
             if exists(post_main_norm):
                 x = post_main_norm(x)
 
-            if self.resi_dual:
-                x = x + pre_norm(outer_residual)
-
-        x = self.final_norm(x)
+        if self.resi_dual:
+            x = x + self.final_norm(outer_residual)
+        else:
+            x = self.final_norm(x)
 
         if return_hiddens:
             intermediates = LayerIntermediates(
