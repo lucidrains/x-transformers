@@ -377,7 +377,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         self.learned_logslopes = nn.Parameter(log_slopes)
 
     def forward(self, i, j):
-        h, i, j, device = self.heads, self.device
+        h, device = self.heads, self.device
 
         def get_slopes(param):
             return pad_at_dim(param.exp(), (0, h - param.shape[0]), dim = -2)
