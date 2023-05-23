@@ -1193,7 +1193,7 @@ class ViTransformerWrapper(nn.Module):
 
         self.patch_size = patch_size
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, dim))
 
         self.patch_to_embedding = nn.Sequential(
             nn.LayerNorm(patch_dim),

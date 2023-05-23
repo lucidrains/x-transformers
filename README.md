@@ -98,7 +98,7 @@ mask = torch.ones_like(x).bool()
 model(x, mask = mask) # (1, 1024, 20000)
 ```
 
-State of the art image classification
+State of the art image classification (<a href="https://arxiv.org/abs/2205.01580">SimpleViT</a>)
 
 ```python
 import torch
@@ -1871,6 +1871,16 @@ generated = model.generate(start_emb, 17) # (17, 777)
     title   = {Scaling Vision Transformers to 22 Billion Parameters},
     author  = {Mostafa Dehghani and Josip Djolonga and Basil Mustafa and Piotr Padlewski and Jonathan Heek and Justin Gilmer and Andreas Steiner and Mathilde Caron and Robert Geirhos and Ibrahim M. Alabdulmohsin and Rodolphe Jenatton and Lucas Beyer and Michael Tschannen and Anurag Arnab and Xiao Wang and Carlos Riquelme and Matthias Minderer and Joan Puigcerver and Utku Evci and Manoj Kumar and Sjoerd van Steenkiste and Gamaleldin F. Elsayed and Aravindh Mahendran and Fisher Yu and Avital Oliver and Fantine Huot and Jasmijn Bastings and Mark Collier and Alexey A. Gritsenko and Vighnesh Birodkar and Cristina Nader Vasconcelos and Yi Tay and Thomas Mensink and Alexander Kolesnikov and Filip Paveti'c and Dustin Tran and Thomas Kipf and Mario Luvci'c and Xiaohua Zhai and Daniel Keysers and Jeremiah Harmsen and Neil Houlsby},
     year    = {2023}
+}
+```
+
+```bibtex
+@article{Beyer2022BetterPV,
+    title   = {Better plain ViT baselines for ImageNet-1k},
+    author  = {Lucas Beyer and Xiaohua Zhai and Alexander Kolesnikov},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2205.01580}
 }
 ```
 
