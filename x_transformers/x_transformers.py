@@ -438,6 +438,18 @@ def apply_rotary_pos_emb(t, freqs, scale = 1):
     freqs = freqs[-seq_len:, :]
     return (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
 
+# linear with optional groups
+
+def Linear(dim, dim_out, *, groups = 1, bias = True):
+    if groups == 1:
+        return nn.Linear(dim, dim_out, bias = bias)
+
+    return nn.Sequential(
+        Rearrange('b n d -> b d n'),
+        nn.Conv1d(dim, dim_out, 1, groups = groups, bias = bias),
+        Rearrange('b d n -> b n d')
+    )
+
 # norms
 
 class Scale(nn.Module):
@@ -622,12 +634,20 @@ class Attention(nn.Module):
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None,
-        tensor_product = False   # https://arxiv.org/abs/2208.06061
+        tensor_product = False,   # https://arxiv.org/abs/2208.06061
+        depthwise_heads = None,
+        cascading_heads = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
 
         self.heads = heads
+
+        depthwise_heads = default(depthwise_heads, cascading_heads)
+        groups = heads if depthwise_heads else 1
+
+        self.cascading_heads = cascading_heads
+
         self.causal = causal
         self.max_attend_past = max_attend_past
 
@@ -641,20 +661,20 @@ class Attention(nn.Module):
             v_dim = value_dim_head
             out_dim = v_dim * heads
 
-        self.to_q = nn.Linear(dim, q_dim, bias = False)
-        self.to_k = nn.Linear(dim, k_dim, bias = False)
+        self.to_q = Linear(dim, q_dim, groups = groups, bias = False)
+        self.to_k = Linear(dim, k_dim, groups = groups, bias = False)
 
         # shared key / values, for further memory savings during inference
         assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
-        self.to_v = nn.Linear(dim, v_dim, bias = False) if not shared_kv else None
+        self.to_v = Linear(dim, v_dim, groups = groups, bias = False) if not shared_kv else None
 
         # relations projection from tp-attention
-        self.to_r = nn.Linear(dim, v_dim, bias = False) if tensor_product else None
+        self.to_r = Linear(dim, v_dim, groups = groups, bias = False) if tensor_product else None
 
         # add GLU gating for aggregated values, from alphafold2
         self.to_v_gate = None
         if gate_values:
-            self.to_v_gate = nn.Linear(dim, out_dim)
+            self.to_v_gate = Linear(dim, out_dim, groups = groups)
             nn.init.constant_(self.to_v_gate.weight, 0)
             nn.init.constant_(self.to_v_gate.bias, 1)
 
@@ -820,12 +840,31 @@ class Attention(nn.Module):
 
         # attention is all we need
 
-        out, intermediates = self.attend(
-            q, k, v,
-            mask = final_attn_mask,
-            attn_bias = attn_bias,
-            prev_attn = prev_attn
-        )
+        if not self.cascading_heads:
+            out, intermediates = self.attend(
+                q, k, v,
+                mask = final_attn_mask,
+                attn_bias = attn_bias,
+                prev_attn = prev_attn
+            )
+        else:
+            outs = []
+            out = None
+
+            for q, k, v in zip(q.unbind(dim = 1), k.unbind(dim = 1), v.unbind(dim = 1)):
+                q, k, v = map(lambda t: rearrange(t, 'b ... -> b 1 ...'), (q, k, v))
+
+                if exists(out):
+                    q = q + out
+
+                out, intermediates = self.attend(
+                    q, k, v,
+                    mask = final_attn_mask
+                )
+
+                outs.append(out)
+
+            out = torch.cat(outs, dim = 1)
 
         # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
 
