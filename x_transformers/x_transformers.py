@@ -627,8 +627,8 @@ class Attention(nn.Module):
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
-        self.heads = heads
 
+        self.heads = heads
         self.causal = causal
         self.max_attend_past = max_attend_past
 
@@ -655,7 +655,7 @@ class Attention(nn.Module):
         # add GLU gating for aggregated values, from alphafold2
         self.to_v_gate = None
         if gate_values:
-            self.to_v_gate = Linear(dim, out_dim, groups = groups)
+            self.to_v_gate = nn.Linear(dim, out_dim)
             nn.init.constant_(self.to_v_gate.weight, 0)
             nn.init.constant_(self.to_v_gate.bias, 1)
 
