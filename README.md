@@ -1884,4 +1884,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@article{Liu2023EfficientViTME,
+    title   = {EfficientViT: Memory Efficient Vision Transformer with Cascaded Group Attention},
+    author  = {Xinyu Liu and Houwen Peng and Ningxin Zheng and Yuqing Yang and Han Hu and Yixuan Yuan},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2305.07027}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
