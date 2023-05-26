@@ -21,6 +21,9 @@ class Intermediates:
     pre_softmax_attn: Tensor = None
     post_softmax_attn: Tensor = None
 
+    def to_tuple(self):
+        return (self.qk_similarities, self.pre_softmax_attn, self.post_softmax_attn)
+
 # helpers
 
 def exists(val):
@@ -28,6 +31,9 @@ def exists(val):
 
 def default(val, d):
     return val if exists(val) else d
+
+def compact(arr):
+    return [*filter(exists, arr)]
 
 def once(fn):
     called = False
@@ -244,3 +250,78 @@ class Attend(nn.Module):
         )
 
         return out, intermediates
+
+# cascading heads logic
+
+def to_single_heads(t):
+    heads = t.unbind(dim = 1)
+    return tuple(rearrange(head, 'b ... -> b 1 ...') for head in heads)
+
+class CascadingHeads(nn.Module):
+    def __init__(self, attend: Attend):
+        super().__init__()
+        self.attend = attend
+
+    def forward(
+        self,
+        q, k, v,
+        mask = None,
+        attn_bias = None,
+        prev_attn = None
+    ):
+        assert q.shape[-1] == v.shape[-1], 'cascading heads can only be done if query / key and value head dimensions are the same'
+
+        # split inputs into per-head inputs
+
+        heads = q.shape[1]
+
+        queries = to_single_heads(q)
+        keys = to_single_heads(k) if k.ndim == 4 else ((k,) * heads)
+        values = to_single_heads(v) if v.ndim == 4 else ((v,) * heads)
+
+        mask = (mask,) * heads
+        attn_bias = to_single_heads(attn_bias) if exists(attn_bias) else ((None,) * heads)
+        prev_attn = to_single_heads(prev_attn) if exists(prev_attn) else ((None,) * heads)
+
+        # now loop through each head, without output of previous head summed with the next head
+        # thus cascading
+
+        all_outs = []
+        all_intermediates = []
+
+        prev_head_out = None
+
+        for h_q, h_k, h_v, h_mask, h_attn_bias, h_prev_attn in zip(queries, keys, values, mask, attn_bias, prev_attn):
+
+            if exists(prev_head_out):
+                h_q = h_q + prev_head_out
+
+            out, intermediates = self.attend(
+                h_q, h_k, h_v,
+                mask = h_mask,
+                attn_bias = h_attn_bias,
+                prev_attn = h_prev_attn
+            )
+
+            prev_head_out = out
+
+            all_outs.append(out)
+            all_intermediates.append(intermediates)
+
+        # cat all output heads
+
+        all_outs = torch.cat(all_outs, dim = 1)
+
+        # cat all intermediates, if they exist
+
+        qk_similarities, pre_softmax_attn, post_softmax_attn = zip(*map(lambda i: i.to_tuple(), all_intermediates))
+
+        qk_similarities, pre_softmax_attn, post_softmax_attn = map(compact, (qk_similarities, pre_softmax_attn, post_softmax_attn))
+
+        aggregated_intermediates = Intermediates(
+            qk_similarities = torch.cat(qk_similarities, dim = 1) if len(qk_similarities) > 0 else None,
+            pre_softmax_attn = torch.cat(pre_softmax_attn, dim = 1) if len(pre_softmax_attn) > 0 else None,
+            post_softmax_attn = torch.cat(post_softmax_attn, dim = 1) if len(post_softmax_attn) > 0 else None
+        )
+
+        return all_outs, aggregated_intermediates

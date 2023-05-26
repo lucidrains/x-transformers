@@ -14,7 +14,7 @@ from typing import List
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
-from x_transformers.attend import Attend, Intermediates
+from x_transformers.attend import Attend, Intermediates, CascadingHeads
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # constants
@@ -622,7 +622,8 @@ class Attention(nn.Module):
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None,
-        tensor_product = False   # https://arxiv.org/abs/2208.06061
+        tensor_product = False,   # https://arxiv.org/abs/2208.06061
+        cascading_heads = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -685,6 +686,9 @@ class Attention(nn.Module):
             scale = qk_norm_scale if qk_norm else self.scale,
             flash = flash
         )
+
+        # cascading heads - wrap the Attend logic
+        self.attend = CascadingHeads(self.attend)
 
         # head scaling
         self.head_scale = head_scale
