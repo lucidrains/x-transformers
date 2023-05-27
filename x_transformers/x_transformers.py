@@ -687,8 +687,9 @@ class Attention(nn.Module):
             flash = flash
         )
 
-        # cascading heads - wrap the Attend logic
-        self.attend = CascadingHeads(self.attend)
+        if cascading_heads:
+            # cascading heads - wrap the Attend logic
+            self.attend = CascadingHeads(self.attend)
 
         # head scaling
         self.head_scale = head_scale
