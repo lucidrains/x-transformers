@@ -1062,7 +1062,8 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        resi_dual = True # set this to True
+        resi_dual = True,               # set this to True
+        resi_dual_scale = 0.1           # in appendix, they said on fp16 the prenorm residual is prone to overflow. they claim by scaling it at each layer by a factor, it would prevent the overflow, and keep results the same (as layernorms are invariant to scaling of the input)
     )
 )
 
