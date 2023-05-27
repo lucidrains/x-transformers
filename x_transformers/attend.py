@@ -280,7 +280,10 @@ class CascadingHeads(nn.Module):
         values = to_single_heads(v) if v.ndim == 4 else ((v,) * heads)
 
         mask = (mask,) * heads
-        attn_bias = to_single_heads(attn_bias) if exists(attn_bias) else ((None,) * heads)
+
+        attn_bias = attn_bias.unbind(dim = 0) if exists(attn_bias) else ((None,) * heads)
+        attn_bias = map(lambda t: rearrange(t, '... -> 1 ...'), attn_bias)
+
         prev_attn = to_single_heads(prev_attn) if exists(prev_attn) else ((None,) * heads)
 
         # now loop through each head, without output of previous head summed with the next head
