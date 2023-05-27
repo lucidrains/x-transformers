@@ -253,9 +253,9 @@ class Attend(nn.Module):
 
 # cascading heads logic
 
-def to_single_heads(t):
-    heads = t.unbind(dim = 1)
-    return tuple(rearrange(head, 'b ... -> b 1 ...') for head in heads)
+def to_single_heads(t, dim = 1):
+    heads = t.unbind(dim = dim)
+    return tuple(head.unsqueeze(dim) for head in heads)
 
 class CascadingHeads(nn.Module):
     def __init__(self, attend: Attend):
@@ -280,7 +280,8 @@ class CascadingHeads(nn.Module):
         values = to_single_heads(v) if v.ndim == 4 else ((v,) * heads)
 
         mask = (mask,) * heads
-        attn_bias = to_single_heads(attn_bias) if exists(attn_bias) else ((None,) * heads)
+
+        attn_bias = to_single_heads(attn_bias, dim = 0) if exists(attn_bias) else ((None,) * heads)
         prev_attn = to_single_heads(prev_attn) if exists(prev_attn) else ((None,) * heads)
 
         # now loop through each head, without output of previous head summed with the next head
