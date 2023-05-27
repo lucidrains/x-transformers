@@ -901,6 +901,7 @@ class AttentionLayers(nn.Module):
         shift_tokens = 0,
         sandwich_norm = False,
         resi_dual = False,
+        resi_dual_scale = 1.,
         zero_init_branch_output = False,
         layer_dropout = 0.,
         cross_attn_tokens_dropout = 0.,
@@ -962,7 +963,10 @@ class AttentionLayers(nn.Module):
 
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
+
         self.resi_dual = resi_dual
+        assert 0 < resi_dual_scale <= 1., 'resiDual prenorm residual must be scaled by a factor greater than 0 and less than or equal to 1.'
+        self.resi_dual_scale = resi_dual_scale
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
@@ -1128,7 +1132,7 @@ class AttentionLayers(nn.Module):
                 out = block(x)
 
             if self.resi_dual:
-                outer_residual = residual_fn(out, outer_residual)
+                outer_residual = residual_fn(out, outer_residual) * self.resi_dual_scale
 
             if exists(post_branch_norm):
                 out = post_branch_norm(out)
