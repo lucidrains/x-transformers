@@ -358,7 +358,7 @@ class AlibiPositionalBias(nn.Module):
     def forward(self, i, j):
         h, device = self.total_heads, self.device
 
-        if exists(self.bias) and self.bias.shape[-1] >= j:
+        if exists(self.bias) and self.bias.shape[-1] >= j and self.bias.shape[-2] >= i:
             return self.bias[..., :i, :j]
 
         bias = self.get_bias(i, j, device)
@@ -382,7 +382,7 @@ class LearnedAlibiPositionalBias(AlibiPositionalBias):
         def get_slopes(param):
             return pad_at_dim(param.exp(), (0, h - param.shape[0]), dim = -2)
 
-        if exists(self.bias) and self.bias.shape[-1] >= j:
+        if exists(self.bias) and self.bias.shape[-1] >= j and self.bias.shape[-2] >= i:
             bias = self.bias[..., :i, :j]
         else:
             bias = self.get_bias(i, j, device)
@@ -971,6 +971,8 @@ class AttentionLayers(nn.Module):
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
+        assert not (flash_attn and (residual_attn or cross_residual_attn)), 'flash attention is not compatible with residual attention'
+
         self.cross_attend = cross_attend
 
         norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
