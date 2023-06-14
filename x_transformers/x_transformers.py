@@ -23,7 +23,7 @@ DEFAULT_DIM_HEAD = 64
 
 @dataclass
 class LayerIntermediates:
-    hiddens: List[Tensor] = None,
+    hiddens: List[Tensor] = None
     attn_intermediates: List[Intermediates] = None
 
 # helpers
