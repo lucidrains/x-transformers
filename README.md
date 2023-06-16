@@ -1236,6 +1236,8 @@ A number of papers have hinted that causal transformers (`Decoder`) can learn ab
 
 Given <a href="https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html">PaLM</a>, the trend going forward may be to forgo absolute positional embedding (again, for causal transformers only), and add relative positional embeddings with RoPE, ALiBi, etc.
 
+Update: <a href="https://arxiv.org/abs/2305.19466">This paper</a> shows that in the absence of any engineered absolute or relative positional embeddings, decoders can generate implicit positions, and even length generalize better than solutions of the past. They were unaware of dynamic positional bias, however.
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
@@ -1892,6 +1894,16 @@ generated = model.generate(start_emb, 17) # (17, 777)
     journal = {ArXiv},
     year    = {2023},
     volume  = {abs/2305.07027}
+}
+```
+
+```bibtex
+@article{Kazemnejad2023TheIO,
+    title   = {The Impact of Positional Encoding on Length Generalization in Transformers},
+    author  = {Amirhossein Kazemnejad and Inkit Padhi and Karthikeyan Natesan Ramamurthy and Payel Das and Siva Reddy},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2305.19466}
 }
 ```
 
