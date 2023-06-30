@@ -138,7 +138,7 @@ class Attend(nn.Module):
 
             if causal:
                 causal_mask = torch.ones((q_len, k_len), dtype = torch.bool, device = device).triu(k_len - q_len + 1)
-                mask = mask & ~causal_mask
+                mask = mask | causal_mask
                 causal = False
 
         # handle alibi positional bias
@@ -153,7 +153,7 @@ class Attend(nn.Module):
             mask_value = -torch.finfo(q.dtype).max
 
             if exists(mask):
-                attn_bias = attn_bias.masked_fill(~mask, mask_value // 2)
+                attn_bias = attn_bias.masked_fill(mask, mask_value // 2)
             elif causal:
                 causal_mask = torch.ones((q_len, k_len), dtype = torch.bool, device = device).triu(k_len - q_len + 1)
                 attn_bias = attn_bias.masked_fill(causal_mask, mask_value // 2)
