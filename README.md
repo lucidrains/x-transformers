@@ -1635,6 +1635,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
 ```
 
 ```bibtex
+@inproceedings{Chen2023ExtendingCW,
+    title   = {Extending Context Window of Large Language Models via Positional Interpolation},
+    author  = {Shouyuan Chen and Sherman Wong and Liangjian Chen and Yuandong Tian},
+    year    = {2023}
+}
+```
+
+```bibtex
 @inproceedings{Sun2022ALT,
   title     = {A Length-Extrapolatable Transformer},
   author    = {Yutao Sun and Li Dong and Barun Patra and Shuming Ma and Shaohan Huang and Alon Benhaim and Vishrav Chaudhary and Xia Song and Furu Wei},
