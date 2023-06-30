@@ -398,15 +398,11 @@ class RotaryEmbedding(nn.Module):
         self,
         dim,
         use_xpos = False,
-        scale_base = 512,
-        interpolation_factor = 1.
+        scale_base = 512
     ):
         super().__init__()
         inv_freq = 1. / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
-
-        assert interpolation_factor >= 1.
-        self.interpolation_factor = interpolation_factor
 
         if not use_xpos:
             self.register_buffer('scale', None)
@@ -419,8 +415,6 @@ class RotaryEmbedding(nn.Module):
 
     def forward(self, seq_len, device):
         t = torch.arange(seq_len, device = device).type_as(self.inv_freq)
-        t = t / self.interpolation_factor
-
         freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
         freqs = torch.cat((freqs, freqs), dim = -1)
 
@@ -893,7 +887,6 @@ class AttentionLayers(nn.Module):
         rotary_emb_dim = None,
         rotary_xpos = False,
         rotary_xpos_scale_base = 512,
-        rotary_interpolation_factor = 1.,
         custom_layers = None,
         sandwich_coef = None,
         par_ratio = None,
@@ -932,7 +925,7 @@ class AttentionLayers(nn.Module):
         rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
 
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
-        self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor) if rotary_pos_emb else None
+        self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base) if rotary_pos_emb else None
 
         assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
