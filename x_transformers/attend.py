@@ -185,7 +185,7 @@ class Attend(nn.Module):
     def forward(
         self,
         q, k, v,
-        mask = None,
+        mask = None,        # for this module, mask of `True` refers to masking out attention, while 'False' would attend
         attn_bias = None,
         prev_attn = None
     ):
