@@ -815,7 +815,7 @@ class Attention(nn.Module):
             masks.append(sparse_topk_mask)
 
         if len(masks) > 0:
-            final_attn_mask = or_reduce(masks)
+            final_attn_mask = ~or_reduce(masks)
 
         # prepare relative positional bias, if needed
 

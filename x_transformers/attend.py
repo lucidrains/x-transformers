@@ -138,7 +138,7 @@ class Attend(nn.Module):
 
             if causal:
                 causal_mask = torch.ones((q_len, k_len), dtype = torch.bool, device = device).triu(k_len - q_len + 1)
-                mask = mask | causal_mask
+                mask = mask & ~causal_mask
                 causal = False
 
         # handle alibi positional bias
@@ -153,7 +153,7 @@ class Attend(nn.Module):
             mask_value = -torch.finfo(q.dtype).max
 
             if exists(mask):
-                attn_bias = attn_bias.masked_fill(mask, mask_value // 2)
+                attn_bias = attn_bias.masked_fill(~mask, mask_value // 2)
             elif causal:
                 causal_mask = torch.ones((q_len, k_len), dtype = torch.bool, device = device).triu(k_len - q_len + 1)
                 attn_bias = attn_bias.masked_fill(causal_mask, mask_value // 2)
@@ -163,8 +163,6 @@ class Attend(nn.Module):
             # make it an additive bias here
 
             mask = attn_bias
-        else:
-            mask = ~mask
 
         # Check if there is a compatible device for flash attention
 
@@ -185,7 +183,7 @@ class Attend(nn.Module):
     def forward(
         self,
         q, k, v,
-        mask = None,        # for this module, mask of `True` refers to masking out attention, while 'False' would attend
+        mask = None,
         attn_bias = None,
         prev_attn = None
     ):
@@ -226,7 +224,7 @@ class Attend(nn.Module):
         mask_value = -torch.finfo(dots.dtype).max
 
         if exists(mask):
-            dots = dots.masked_fill(mask, mask_value)
+            dots = dots.masked_fill(~mask, mask_value)
 
         if self.causal:
             i, j = dots.shape[-2:]
