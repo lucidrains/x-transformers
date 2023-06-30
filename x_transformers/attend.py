@@ -163,6 +163,8 @@ class Attend(nn.Module):
             # make it an additive bias here
 
             mask = attn_bias
+        else:
+            mask = ~mask
 
         # Check if there is a compatible device for flash attention
 
