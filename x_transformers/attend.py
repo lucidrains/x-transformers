@@ -137,8 +137,10 @@ class Attend(nn.Module):
             # manually handle causal mask, if another mask was given
 
             if causal:
-                causal_mask = torch.ones((q_len, k_len), dtype = torch.bool, device = device).triu(k_len - q_len + 1)
-                mask = mask & ~causal_mask
+                r = torch.arange(q_len, device=device)
+                causal_mask = rearrange(r, "q_len -> () () q_len ()") < rearrange(r, "k_len -> () () () k_len")
+                causal_mask = F.pad(causal_mask, (k_len - q_len, 0), value=False)
+                mask = mask | causal_mask
                 causal = False
 
         # handle alibi positional bias
@@ -155,7 +157,9 @@ class Attend(nn.Module):
             if exists(mask):
                 attn_bias = attn_bias.masked_fill(~mask, mask_value // 2)
             elif causal:
-                causal_mask = torch.ones((q_len, k_len), dtype = torch.bool, device = device).triu(k_len - q_len + 1)
+                r = torch.arange(q_len, device=device)
+                causal_mask = rearrange(r, "q_len -> () () q_len ()") < rearrange(r, "k_len -> () () () k_len")
+                causal_mask = F.pad(causal_mask, (k_len - q_len, 0), value=False)
                 attn_bias = attn_bias.masked_fill(causal_mask, mask_value // 2)
                 causal = False
 
@@ -228,7 +232,9 @@ class Attend(nn.Module):
 
         if self.causal:
             i, j = dots.shape[-2:]
-            causal_mask = torch.ones((i, j), dtype = torch.bool, device = device).triu(j - i + 1)
+            r = torch.arange(i, device=device)
+            causal_mask = rearrange(r, "i -> () () i ()") < rearrange(r, "j -> () () () j")
+            causal_mask = F.pad(causal_mask, (j - i, 0), value=False)
             dots = dots.masked_fill(causal_mask, mask_value)
 
         attn = self.attn_fn(dots, dim = -1)
