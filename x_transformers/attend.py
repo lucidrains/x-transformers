@@ -161,7 +161,7 @@ class Attend(nn.Module):
         # convert from bool to float
 
         if exists(attn_bias):
-            attn_bias = rearrange(attn_bias, 'h i j -> 1 h i j').expand(batch, -1, -1, -1)
+            attn_bias = rearrange(attn_bias, 'h i j -> 1 h i j').expand(batch, heads, -1, -1)
 
             # if mask given, the mask would already contain the causal mask from above logic
             # otherwise, if no mask given but still causal, mask out alibi positional bias to a large negative number
