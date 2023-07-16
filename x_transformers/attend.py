@@ -70,6 +70,7 @@ class Attend(nn.Module):
         causal = False,
         heads = None,
         talking_heads = False,
+        sparse_topk = None,
         scale = None,
         qk_norm = False,
         flash = False,
@@ -95,6 +96,11 @@ class Attend(nn.Module):
         if talking_heads:
             self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
             self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
+
+        # sparse topk
+
+        assert not (flash and sparse_topk), 'sparse topk not compatible with flash attention'
+        self.sparse_topk = sparse_topk
 
         # flash attention
 
@@ -234,16 +240,20 @@ class Attend(nn.Module):
         if exists(attn_bias):
             dots = dots + attn_bias
 
-        dtype = dots.dtype
+        i, j, dtype = *dots.shape[-2:], dots.dtype
         pre_softmax_attn = dots.clone()
 
         mask_value = -torch.finfo(dots.dtype).max
+
+        if exists(self.sparse_topk) and self.sparse_topk < j:
+            top_values, _ = dots.topk(self.sparse_topk, dim = -1)
+            sparse_topk_mask = dots < top_values[..., -1:]
+            mask = (mask & sparse_topk_mask) if exists(mask) else sparse_topk_mask
 
         if exists(mask):
             dots = dots.masked_fill(~mask, mask_value)
 
         if self.causal:
-            i, j = dots.shape[-2:]
             causal_mask = self.create_causal_mask(i, j, device = device)
             dots = dots.masked_fill(causal_mask, mask_value)
 

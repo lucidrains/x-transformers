@@ -689,6 +689,7 @@ class Attention(nn.Module):
             causal = causal,
             talking_heads = talking_heads,
             dropout = dropout,
+            sparse_topk = sparse_topk,
             qk_norm = qk_norm,
             scale = qk_norm_scale if qk_norm else self.scale,
             flash = flash,
@@ -815,12 +816,6 @@ class Attention(nn.Module):
             dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
             max_attend_past_mask = dist > self.max_attend_past
             masks.append(max_attend_past_mask)
-
-        if exists(self.sparse_topk) and self.sparse_topk < dots.shape[-1]:
-            top, _ = dots.topk(self.sparse_topk, dim = -1)
-            vk = rearrange(top[..., -1], '... -> ... 1')
-            sparse_topk_mask = dots < vk
-            masks.append(sparse_topk_mask)
 
         if len(masks) > 0:
             final_attn_mask = ~or_reduce(masks)
