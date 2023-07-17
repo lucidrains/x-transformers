@@ -1255,7 +1255,7 @@ class TransformerWrapper(nn.Module):
         max_seq_len,
         attn_layers,
         emb_dim = None,
-        max_mem_len = 0.,
+        max_mem_len = 0,
         shift_mem_down = 0,
         emb_dropout = 0.,
         post_emb_norm = False,
@@ -1420,6 +1420,7 @@ class ContinuousTransformerWrapper(nn.Module):
         dim_in = None,
         dim_out = None,
         emb_dim = None,
+        max_mem_len = 0,
         post_emb_norm = False,
         emb_dropout = 0.,
         use_abs_pos_emb = True,
@@ -1431,6 +1432,8 @@ class ContinuousTransformerWrapper(nn.Module):
         dim = attn_layers.dim
 
         self.max_seq_len = max_seq_len
+
+        self.max_mem_len = max_mem_len
 
         if not (use_abs_pos_emb and not attn_layers.has_pos_emb):
             self.pos_emb = always(0)
@@ -1453,6 +1456,7 @@ class ContinuousTransformerWrapper(nn.Module):
         x,
         return_embeddings = False,
         return_intermediates = False,
+        return_mems = True,
         mask = None,
         return_attn = False,
         mems = None,
@@ -1481,6 +1485,11 @@ class ContinuousTransformerWrapper(nn.Module):
 
         if return_intermediates:
             return out, intermediates
+
+        if return_mems:
+            hiddens = intermediates.hiddens
+            new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), hiddens))
+            return out, new_mems
 
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
