@@ -1456,7 +1456,7 @@ class ContinuousTransformerWrapper(nn.Module):
         x,
         return_embeddings = False,
         return_intermediates = False,
-        return_mems = True,
+        return_mems = False,
         mask = None,
         return_attn = False,
         mems = None,
