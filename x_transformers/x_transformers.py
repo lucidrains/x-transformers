@@ -630,6 +630,7 @@ class Attention(nn.Module):
         value_dim_head = None,
         tensor_product = False,   # https://arxiv.org/abs/2208.06061
         cascading_heads = False,
+        add_zero_kv = False,      # same as add_zero_attn in pytorch
         onnxable = False
     ):
         super().__init__()
@@ -692,6 +693,7 @@ class Attention(nn.Module):
             sparse_topk = sparse_topk,
             qk_norm = qk_norm,
             scale = qk_norm_scale if qk_norm else self.scale,
+            add_zero_kv = add_zero_kv,
             flash = flash,
             onnxable = onnxable
         )
