@@ -129,6 +129,7 @@ class AutoregressiveWrapper(nn.Module):
         seq, ignore_index = x.shape[1], self.ignore_index
 
         inp, target = x[:, :-1], x[:, 1:]
+        inp = torch.where(inp == ignore_index, self.pad_value, inp)
 
         if self.mask_prob > 0.:
             rand = torch.randn(inp.shape, device = x.device)
