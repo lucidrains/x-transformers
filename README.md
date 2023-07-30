@@ -399,6 +399,24 @@ model = TransformerWrapper(
 )
 ```
 
+*July 2023* <a href="https://arxiv.org/abs/2307.14995">A linear attention paper</a> has experiments to show that removing the learned multiplicative gamma led to no performance degradation. This simplifies the RMS normalization to a satisfying `l2norm(x) * sqrt(dim)`.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        use_simple_rmsnorm = True # set to true to use for all layers
+    )
+)
+```
+
 ### GLU Variants Improve Transformer
 
 <img src="./images/ffglu.png"></img>
@@ -1622,6 +1640,15 @@ generated = model.generate(start_emb, 17) # (17, 777)
     eprint  = {1910.07467},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG}
+}
+```
+
+```bibtex
+@inproceedings{Qin2023ScalingTT,
+    title   = {Scaling TransNormer to 175 Billion Parameters},
+    author  = {Zhen Qin and Dong Li and Weigao Sun and Weixuan Sun and Xuyang Shen and Xiaodong Han and Yunshen Wei and Baohong Lv and Fei Yuan and Xiao Luo and Y. Qiao and Yiran Zhong},
+    year    = {2023},
+    url     = {https://api.semanticscholar.org/CorpusID:260203124}
 }
 ```
 

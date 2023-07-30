@@ -472,15 +472,21 @@ class ScaleNorm(nn.Module):
         return x / norm.clamp(min = self.eps) * self.g
 
 class RMSNorm(nn.Module):
-    def __init__(self, dim, eps = 1e-8):
+    def __init__(self, dim):
         super().__init__()
-        self.scale = dim ** -0.5
-        self.eps = eps
+        self.scale = dim ** 0.5
         self.g = nn.Parameter(torch.ones(dim))
 
     def forward(self, x):
-        norm = torch.norm(x, dim = -1, keepdim = True) * self.scale
-        return x / norm.clamp(min = self.eps) * self.g
+        return F.normalize(x, dim = -1) * self.scale * self.g
+
+class SimpleRMSNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.scale = dim ** 0.5
+
+    def forward(self, x):
+        return F.normalize(x, dim = -1) * self.scale
 
 # residual and residual gates
 
@@ -878,6 +884,7 @@ class AttentionLayers(nn.Module):
         only_cross = False,
         use_scalenorm = False,
         use_rmsnorm = False,
+        use_simple_rmsnorm = False,
         alibi_pos_bias = False,
         alibi_num_heads = None,
         alibi_learned = False,
@@ -981,8 +988,17 @@ class AttentionLayers(nn.Module):
 
         self.cross_attend = cross_attend
 
-        norm_class = ScaleNorm if use_scalenorm else nn.LayerNorm
-        norm_class = RMSNorm if use_rmsnorm else norm_class
+        assert (int(use_scalenorm) + int(use_rmsnorm) + int(use_simple_rmsnorm)) <= 1, 'you can only use either scalenorm, rmsnorm, or simple rmsnorm'
+
+        if use_scalenorm:
+            norm_class = ScaleNorm
+        elif use_rmsnorm:
+            norm_class = RMSNorm
+        elif use_simple_rmsnorm:
+            norm_class = SimpleRMSNorm
+        else:
+            norm_class = nn.LayerNorm
+
         norm_fn = partial(norm_class, dim)
 
         if cross_attend and not only_cross:
