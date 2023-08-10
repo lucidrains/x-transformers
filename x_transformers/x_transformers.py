@@ -789,7 +789,7 @@ class Attention(nn.Module):
             ql, kl, vl = map(lambda arg: apply_rotary_pos_emb(arg[0], freqs, arg[1]), ((ql, q_xpos_scale), (kl, k_xpos_scale), (vl, k_xpos_scale)))
             q, k, v = map(lambda t: torch.cat(t, dim = -1), ((ql, qr), (kl, kr), (vl, vr)))
 
-        input_mask = default(context_mask, mask)
+        input_mask = context_mask if has_context else mask
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
@@ -803,7 +803,6 @@ class Attention(nn.Module):
 
             if exists(input_mask):
                 input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
-
 
         i, j = map(lambda t: t.shape[-2], (q, k))
 
