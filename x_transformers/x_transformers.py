@@ -1220,7 +1220,6 @@ class ViTransformerWrapper(nn.Module):
         attn_layers,
         channels = 3,
         num_classes = None,
-        dropout = 0.,
         post_emb_norm = False,
         emb_dropout = 0.
     ):
