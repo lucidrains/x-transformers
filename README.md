@@ -1446,6 +1446,14 @@ generated = model.generate(start_emb, 17) # (17, 777)
 ```
 
 ```bibtex
+@inproceedings{Zoph2022STMoEDS,
+    title   = {ST-MoE: Designing Stable and Transferable Sparse Expert Models},
+    author  = {Barret Zoph and Irwan Bello and Sameer Kumar and Nan Du and Yanping Huang and Jeff Dean and Noam M. Shazeer and William Fedus},
+    year    = {2022}
+}
+```
+
+```bibtex
 @misc{bhojanapalli2020lowrank,
     title   = {Low-Rank Bottleneck in Multi-head Attention Models},
     author  = {Srinadh Bhojanapalli and Chulhee Yun and Ankit Singh Rawat and Sashank J. Reddi and Sanjiv Kumar},

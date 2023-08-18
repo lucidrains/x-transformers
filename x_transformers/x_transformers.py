@@ -9,7 +9,7 @@ from functools import partial, wraps
 from inspect import isfunction
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List
+from typing import List, Callable
 
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
@@ -64,6 +64,9 @@ class equals():
         self.val = val
     def __call__(self, x, *args, **kwargs):
         return x == self.val
+
+def Sequential(*modules):
+    return nn.Sequential(*filter(exists, modules))
 
 # tensor helpers
 
@@ -277,16 +280,16 @@ class DynamicPositionBias(nn.Module):
 
         self.mlp = nn.ModuleList([])
 
-        self.mlp.append(nn.Sequential(
+        self.mlp.append(Sequential(
             nn.Linear(1, dim),
-            nn.LayerNorm(dim) if norm else nn.Identity(),
+            nn.LayerNorm(dim) if norm else None,
             nn.SiLU()
         ))
 
         for _ in range(depth - 1):
-            self.mlp.append(nn.Sequential(
+            self.mlp.append(Sequential(
                 nn.Linear(dim, dim),
-                nn.LayerNorm(dim) if norm else nn.Identity(),
+                nn.LayerNorm(dim) if norm else None,
                 nn.SiLU()
             ))
 
@@ -562,14 +565,21 @@ class ShiftTokens(nn.Module):
 # feedforward
 
 class GLU(nn.Module):
-    def __init__(self, dim_in, dim_out, activation):
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        activation: Callable,
+        mult_bias = False
+    ):
         super().__init__()
         self.act = activation
         self.proj = nn.Linear(dim_in, dim_out * 2)
+        self.mult_bias = nn.Parameter(torch.ones(dim_out)) if mult_bias else 1.
 
     def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim = -1)
-        return x * self.act(gate)
+        return x * self.act(gate) * self.mult_bias
 
 class FeedForward(nn.Module):
     def __init__(
@@ -578,6 +588,7 @@ class FeedForward(nn.Module):
         dim_out = None,
         mult = 4,
         glu = False,
+        glu_mult_bias = False,
         swish = False,
         relu_squared = False,
         post_act_ln = False,
@@ -596,14 +607,17 @@ class FeedForward(nn.Module):
         else:
             activation = nn.GELU()
 
-        project_in = nn.Sequential(
-            nn.Linear(dim, inner_dim, bias = not no_bias),
-            activation
-        ) if not glu else GLU(dim, inner_dim, activation)
+        if glu:
+            project_in = GLU(dim, inner_dim, activation, mult_bias = glu_mult_bias)
+        else:
+            project_in = nn.Sequential(
+                nn.Linear(dim, inner_dim, bias = not no_bias),
+                activation
+            )
 
-        self.ff = nn.Sequential(
+        self.ff = Sequential(
             project_in,
-            nn.LayerNorm(inner_dim) if post_act_ln else nn.Identity(),
+            nn.LayerNorm(inner_dim) if post_act_ln else None,
             nn.Dropout(dropout),
             nn.Linear(inner_dim, dim_out, bias = not no_bias)
         )
