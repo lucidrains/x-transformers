@@ -373,29 +373,6 @@ class AlibiPositionalBias(nn.Module):
 
         return self.bias
 
-class LearnedAlibiPositionalBias(AlibiPositionalBias):
-    def __init__(self, heads, total_heads):
-        super().__init__(heads, total_heads)
-        log_slopes = torch.log(self.slopes)
-        self.learned_logslopes = nn.Parameter(log_slopes)
-
-    def forward(self, i, j):
-        h, device = self.heads, self.device
-
-        def get_slopes(param):
-            return pad_at_dim(param.exp(), (0, h - param.shape[0]), dim = -2)
-
-        if exists(self.bias) and self.bias.shape[-1] >= j and self.bias.shape[-2] >= i:
-            bias = self.bias[..., :i, :j]
-        else:
-            bias = self.get_bias(i, j, device)
-            self.register_buffer('bias', bias, persistent = False)
-
-        slopes = get_slopes(self.learned_logslopes)
-        bias = bias * slopes
-
-        return bias
-
 class RotaryEmbedding(nn.Module):
     def __init__(
         self,
@@ -907,7 +884,6 @@ class AttentionLayers(nn.Module):
         use_simple_rmsnorm = False,
         alibi_pos_bias = False,
         alibi_num_heads = None,
-        alibi_learned = False,
         rel_pos_bias = False,
         rel_pos_num_buckets = 32,
         rel_pos_max_distance = 128,
@@ -979,8 +955,7 @@ class AttentionLayers(nn.Module):
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
-            alibi_pos_klass = LearnedAlibiPositionalBias if alibi_learned else AlibiPositionalBias
-            self.rel_pos = alibi_pos_klass(heads = alibi_num_heads, total_heads = heads)
+            self.rel_pos = AlibiPositionalBias(heads = alibi_num_heads, total_heads = heads)
 
         # determine deepnorm and residual scale
 

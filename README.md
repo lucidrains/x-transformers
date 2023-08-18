@@ -975,6 +975,8 @@ Update: It may be that ALiBi enforces a strong local attention across the heads,
 
 Update: There are reports that ALiBi outperform Rotary embeddings for pretraining and downstream fine-tuning.
 
+Update: <a href="https://arxiv.org/abs/2305.19466">New paper</a> shows that no positional embedding can length extrapolate even than explicit ones
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
