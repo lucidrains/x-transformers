@@ -1962,4 +1962,12 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@inproceedings{Zoph2022STMoEDS,
+    title   = {ST-MoE: Designing Stable and Transferable Sparse Expert Models},
+    author  = {Barret Zoph and Irwan Bello and Sameer Kumar and Nan Du and Yanping Huang and Jeff Dean and Noam M. Shazeer and William Fedus},
+    year    = {2022}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

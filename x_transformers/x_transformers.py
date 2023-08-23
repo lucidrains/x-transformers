@@ -9,7 +9,7 @@ from functools import partial, wraps
 from inspect import isfunction
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Callable
+from typing import List, Callable, Optional
 
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
@@ -23,9 +23,10 @@ DEFAULT_DIM_HEAD = 64
 
 @dataclass
 class LayerIntermediates:
-    hiddens: List[Tensor] = None
-    attn_intermediates: List[Intermediates] = None
-    layer_hiddens: List[Tensor] = None
+    hiddens: Optional[List[Tensor]] = None
+    attn_intermediates: Optional[List[Intermediates]] = None
+    layer_hiddens: Optional[List[Tensor]] = None
+    attn_z_loss: Optional[Tensor] = None
 
 # helpers
 
@@ -89,6 +90,31 @@ def or_reduce(masks):
     for rest in body:
         head = head | rest
     return head
+
+# auxiliary loss helpers
+
+def calc_z_loss(
+    pre_softmax_attns: List[Tensor],
+    mask = None,
+    weight = 1.
+):
+    # the same loss applied to the mixture of experts router logits in https://arxiv.org/abs/2202.08906
+    # in the paper, in a tiny footnote, they mention using it on attention logits with stabilizing effects
+    # also used in PaLM as one of the measures
+
+    lse = 0.
+
+    for attn in pre_softmax_attns:
+        lse = lse + attn.logsumexp(dim = -1)
+
+    loss = torch.square(lse)
+    loss = reduce(loss, 'b h n -> b n', 'sum')
+
+    if not exists(mask):
+        return loss.mean() * weight
+
+    loss = loss[mask].sum() / mask.sum().clamp(min = 1e-5)
+    return loss * weight
 
 # init helpers
 
@@ -1288,7 +1314,8 @@ class TransformerWrapper(nn.Module):
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         l2norm_embed = False,
-        emb_frac_gradient = 1. # GLM-130B and Cogview successfully used this, set at 0.1
+        emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
+        attn_z_loss_weight = 1e-4
     ):
         super().__init__()
         assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
@@ -1353,10 +1380,12 @@ class TransformerWrapper(nn.Module):
         pos = None,
         prepend_embeds = None,
         sum_embeds = None,
+        return_attn_z_loss = False,
+        attn_z_loss_weight = 1e-4,
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
-        return_hiddens = return_mems | return_attn | return_intermediates
+        return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
 
         # absolute positional embedding
 
@@ -1418,6 +1447,11 @@ class TransformerWrapper(nn.Module):
             out = x
         else:
             out = self.to_logits(x)
+
+        if return_attn_z_loss:
+            pre_softmax_attns = list(map(lambda t: t.pre_softmax_attn, intermediates.attn_intermediates))
+            intermediates.attn_z_loss = calc_z_loss(pre_softmax_attns, weight = attn_z_loss_weight)
+            return_intermediates = True
 
         if return_intermediates:
             return out, intermediates
