@@ -25,6 +25,7 @@ DEFAULT_DIM_HEAD = 64
 class LayerIntermediates:
     hiddens: List[Tensor] = None
     attn_intermediates: List[Intermediates] = None
+    layer_hiddens: List[Tensor] = None
 
 # helpers
 
@@ -1110,7 +1111,9 @@ class AttentionLayers(nn.Module):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
 
         hiddens = []
+        layer_hiddens = []
         intermediates = []
+
         prev_attn = None
         prev_cross_attn = None
 
@@ -1139,6 +1142,9 @@ class AttentionLayers(nn.Module):
                     context, context_mask = dropout_seq(context, context_mask, self.cross_attn_tokens_dropout)
 
             inner_residual = x
+
+            if return_hiddens:
+                layer_hiddens.append(x)
 
             pre_norm, post_branch_norm, post_main_norm = norm
 
@@ -1171,6 +1177,9 @@ class AttentionLayers(nn.Module):
             if exists(post_main_norm):
                 x = post_main_norm(x)
 
+        if return_hiddens:
+            layer_hiddens.append(x)
+
         if self.resi_dual:
             x = x + self.final_norm(outer_residual)
         else:
@@ -1179,7 +1188,8 @@ class AttentionLayers(nn.Module):
         if return_hiddens:
             intermediates = LayerIntermediates(
                 hiddens = hiddens,
-                attn_intermediates = intermediates
+                attn_intermediates = intermediates,
+                layer_hiddens = layer_hiddens
             )
 
             return x, intermediates
@@ -1346,7 +1356,7 @@ class TransformerWrapper(nn.Module):
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
-        return_hiddens = return_mems | return_attn
+        return_hiddens = return_mems | return_attn | return_intermediates
 
         # absolute positional embedding
 
