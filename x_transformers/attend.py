@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Optional
 
 import torch
 from torch import nn, einsum, Tensor
@@ -17,9 +18,9 @@ EfficientAttentionConfig = namedtuple('EfficientAttentionConfig', ['enable_flash
 
 @dataclass
 class Intermediates:
-    qk_similarities: Tensor = None
-    pre_softmax_attn: Tensor = None
-    post_softmax_attn: Tensor = None
+    qk_similarities: Optional[Tensor] = None
+    pre_softmax_attn: Optional[Tensor] = None
+    post_softmax_attn: Optional[Tensor] = None
 
     def to_tuple(self):
         return (self.qk_similarities, self.pre_softmax_attn, self.post_softmax_attn)
@@ -256,7 +257,6 @@ class Attend(nn.Module):
             dots = dots + attn_bias
 
         i, j, dtype = *dots.shape[-2:], dots.dtype
-        pre_softmax_attn = dots.clone()
 
         mask_value = -torch.finfo(dots.dtype).max
 
@@ -271,6 +271,8 @@ class Attend(nn.Module):
         if self.causal:
             causal_mask = self.create_causal_mask(i, j, device = device)
             dots = dots.masked_fill(causal_mask, mask_value)
+
+        pre_softmax_attn = dots.clone()
 
         attn = self.attn_fn(dots, dim = -1)
         attn = attn.type(dtype)
