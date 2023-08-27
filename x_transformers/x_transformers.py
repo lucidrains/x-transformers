@@ -41,6 +41,9 @@ def default(val, d):
 def cast_tuple(val, depth):
     return val if isinstance(val, tuple) else (val,) * depth
 
+def divisible_by(num, den):
+    return (num % den) == 0
+
 def maybe(fn):
     @wraps(fn)
     def inner(x, *args, **kwargs):
@@ -236,7 +239,7 @@ class AbsolutePositionalEmbedding(nn.Module):
 class ScaledSinusoidalEmbedding(nn.Module):
     def __init__(self, dim, theta = 10000):
         super().__init__()
-        assert (dim % 2) == 0
+        assert divisible_by(dim, 2)
         self.scale = nn.Parameter(torch.ones(1) * dim ** -0.5)
 
         half_dim = dim // 2
@@ -657,6 +660,7 @@ class Attention(nn.Module):
         qk_norm_scale = 10,
         qk_norm_dim_scale = False,
         one_kv_head = False,
+        kv_heads = None,
         shared_kv = False,
         value_dim_head = None,
         tensor_product = False,   # https://arxiv.org/abs/2208.06061
@@ -671,15 +675,21 @@ class Attention(nn.Module):
         self.causal = causal
         self.max_attend_past = max_attend_past
 
-        value_dim_head = default(value_dim_head, dim_head)
-        q_dim = k_dim = dim_head * heads
-        v_dim = out_dim = value_dim_head * heads
 
-        self.one_kv_head = one_kv_head
-        if one_kv_head:
-            k_dim = dim_head
-            v_dim = value_dim_head
-            out_dim = v_dim * heads
+        assert not (exists(kv_heads) and one_kv_head), 'either attn_one_kv_head is set to True (in which case kv_heads is set to 1), or attn_kv_heads is set, but not both'
+
+        value_dim_head = default(value_dim_head, dim_head)
+        kv_heads = default(kv_heads, heads)
+
+        kv_heads = 1 if one_kv_head else kv_heads
+        assert divisible_by(heads, kv_heads)
+
+        self.kv_heads = kv_heads
+
+        q_dim = dim_head * heads
+        k_dim = dim_head * kv_heads
+        v_dim = value_dim_head * kv_heads
+        out_dim = value_dim_head * heads
 
         self.to_q = nn.Linear(dim, q_dim, bias = False)
         self.to_k = nn.Linear(dim, k_dim, bias = False)
@@ -711,7 +721,7 @@ class Attention(nn.Module):
             self.qk_norm_q_scale = nn.Parameter(torch.ones(dim_head))
             self.qk_norm_k_scale = nn.Parameter(torch.ones(dim_head))
 
-        assert (not qk_norm) or (dim_head % qk_norm_groups) == 0, 'dimension per attention head must be divisible by the qk norm groups'
+        assert (not qk_norm) or divisible_by(dim_head, qk_norm_groups), 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
 
         # attend class - includes core attention algorithm + talking heads
@@ -767,7 +777,7 @@ class Attention(nn.Module):
         prev_attn = None,
         mem = None
     ):
-        b, n, _, h, head_scale, device, has_context = *x.shape, self.heads, self.head_scale, x.device, exists(context)
+        b, n, _, h, kv_h, head_scale, device, has_context = *x.shape, self.heads, self.kv_heads, self.head_scale, x.device, exists(context)
         kv_input = default(context, x)
 
         q_input = x
@@ -786,8 +796,7 @@ class Attention(nn.Module):
 
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
-        if not self.one_kv_head:
-            k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = h), (k, v, r))
+        k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = kv_h), (k, v, r))
 
         if self.qk_norm:
             qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
@@ -1250,7 +1259,7 @@ class ViTransformerWrapper(nn.Module):
     ):
         super().__init__()
         assert isinstance(attn_layers, Encoder), 'attention layers must be an Encoder'
-        assert image_size % patch_size == 0, 'image dimensions must be divisible by the patch size'
+        assert divisible_by(image_size, patch_size), 'image dimensions must be divisible by the patch size'
         dim = attn_layers.dim
         num_patches = (image_size // patch_size) ** 2
         patch_dim = channels * patch_size ** 2
