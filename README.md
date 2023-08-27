@@ -574,6 +574,24 @@ model = TransformerWrapper(
 )
 ```
 
+This has been further generalized in <a href="https://arxiv.org/abs/2305.13245">a recent paper</a> to allow for groups of query heads to attend to a single key / value head. You can use this by specifying the `attn_kv_heads`
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 12,
+        heads = 8,
+        attn_one_kv_head = 2 # say you want 4 query heads to attend to 1 key / value head
+    )
+)
+```
+
 ### Attention on Attention for Image Captioning
 
 <img src="./images/attention-on-attention.png"></img>
@@ -1819,6 +1837,17 @@ generated = model.generate(start_emb, 17) # (17, 777)
 ```
 
 ```bibtex
+@article{Ainslie2023GQATG,
+    title   = {GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints},
+    author  = {Joshua Ainslie and James Lee-Thorp and Michiel de Jong and Yury Zemlyanskiy and Federico Lebr'on and Sumit K. Sanghai},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2305.13245},
+    url     = {https://api.semanticscholar.org/CorpusID:258833177}
+}
+```
+
+```bibtex
 @article{Wang2022DeepNetST,
     title   = {DeepNet: Scaling Transformers to 1, 000 Layers},
     author  = {Hongyu Wang and Shuming Ma and Li Dong and Shaohan Huang and Dongdong Zhang and Furu Wei},
@@ -1956,7 +1985,7 @@ generated = model.generate(start_emb, 17) # (17, 777)
 
 ```bibtex
 @misc{bloc97-2023
-    title   = {NTK-Aware Scaled RoPE allows LLaMA models to have extended (8k+) context size without any fine-tuning and minimal perplexity degradation.}
+    title   = {NTK-Aware Scaled RoPE allows LLaMA models to have extended (8k+) context size without any fine-tuning and minimal perplexity degradation.},
     author  = {/u/bloc97},
     url     = {https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/}
 }
