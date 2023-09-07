@@ -1250,6 +1250,8 @@ Update: <a href="https://twitter.com/Tim_Dettmers/status/1625531080513306627">Co
 
 Update 2: <a href="https://arxiv.org/abs/2305.19268">Counter</a> to Tim's assertion that outliers are needed, and potentially even <a href="https://arxiv.org/abs/2306.12929">some solutions</a>
 
+Update 3: Used by <a href="https://www.adept.ai/blog/persimmon-8b">8B parameter LLM</a> successfully
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
