@@ -718,8 +718,8 @@ class Attention(nn.Module):
 
         self.qk_norm_q_scale = self.qk_norm_k_scale = 1
         if qk_norm and qk_norm_dim_scale:
-            self.qk_norm_q_scale = nn.Parameter(torch.ones(dim_head))
-            self.qk_norm_k_scale = nn.Parameter(torch.ones(dim_head))
+            self.qk_norm_q_scale = nn.Parameter(torch.ones(heads, 1, dim_head))
+            self.qk_norm_k_scale = nn.Parameter(torch.ones(heads, 1, dim_head))
 
         assert (not qk_norm) or divisible_by(dim_head, qk_norm_groups), 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
