@@ -457,9 +457,13 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim = -1)
 
 def apply_rotary_pos_emb(t, freqs, scale = 1):
-    seq_len = t.shape[-2]
+    rot_dim, seq_len = freqs.shape[-1], t.shape[-2]
     freqs = freqs[-seq_len:, :]
-    return (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
+
+    # partial rotary embeddings, Wang et al. GPT-J
+    t, t_unrotated = t[..., :rot_dim], t[..., rot_dim:]
+    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
+    return torch.cat((t, t_unrotated), dim = -1)
 
 # norms
 
@@ -663,9 +667,10 @@ class Attention(nn.Module):
         kv_heads = None,
         shared_kv = False,
         value_dim_head = None,
-        tensor_product = False,   # https://arxiv.org/abs/2208.06061
+        tensor_product = False,      # https://arxiv.org/abs/2208.06061
         cascading_heads = False,
-        add_zero_kv = False,      # same as add_zero_attn in pytorch
+        add_zero_kv = False,         # same as add_zero_attn in pytorch
+        rotary_embed_values = False,
         onnxable = False
     ):
         super().__init__()
@@ -761,6 +766,9 @@ class Attention(nn.Module):
         self.attn_on_attn = on_attn
         self.to_out = nn.Sequential(nn.Linear(out_dim, dim * 2, bias = False), nn.GLU()) if on_attn else nn.Linear(out_dim, dim, bias = False)
 
+        # whether to rotate positions into values, for absolute positions in addition to relative
+        self.rotary_embed_values = rotary_embed_values
+
         # init output projection 0
         if zero_init_output:
             init_zero_(self.to_out)
@@ -808,13 +816,13 @@ class Attention(nn.Module):
 
         if exists(rotary_pos_emb) and not has_context:
             freqs, xpos_scale = rotary_pos_emb
-            l = freqs.shape[-1]
-
             q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.) if exists(xpos_scale) else (1., 1.)
-            (ql, qr), (kl, kr), (vl, vr) = map(lambda t: (t[..., :l], t[..., l:]), (q, k, v))
 
-            ql, kl, vl = map(lambda arg: apply_rotary_pos_emb(arg[0], freqs, arg[1]), ((ql, q_xpos_scale), (kl, k_xpos_scale), (vl, k_xpos_scale)))
-            q, k, v = map(lambda t: torch.cat(t, dim = -1), ((ql, qr), (kl, kr), (vl, vr)))
+            q = apply_rotary_pos_emb(q, freqs, q_xpos_scale)
+            k = apply_rotary_pos_emb(k, freqs, k_xpos_scale)
+
+            if self.rotary_embed_values:
+                v = apply_rotary_pos_emb(v, freqs, k_xpos_scale)
 
         input_mask = context_mask if has_context else mask
 
