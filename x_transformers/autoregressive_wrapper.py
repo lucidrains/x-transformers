@@ -1,4 +1,5 @@
 from math import ceil
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -56,7 +57,8 @@ class AutoregressiveWrapper(nn.Module):
         net,
         ignore_index = -100,
         pad_value = 0,
-        mask_prob = 0.
+        mask_prob = 0.,
+        add_attn_z_loss = False
     ):
         super().__init__()
         self.pad_value = pad_value
@@ -68,6 +70,9 @@ class AutoregressiveWrapper(nn.Module):
         # paper shows masking (MLM) in conjunction with autoregressive decoder-only training leads to big improvements https://arxiv.org/abs/2210.13432
         assert mask_prob < 1.
         self.mask_prob = mask_prob
+
+        # whether to add router z-loss
+        self.add_attn_z_loss = add_attn_z_loss
 
     @torch.no_grad()
     @eval_decorator
@@ -81,8 +86,10 @@ class AutoregressiveWrapper(nn.Module):
         filter_thres = 0.9,
         min_p_pow = 2.0,
         min_p_ratio = 0.02,
+        restrict_to_max_seq_len = True,
         **kwargs
     ):
+        max_seq_len = self.max_seq_len
         device = start_tokens.device
         num_dims = start_tokens.ndim
 
@@ -92,10 +99,25 @@ class AutoregressiveWrapper(nn.Module):
 
         out = start_tokens
 
-        for _ in range(seq_len):
-            x = out[:, -self.max_seq_len:]
+        cache = None
 
-            logits = self.net(x, **kwargs)[:, -1]
+        for _ in range(seq_len):
+
+            if restrict_to_max_seq_len:
+                x = out[:, -max_seq_len:]
+
+                if exists(cache):
+                    for inter in cache.attn_intermediates:
+                        inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
+
+            logits, cache = self.net(
+                x,
+                return_intermediates = True,
+                cache = cache,
+                **kwargs
+            )
+
+            logits = logits[:, -1]
 
             if filter_logits_fn in {top_k, top_p}:
                 filtered_logits = filter_logits_fn(logits, thres = filter_thres)
@@ -126,7 +148,7 @@ class AutoregressiveWrapper(nn.Module):
         return out
 
     def forward(self, x, **kwargs):
-        seq, ignore_index = x.shape[1], self.ignore_index
+        seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
 
         inp, target = x[:, :-1], x[:, 1:]
         inp = torch.where(inp == ignore_index, self.pad_value, inp)
@@ -139,12 +161,20 @@ class AutoregressiveWrapper(nn.Module):
             mask = ~torch.zeros_like(inp).scatter(1, indices, 1.).bool()
             kwargs.update(self_attn_context_mask = mask)
 
-        logits = self.net(inp, **kwargs)
+        logits, cache = self.net(
+            inp,
+            return_intermediates = True,
+            return_attn_z_loss = add_attn_z_loss,
+            **kwargs
+        )
 
         loss = F.cross_entropy(
             rearrange(logits, 'b n c -> b c n'),
             target,
             ignore_index = ignore_index
         )
+
+        if add_attn_z_loss:
+            loss = loss + cache.attn_z_loss
 
         return loss

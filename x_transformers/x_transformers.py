@@ -765,7 +765,9 @@ class Attention(nn.Module):
         rel_pos = None,
         rotary_pos_emb = None,
         prev_attn = None,
-        mem = None
+        mem = None,
+        return_intermediates = True,
+        cache: Optional[Intermediates] = None,
     ):
         b, n, _, h, kv_h, head_scale, device, has_context = *x.shape, self.heads, self.kv_heads, self.head_scale, x.device, exists(context)
         kv_input = default(context, x)
@@ -787,6 +789,14 @@ class Attention(nn.Module):
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
         k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = kv_h), (k, v, r))
+
+        if exists(cache) and not has_context:
+            ck, cv = cache.cached_kv
+            k = torch.cat((ck, k), dim = -2)
+            v = torch.cat((cv, v), dim = -2)
+
+        if return_intermediates:
+            cached_kv = (k, v)
 
         if self.qk_norm:
             qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
@@ -894,6 +904,11 @@ class Attention(nn.Module):
             mask = rearrange(mask, 'b n -> b n 1')
             out = out.masked_fill(~mask, 0.)
 
+        if not return_intermediates:
+            return out
+
+        intermediates.cached_kv = cached_kv
+
         return out, intermediates
 
 class AttentionLayers(nn.Module):
@@ -953,6 +968,7 @@ class AttentionLayers(nn.Module):
 
         self.dim = dim
         self.depth = depth
+        self.causal = causal
         self.layers = nn.ModuleList([])
 
         self.has_pos_emb = rel_pos_bias or rotary_pos_emb
@@ -1118,9 +1134,12 @@ class AttentionLayers(nn.Module):
         attn_mask = None,
         self_attn_context_mask = None,
         mems = None,
+        cache: Optional[LayerIntermediates] = None,
         return_hiddens = False
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
+
+        # initialize accums
 
         hiddens = []
         layer_hiddens = []
@@ -1131,10 +1150,25 @@ class AttentionLayers(nn.Module):
 
         mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
 
+        # rotary positions
+
         rotary_pos_emb = None
         if exists(self.rotary_pos_emb):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
             rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, x.device)
+
+        # assume cached key / values
+
+        attn_cache = []
+
+        if exists(cache):
+            assert not self.training and self.causal
+            x = x[:, -1:]
+            attn_cache = cache.attn_intermediates
+
+        iter_attn_cache = iter(attn_cache)
+
+        # outer residual - for resiDual paper
 
         outer_residual = x * self.resi_dual_scale
 
@@ -1164,9 +1198,9 @@ class AttentionLayers(nn.Module):
                 x = pre_norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, mem = layer_mem)
+                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem)
             elif layer_type == 'c':
-                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn)
+                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None))
             elif layer_type == 'f':
                 out = block(x)
 
@@ -1197,16 +1231,16 @@ class AttentionLayers(nn.Module):
         else:
             x = self.final_norm(x)
 
-        if return_hiddens:
-            intermediates = LayerIntermediates(
-                hiddens = hiddens,
-                attn_intermediates = intermediates,
-                layer_hiddens = layer_hiddens
-            )
+        if not return_hiddens:
+            return x
 
-            return x, intermediates
+        intermediates = LayerIntermediates(
+            hiddens = hiddens,
+            attn_intermediates = intermediates,
+            layer_hiddens = layer_hiddens
+        )
 
-        return x
+        return x, intermediates
 
 class Encoder(AttentionLayers):
     def __init__(self, **kwargs):
@@ -1368,6 +1402,7 @@ class TransformerWrapper(nn.Module):
         sum_embeds = None,
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
+        cache: Optional[LayerIntermediates] = None,
         **kwargs
     ):
         b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
@@ -1420,10 +1455,7 @@ class TransformerWrapper(nn.Module):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
             mems = [*mems_r, *mems_l]
 
-        if return_hiddens:
-            x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
-        else:
-            x = self.attn_layers(x, mask = mask, mems = mems, **kwargs)
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, cache = cache, return_hiddens = True, **kwargs)
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
 

@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import nn, einsum, Tensor
@@ -21,6 +21,7 @@ class Intermediates:
     qk_similarities: Optional[Tensor] = None
     pre_softmax_attn: Optional[Tensor] = None
     post_softmax_attn: Optional[Tensor] = None
+    cached_kv: Optional[Tuple[Tensor, Tensor]] = None
 
     def to_tuple(self):
         return (self.qk_similarities, self.pre_softmax_attn, self.post_softmax_attn)
