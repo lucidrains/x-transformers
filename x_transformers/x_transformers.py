@@ -1135,6 +1135,7 @@ class AttentionLayers(nn.Module):
         self_attn_context_mask = None,
         mems = None,
         cache: Optional[LayerIntermediates] = None,
+        cache_age = 1,
         return_hiddens = False
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
@@ -1163,7 +1164,10 @@ class AttentionLayers(nn.Module):
 
         if exists(cache):
             assert not self.training and self.causal
-            x = x[:, -1:]
+
+            if cache_age > 0:
+                x = x[:, -cache_age:] # for spec decoding, may be greater than 1
+
             attn_cache = cache.attn_intermediates
 
         iter_attn_cache = iter(attn_cache)
