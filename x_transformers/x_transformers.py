@@ -11,7 +11,7 @@ from collections import namedtuple
 from dataclasses import dataclass
 from typing import List, Callable, Optional
 
-from einops import rearrange, repeat, reduce
+from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
 
 from x_transformers.attend import Attend, Intermediates, CascadingHeads
@@ -778,8 +778,8 @@ class Attention(nn.Module):
         r_input = x
 
         if exists(mem):
-            k_input = torch.cat((mem, k_input), dim = -2)
-            v_input = torch.cat((mem, v_input), dim = -2)
+            k_input, mem_packed_shape = pack([mem, k_input], 'b * d')
+            v_input, _ = pack([mem, v_input], 'b * d')
 
         q = self.to_q(q_input)
         k = self.to_k(k_input)
@@ -792,11 +792,21 @@ class Attention(nn.Module):
 
         if exists(cache) and not has_context:
             ck, cv = cache.cached_kv
+
+            if exists(mem):
+                mk, k = unpack(k, mem_packed_shape, 'b * d')
+                mv, v = unpack(v, mem_packed_shape, 'b * d')
+
             k = torch.cat((ck, k), dim = -2)
             v = torch.cat((cv, v), dim = -2)
 
+            if exists(mem):
+                k = torch.cat((mk, k), dim = -2)
+                v = torch.cat((mv, v), dim = -2)
+
         if return_intermediates:
-            cached_kv = (k, v)
+            mem_len = mem.shape[-2] if exists(mem) else 0
+            cached_kv = (k[..., mem_len:, :], v[..., mem_len:, :])
 
         if self.qk_norm:
             qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
