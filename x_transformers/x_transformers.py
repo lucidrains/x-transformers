@@ -27,6 +27,7 @@ class LayerIntermediates:
     attn_intermediates: Optional[List[Intermediates]] = None
     layer_hiddens: Optional[List[Tensor]] = None
     attn_z_loss: Optional[Tensor] = None
+    mems: Optional[Tensor] = None
 
 # helpers
 
@@ -794,8 +795,8 @@ class Attention(nn.Module):
             ck, cv = cache.cached_kv
 
             if exists(mem):
-                mk, k = unpack(k, mem_packed_shape, 'b * d')
-                mv, v = unpack(v, mem_packed_shape, 'b * d')
+                mk, k = unpack(k, mem_packed_shape, 'b h * d')
+                mv, v = unpack(v, mem_packed_shape, 'b h * d')
 
             k = torch.cat((ck, k), dim = -2)
             v = torch.cat((cv, v), dim = -2)
@@ -1485,14 +1486,18 @@ class TransformerWrapper(nn.Module):
             intermediates.attn_z_loss = calc_z_loss(pre_softmax_attns, weight = attn_z_loss_weight)
             return_intermediates = True
 
-        if return_intermediates:
-            return out, intermediates
-
         if return_mems:
             hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim = -2), zip(mems, hiddens))) if exists(mems) else hiddens
             new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
-            return out, new_mems
+
+            if not return_intermediates:
+                return out, new_mems
+
+            intermediates.mems = new_mems
+
+        if return_intermediates:
+            return out, intermediates
 
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))

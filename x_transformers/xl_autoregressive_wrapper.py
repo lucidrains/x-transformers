@@ -67,6 +67,7 @@ class XLAutoregressiveWrapper(nn.Module):
         curr_pos = len(all_leading_tokens) * max_seq_len
         curr_mems = mems
 
+        cache = None
         out = start_tokens
 
         for _ in range(seq_len):
@@ -75,12 +76,16 @@ class XLAutoregressiveWrapper(nn.Module):
 
             x = out[:, curr_pos:]
 
-            logits, mems = self.net(
+            logits, cache = self.net(
                 x,
                 mems = curr_mems,
+                cache = cache,
                 return_mems = True,
+                return_intermediates = True,
                 **kwargs
             )
+
+            mems = cache.mems
 
             logits = logits[:, -1]
             filtered_logits = filter_logits_fn(logits, thres = filter_thres)
