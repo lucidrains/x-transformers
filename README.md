@@ -1964,4 +1964,15 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@article{Lan2019ALBERTAL,
+    title   = {ALBERT: A Lite BERT for Self-supervised Learning of Language Representations},
+    author  = {Zhenzhong Lan and Mingda Chen and Sebastian Goodman and Kevin Gimpel and Piyush Sharma and Radu Soricut},
+    journal = {ArXiv},
+    year    = {2019},
+    volume  = {abs/1909.11942},
+    url     = {https://api.semanticscholar.org/CorpusID:202888986}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

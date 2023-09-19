@@ -952,6 +952,8 @@ class AttentionLayers(nn.Module):
         custom_layers = None,
         sandwich_coef = None,
         par_ratio = None,
+        weight_tie_layers = False,   # Albert - https://arxiv.org/abs/1909.11942
+        layers_execute_order = None, # generalizes weight tying, can do arbitrary layer execution orders
         residual_attn = False,
         cross_residual_attn = False,
         macaron = False,
@@ -1057,6 +1059,15 @@ class AttentionLayers(nn.Module):
             attn_kwargs = {**attn_kwargs, 'zero_init_output':  True}
             ff_kwargs = {**ff_kwargs, 'zero_init_output':  True}
 
+        # setup weight tying, which is a special case of `layer_execute_order`
+
+        assert not (weight_tie_layers and any([*map(exists, (custom_layers, par_ratio, sandwich_coef))]))
+
+        if weight_tie_layers:
+            assert not exists(layers_execute_order)
+            layers_execute_order = tuple(range(len(default_block))) * depth
+            depth = 1
+
         # calculate layer block order
 
         if exists(custom_layers):
@@ -1079,6 +1090,10 @@ class AttentionLayers(nn.Module):
             layer_types = default_block * depth
 
         self.layer_types = layer_types
+        self.layers_execute_order = default(layers_execute_order, tuple(range(len(layer_types))))
+
+        assert all([i < len(self.layer_types) for i in self.layers_execute_order])
+
         self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
 
         # stochastic depth
@@ -1187,7 +1202,19 @@ class AttentionLayers(nn.Module):
 
         outer_residual = x * self.resi_dual_scale
 
-        for ind, (layer_type, (norm, block, residual_fn), layer_dropout) in enumerate(zip(self.layer_types, self.layers, self.layer_dropouts)):
+        # get layers to be executed
+
+        layer_variables = (
+            self.layer_types,
+            self.layers,
+            self.layer_dropouts
+        )
+
+        layer_variables = tuple(tuple(layer_variable[i] for i in self.layers_execute_order) for layer_variable in layer_variables)
+
+        # go through the attention and feedforward layers
+
+        for ind, (layer_type, (norm, block, residual_fn), layer_dropout) in enumerate(zip(*layer_variables)):
             is_last = ind == (len(self.layers) - 1)
 
             if self.training and layer_dropout > 0. and random() < layer_dropout:
