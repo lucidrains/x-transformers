@@ -1975,4 +1975,23 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@inproceedings{Li2022ContrastiveDO,
+    title   = {Contrastive Decoding: Open-ended Text Generation as Optimization},
+    author  = {Xiang Lisa Li and Ari Holtzman and Daniel Fried and Percy Liang and Jason Eisner and Tatsunori Hashimoto and Luke Zettlemoyer and Mike Lewis},
+    booktitle = {Annual Meeting of the Association for Computational Linguistics},
+    year    = {2022},
+    url     = {https://api.semanticscholar.org/CorpusID:253157949}
+}
+```
+
+```bibtex
+@inproceedings{OBrien2023ContrastiveDI,
+    title   = {Contrastive Decoding Improves Reasoning in Large Language Models},
+    author  = {Sean O'Brien and Mike Lewis},
+    year    = {2023},
+    url     = {https://api.semanticscholar.org/CorpusID:261884427}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

@@ -1,4 +1,4 @@
-from math import ceil
+from math import ceil, log
 
 import torch
 from torch import nn
@@ -8,6 +8,9 @@ from einops import rearrange, pack, unpack
 
 def exists(val):
     return val is not None
+
+def identity(t, *args, **kwargs):
+    return t
 
 def eval_decorator(fn):
     def inner(self, *args, **kwargs):
@@ -49,6 +52,24 @@ def top_a(logits, min_p_pow=2.0, min_p_ratio=0.02):
     logits[probs >= limit] = 1
     return logits
 
+# contrastive decoding function
+
+def contrastive_decode_fn(
+    expert_logits,
+    amateur_logits,
+    alpha = 0.1,
+    beta = 0.5
+):
+    """
+    Appendix A Algorithm 2
+    https://arxiv.org/abs/2309.09117
+    """
+
+    cutoff = log(alpha) + expert_logits.amax(dim = -1, keepdim = True)
+    diffs = (1 + beta) * expert_logits - beta * amateur_logits
+    contrastive_decode_logits = diffs.masked_fill(expert_logits < cutoff, -torch.finfo(expert_logits.dtype).max)
+    return contrastive_decode_logits
+
 # autoregressive wrapper class
 
 class AutoregressiveWrapper(nn.Module):
@@ -87,11 +108,12 @@ class AutoregressiveWrapper(nn.Module):
         min_p_pow = 2.0,
         min_p_ratio = 0.02,
         restrict_to_max_seq_len = True,
+        amateur_model = None,
+        contrastive_decode_beta = 0.5,
+        contrastive_decode_alpha = 0.1,
         **kwargs
     ):
-        max_seq_len = self.max_seq_len
-        device = start_tokens.device
-        num_dims = start_tokens.ndim
+        max_seq_len, device, num_dims = self.max_seq_len, start_tokens.device, start_tokens.ndim
 
         start_tokens, ps = pack([start_tokens], '* n')
 
@@ -99,7 +121,22 @@ class AutoregressiveWrapper(nn.Module):
 
         out = start_tokens
 
+        # kv caches
+
         cache = None
+        amateur_cache = None
+
+        # if doing contrastive decoding, turn off filter automatically
+
+        if exists(amateur_model):
+            filter_logits_fn = identity
+
+            if isinstance(amateur_model, AutoregressiveWrapper):
+                amateur_model = amateur_model.net
+
+            amateur_model.eval()
+
+        # sampling up to seq_len
 
         for _ in range(seq_len):
 
@@ -119,13 +156,32 @@ class AutoregressiveWrapper(nn.Module):
 
             logits = logits[:, -1]
 
+            # handle contrastive decoding, Li et al.
+            # https://arxiv.org/abs/2210.15097
+
+            if exists(amateur_model):
+                amateur_logits, amateur_cache = amateur_model(
+                    x,
+                    return_intermediates = True,
+                    cache = amateur_cache,
+                    **kwargs
+                )
+
+                amateur_logits = amateur_logits[:, -1]
+
+                assert amateur_logits.shape == logits.shape, 'logits dimension are not the same between amateur and expert model'
+                logits = contrastive_decode_fn(logits, amateur_logits, beta = contrastive_decode_beta, alpha = contrastive_decode_alpha)
+
+            # filter by topk, nucleus, topa, or custom
+
             if filter_logits_fn in {top_k, top_p}:
                 filtered_logits = filter_logits_fn(logits, thres = filter_thres)
-                probs = F.softmax(filtered_logits / temperature, dim=-1)
-
             elif filter_logits_fn is top_a:
                 filtered_logits = filter_logits_fn(logits, min_p_pow = min_p_pow, min_p_ratio= min_p_ratio)
-                probs = F.softmax(filtered_logits / temperature, dim=-1)
+            else:
+                filtered_logits = filter_logits_fn(logits)
+
+            probs = F.softmax(filtered_logits / temperature, dim=-1)
 
             sample = torch.multinomial(probs, 1)
 
