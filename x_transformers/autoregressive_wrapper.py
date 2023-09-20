@@ -1,4 +1,5 @@
 from math import ceil, log
+from typing import Optional, Union, List
 
 import torch
 from torch import nn
@@ -111,7 +112,7 @@ class AutoregressiveWrapper(Module):
         temperature = 1.,
         filter_logits_fn = top_k,
         restrict_to_max_seq_len = True,
-        amateur_model: Module = None,
+        amateur_model: Optional[Union[Module, List[Module]]] = None,
         filter_kwargs: dict = dict(),
         contrastive_decode_kwargs: dict = dict(
             beta = 0.5,
@@ -132,17 +133,21 @@ class AutoregressiveWrapper(Module):
         # kv caches
 
         cache = None
-        amateur_cache = None
 
         # if doing contrastive decoding, turn off filter automatically
 
         if exists(amateur_model):
+            if isinstance(amateur_model, Module):
+                amateur_model = [amateur_model]
+
+            amateur_caches = [None] * len(amateur_model)
             filter_logits_fn = identity
 
-            if isinstance(amateur_model, AutoregressiveWrapper):
-                amateur_model = amateur_model.net
+            for i, module in enumerate(amateur_model):
+                if isinstance(module, AutoregressiveWrapper):
+                    amateur_model[i] = module.net
 
-            amateur_model.eval()
+                module.eval()
 
         # sampling up to seq_len
 
@@ -168,17 +173,20 @@ class AutoregressiveWrapper(Module):
             # https://arxiv.org/abs/2210.15097
 
             if exists(amateur_model):
-                amateur_logits, amateur_cache = amateur_model(
-                    x,
-                    return_intermediates = True,
-                    cache = amateur_cache,
-                    **kwargs
-                )
+                for i, (amateur, amateur_cache) in enumerate(zip(amateur_model, amateur_caches)):
+                    amateur_logits, next_amateur_cache = amateur(
+                        x,
+                        return_intermediates = True,
+                        cache = amateur_cache,
+                        **kwargs
+                    )
 
-                amateur_logits = amateur_logits[:, -1]
+                    amateur_logits = amateur_logits[:, -1]
 
-                assert amateur_logits.shape == logits.shape, 'logits dimension are not the same between amateur and expert model'
-                logits = contrastive_decode_fn(logits, amateur_logits, **contrastive_decode_kwargs)
+                    assert amateur_logits.shape == logits.shape, 'logits dimension are not the same between amateur and expert model'
+                    logits = contrastive_decode_fn(logits, amateur_logits, **contrastive_decode_kwargs)
+
+                    amateur_caches[i] = next_amateur_cache
 
             # filter by top_k, top_p (nucleus), top_a, or custom
 
