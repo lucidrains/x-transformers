@@ -2,6 +2,7 @@ from math import ceil, log
 
 import torch
 from torch import nn
+from torch.nn import Module
 import torch.nn.functional as F
 
 from einops import rearrange, pack, unpack
@@ -24,20 +25,19 @@ def eval_decorator(fn):
 # nucleus
 
 def top_p(logits, thres = 0.9):
-    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
-    cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+    sorted_logits, sorted_indices = torch.sort(logits, descending = True)
+    cum_probs = torch.cumsum(F.softmax(sorted_logits, dim = -1), dim = -1)
 
-    sorted_indices_to_remove = cum_probs > (1 - thres)
-    sorted_indices_to_remove[:, 1:] = sorted_indices_to_remove[:, :-1].clone()
-    sorted_indices_to_remove[:, 0] = 0
+    sorted_indices_to_remove = cum_probs > thres
+    sorted_indices_to_remove = F.pad(sorted_indices_to_remove, (1, -1), value = False)
 
     sorted_logits[sorted_indices_to_remove] = float('-inf')
     return sorted_logits.scatter(1, sorted_indices, sorted_logits)
 
 # topk
 
-def top_k(logits, thres = 0.9):
-    k = ceil((1 - thres) * logits.shape[-1])
+def top_k(logits, thres = 0.9, k = None):
+    k = default(k, ceil((1 - thres) * logits.shape[-1]))
     val, ind = torch.topk(logits, k)
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(1, ind, val)
@@ -45,12 +45,10 @@ def top_k(logits, thres = 0.9):
 
 # top_a
 
-def top_a(logits, min_p_pow=2.0, min_p_ratio=0.02):
+def top_a(logits, min_p_pow = 2.0, min_p_ratio = 0.02):
     probs = F.softmax(logits, dim=-1)
     limit = torch.pow(torch.max(probs), min_p_pow) * min_p_ratio
-    logits[probs < limit] = float('-inf')
-    logits[probs >= limit] = 1
-    return logits
+    return torch.where(probs < limit, float('-inf'), logits)
 
 # contrastive decoding function
 
@@ -72,7 +70,7 @@ def contrastive_decode_fn(
 
 # autoregressive wrapper class
 
-class AutoregressiveWrapper(nn.Module):
+class AutoregressiveWrapper(Module):
     def __init__(
         self,
         net,
@@ -104,15 +102,17 @@ class AutoregressiveWrapper(nn.Module):
         eos_token = None,
         temperature = 1.,
         filter_logits_fn = top_k,
-        filter_thres = 0.9,
-        min_p_pow = 2.0,
-        min_p_ratio = 0.02,
         restrict_to_max_seq_len = True,
-        amateur_model = None,
-        contrastive_decode_beta = 0.5,
-        contrastive_decode_alpha = 0.1,
+        amateur_model: Module = None,
+        filter_kwargs: dict = dict(),
+        contrastive_decode_kwargs: dict = dict(
+            beta = 0.5,
+            alpha = 0.1
+        ),
         **kwargs
     ):
+        assert callable(filter_logits_fn)
+
         max_seq_len, device, num_dims = self.max_seq_len, start_tokens.device, start_tokens.ndim
 
         start_tokens, ps = pack([start_tokens], '* n')
@@ -170,16 +170,11 @@ class AutoregressiveWrapper(nn.Module):
                 amateur_logits = amateur_logits[:, -1]
 
                 assert amateur_logits.shape == logits.shape, 'logits dimension are not the same between amateur and expert model'
-                logits = contrastive_decode_fn(logits, amateur_logits, beta = contrastive_decode_beta, alpha = contrastive_decode_alpha)
+                logits = contrastive_decode_fn(logits, amateur_logits, **contrastive_decode_kwargs)
 
-            # filter by topk, nucleus, topa, or custom
+            # filter by top_k, top_p (nucleus), top_a, or custom
 
-            if filter_logits_fn in {top_k, top_p}:
-                filtered_logits = filter_logits_fn(logits, thres = filter_thres)
-            elif filter_logits_fn is top_a:
-                filtered_logits = filter_logits_fn(logits, min_p_pow = min_p_pow, min_p_ratio= min_p_ratio)
-            else:
-                filtered_logits = filter_logits_fn(logits)
+            filtered_logits = filter_logits_fn(logits, **filter_kwargs)
 
             probs = F.softmax(filtered_logits / temperature, dim=-1)
 
