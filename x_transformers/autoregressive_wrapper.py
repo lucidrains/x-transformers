@@ -39,8 +39,12 @@ def top_p(logits, thres = 0.9):
 
 # topk
 
-def top_k(logits, thres = 0.9, k = None):
-    k = default(k, ceil((1 - thres) * logits.shape[-1]))
+def top_k(logits, frac_num_tokens = 0.1, k = None):
+    num_tokens = logits.shape[-1]
+
+    k = default(k, ceil(frac_num_tokens * num_tokens))
+    k = min(k, num_tokens)
+
     val, ind = torch.topk(logits, k)
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(1, ind, val)
@@ -49,8 +53,9 @@ def top_k(logits, thres = 0.9, k = None):
 # top_a
 
 def top_a(logits, min_p_pow = 2.0, min_p_ratio = 0.02):
-    probs = F.softmax(logits, dim=-1)
-    limit = torch.pow(torch.max(probs), min_p_pow) * min_p_ratio
+    probs = F.softmax(logits, dim = -1)
+    max_probs = torch.amax(probs, dim = -1, keepdim = True)
+    limit = torch.pow(max_probs, min_p_pow) * min_p_ratio
     return torch.where(probs < limit, float('-inf'), logits)
 
 # contrastive decoding function
