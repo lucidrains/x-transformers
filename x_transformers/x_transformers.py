@@ -1189,7 +1189,7 @@ class AttentionLayers(nn.Module):
         attn_cache = []
 
         if exists(cache):
-            assert not self.training and self.causal
+            assert not self.training and self.causal and not any([*map(exists, (mask, attn_mask, self_attn_context_mask))])
 
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
