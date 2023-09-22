@@ -1218,9 +1218,6 @@ class AttentionLayers(nn.Module):
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
 
-                if exists(self_attn_kv_mask):
-                    self_attn_kv_mask = self_attn_kv_mask[:, -cache_age:]
-
             attn_cache = cache.attn_intermediates
 
         iter_attn_cache = iter(attn_cache)
