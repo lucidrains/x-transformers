@@ -434,7 +434,6 @@ class RotaryEmbedding(nn.Module):
 
         freqs = torch.einsum('... i , j -> ... i j', t, self.inv_freq)
         freqs = torch.cat((freqs, freqs), dim = -1)
-        freqs = rearrange(freqs, '... i j -> ... 1 i j')
 
         if not exists(self.scale):
             return freqs, 1.
@@ -454,6 +453,9 @@ def rotate_half(x):
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len = freqs.shape[-1], t.shape[-2]
     freqs = freqs[..., -seq_len:, :]
+
+    if t.ndim == 4 and freqs.ndim == 3:
+        freqs = rearrange(freqs, 'b n d -> b 1 n d')
 
     # partial rotary embeddings, Wang et al. GPT-J
     t, t_unrotated = t[..., :rot_dim], t[..., rot_dim:]
