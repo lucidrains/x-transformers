@@ -208,12 +208,15 @@ class AbsolutePositionalEmbedding(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.emb = nn.Embedding(max_seq_len, dim)
 
-    def forward(self, x, pos = None):
+    def forward(self, x, pos = None, offset = None):
         seq_len, device = x.shape[1], x.device
         assert seq_len <= self.max_seq_len, f'you are passing in a sequence length of {seq_len} but your absolute positional embedding has a max sequence length of {self.max_seq_len}'
 
         if not exists(pos):
             pos = torch.arange(seq_len, device = device)
+
+        if exists(offset):
+            pos = pos + offset[..., None]
 
         pos_emb = self.emb(pos)
         pos_emb = pos_emb * self.scale
@@ -230,11 +233,14 @@ class ScaledSinusoidalEmbedding(nn.Module):
         inv_freq = theta ** -freq_seq
         self.register_buffer('inv_freq', inv_freq, persistent = False)
 
-    def forward(self, x, pos = None):
+    def forward(self, x, pos = None, offset = None):
         seq_len, device = x.shape[1], x.device
 
         if not exists(pos):
             pos = torch.arange(seq_len, device = device)
+
+        if exists(offset):
+            pos = pos + offset[..., None]
 
         emb = einsum('i, j -> i j', pos, self.inv_freq)
         emb = torch.cat((emb.sin(), emb.cos()), dim = -1)
@@ -417,8 +423,13 @@ class RotaryEmbedding(nn.Module):
         self.scale_base = scale_base
         self.register_buffer('scale', scale)
 
-    def forward(self, seq_len, device):
+    def forward(self, seq_len, offset = None):
+        device = self.inv_freq.device
         t = torch.arange(seq_len, device = device).type_as(self.inv_freq)
+
+        if exists(offset):
+            t = t + offset[..., None]
+
         t = t / self.interpolation_factor
 
         freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
@@ -1158,8 +1169,9 @@ class AttentionLayers(nn.Module):
         mask = None,
         context_mask = None,
         attn_mask = None,
-        self_attn_context_mask = None,
+        self_attn_kv_mask = None,
         mems = None,
+        seq_start_pos: Optional[Tensor] = None,
         cache: Optional[LayerIntermediates] = None,
         cache_age = 1,
         return_hiddens = False
@@ -1177,22 +1189,37 @@ class AttentionLayers(nn.Module):
 
         mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
 
+        # handle left padded sequences
+
+        if exists(seq_start_pos):
+            seq_arange = torch.arange(x.shape[-1], device = x.device, dtype = torch.long)
+            left_pad_mask = seq_arange >= seq_start_pos[..., None]
+
+            if exists(self_attn_kv_mask):
+                self_attn_kv_mask = self_attn_kv_mask & left_pad_mask
+            else:
+                self_attn_kv_mask = left_pad_mask
+
         # rotary positions
 
         rotary_pos_emb = None
+
         if exists(self.rotary_pos_emb):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
-            rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, x.device)
+            rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, offset = seq_start_pos)
 
         # assume cached key / values
 
         attn_cache = []
 
         if exists(cache):
-            assert not self.training and self.causal and not any([*map(exists, (mask, attn_mask, self_attn_context_mask))])
+            assert not self.training and self.causal and not any([*map(exists, (mask, attn_mask))])
 
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
+
+                if exists(self_attn_kv_mask):
+                    self_attn_kv_mask = self_attn_kv_mask[:, -cache_age:]
 
             attn_cache = cache.attn_intermediates
 
@@ -1240,7 +1267,7 @@ class AttentionLayers(nn.Module):
                 x = pre_norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_context_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), return_intermediates = True)
             elif layer_type == 'f':
@@ -1444,6 +1471,7 @@ class TransformerWrapper(nn.Module):
         sum_embeds = None,
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
+        seq_start_pos = None,
         cache: Optional[LayerIntermediates] = None,
         **kwargs
     ):
@@ -1453,7 +1481,7 @@ class TransformerWrapper(nn.Module):
         # absolute positional embedding
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(x, pos = pos) if not external_pos_emb else pos
+        pos_emb = self.pos_emb(x, pos = pos, offset = seq_start_pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
 
         # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
@@ -1497,7 +1525,7 @@ class TransformerWrapper(nn.Module):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
             mems = [*mems_r, *mems_l]
 
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, cache = cache, return_hiddens = True, **kwargs)
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
 
         mem, x = x[:, :num_mem], x[:, num_mem:]
 

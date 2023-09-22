@@ -1,8 +1,8 @@
 from math import ceil, log
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Callable
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import Module
 import torch.nn.functional as F
 
@@ -25,6 +25,32 @@ def eval_decorator(fn):
         self.train(was_training)
         return out
     return inner
+
+# for variable lengthed prefixes
+
+def align(t, lens, pad_id = 0, left = False, right = False):
+    assert left ^ right
+    batch, seq_len, device, dtype = *t.shape, t.device, t.dtype
+
+    assert lens.ndim == 1 and lens.shape[0] == batch
+    assert lens.amax() <= seq_len
+
+    pad_lens = seq_len - lens
+    max_pad_len = pad_lens.amax()
+
+    batch_arange = torch.arange(batch, device = device, dtype = torch.long)[..., None]
+    prompt_len_arange = torch.arange(seq_len, device = device, dtype = torch.long)
+
+    if left:
+        padding = (0, max_pad_len)
+        offset = pad_lens
+    elif right:
+        padding = (max_pad_len, 0)
+        offset = max_pad_len - pad_lens
+
+    t = F.pad(t, padding, value = 0)
+    aligned = t[batch_arange, prompt_len_arange + offset[..., None]]
+    return aligned
 
 # nucleus
 
@@ -106,11 +132,12 @@ class AutoregressiveWrapper(Module):
     @eval_decorator
     def generate(
         self,
-        start_tokens,
+        prompts,
         seq_len,
         eos_token = None,
         temperature = 1.,
-        filter_logits_fn = top_k,
+        prompt_lens: Optional[Tensor] = None,
+        filter_logits_fn: Callable = top_k,
         restrict_to_max_seq_len = True,
         amateur_model: Optional[Union[Module, List[Module]]] = None,
         filter_kwargs: dict = dict(),
@@ -120,15 +147,22 @@ class AutoregressiveWrapper(Module):
         ),
         **kwargs
     ):
-        assert callable(filter_logits_fn)
+        max_seq_len, device = self.max_seq_len, prompts.device
 
-        max_seq_len, device, num_dims = self.max_seq_len, start_tokens.device, start_tokens.ndim
+        prompts, ps = pack([prompts], '* n')
 
-        start_tokens, ps = pack([start_tokens], '* n')
+        b, t = prompts.shape
 
-        b, t = start_tokens.shape
+        # handle variable lengthed prompts (prefixes)
 
-        out = start_tokens
+        seq_start_pos = None
+        if exists(prompt_lens):
+            prompts = align(prompts, prompt_lens, pad_id = self.pad_value, right = True)
+            seq_start_pos = t - prompt_lens
+
+        # output from which sampled tokens appended to
+
+        out = prompts
 
         # kv caches
 
@@ -164,6 +198,7 @@ class AutoregressiveWrapper(Module):
                 x,
                 return_intermediates = True,
                 cache = cache,
+                seq_start_pos = seq_start_pos,
                 **kwargs
             )
 
@@ -178,6 +213,7 @@ class AutoregressiveWrapper(Module):
                         x,
                         return_intermediates = True,
                         cache = amateur_cache,
+                        seq_start_pos = seq_start_pos,
                         **kwargs
                     )
 
@@ -208,6 +244,11 @@ class AutoregressiveWrapper(Module):
                     out = out.masked_fill(mask, self.pad_value)
                     break
 
+        # if variable lengthed, needs to realign
+
+        if exists(prompt_lens):
+            out = align(out, prompt_lens, pad_id = self.pad_value, left = True)
+
         out = out[:, t:]
 
         out, = unpack(out, ps, '* n')
@@ -226,7 +267,7 @@ class AutoregressiveWrapper(Module):
             num_mask = min(int(seq * self.mask_prob), seq - 1)
             indices = rand.topk(num_mask, dim = -1).indices
             mask = ~torch.zeros_like(inp).scatter(1, indices, 1.).bool()
-            kwargs.update(self_attn_context_mask = mask)
+            kwargs.update(self_attn_kv_mask = mask)
 
         logits, cache = self.net(
             inp,
