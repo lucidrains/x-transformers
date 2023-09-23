@@ -28,8 +28,7 @@ def eval_decorator(fn):
 
 # for variable lengthed prefixes
 
-def align(t, lens, pad_id = 0, left = False, right = False):
-    assert left ^ right
+def align_right(t, lens, pad_id = 0):
     batch, seq_len, device, dtype = *t.shape, t.device, t.dtype
 
     assert lens.ndim == 1 and lens.shape[0] == batch
@@ -41,14 +40,9 @@ def align(t, lens, pad_id = 0, left = False, right = False):
     batch_arange = torch.arange(batch, device = device, dtype = torch.long)[..., None]
     prompt_len_arange = torch.arange(seq_len, device = device, dtype = torch.long)
 
-    if left:
-        padding = (0, max_pad_len)
-        offset = pad_lens
-    elif right:
-        padding = (max_pad_len, 0)
-        offset = max_pad_len - pad_lens
+    t = F.pad(t, (max_pad_len, 0), value = 0)
+    offset = max_pad_len - pad_lens
 
-    t = F.pad(t, padding, value = 0)
     aligned = t[batch_arange, prompt_len_arange + offset[..., None]]
     return aligned
 
@@ -157,7 +151,7 @@ class AutoregressiveWrapper(Module):
 
         seq_start_pos = None
         if exists(prompt_lens):
-            prompts = align(prompts, prompt_lens, pad_id = self.pad_value, right = True)
+            prompts = align_right(prompts, prompt_lens, pad_id = self.pad_value)
             seq_start_pos = t - prompt_lens
 
         # output from which sampled tokens appended to
@@ -243,11 +237,6 @@ class AutoregressiveWrapper(Module):
                     mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
                     out = out.masked_fill(mask, self.pad_value)
                     break
-
-        # if variable lengthed, needs to realign
-
-        if exists(prompt_lens):
-            out = align(out, prompt_lens, pad_id = self.pad_value, left = True)
 
         out = out[:, t:]
 
