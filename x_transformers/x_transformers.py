@@ -432,7 +432,7 @@ class RotaryEmbedding(nn.Module):
 
         t = t / self.interpolation_factor
 
-        freqs = torch.einsum('... i , j -> ... i j', t, self.inv_freq)
+        freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
         freqs = torch.cat((freqs, freqs), dim = -1)
 
         if not exists(self.scale):
@@ -452,7 +452,7 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len = freqs.shape[-1], t.shape[-2]
-    freqs = freqs[..., -seq_len:, :]
+    freqs = freqs[-seq_len:, :]
 
     if t.ndim == 4 and freqs.ndim == 3:
         freqs = rearrange(freqs, 'b n d -> b 1 n d')
