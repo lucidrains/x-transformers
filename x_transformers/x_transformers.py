@@ -216,7 +216,7 @@ class AbsolutePositionalEmbedding(nn.Module):
             pos = torch.arange(seq_len, device = device)
 
         if exists(offset):
-            pos = pos + offset[..., None]
+            pos = (pos + offset[..., None]).clamp(min = 0)
 
         pos_emb = self.emb(pos)
         pos_emb = pos_emb * self.scale
@@ -1478,7 +1478,7 @@ class TransformerWrapper(nn.Module):
         # absolute positional embedding
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(x, pos = pos, offset = seq_start_pos) if not external_pos_emb else pos
+        pos_emb = self.pos_emb(x, pos = pos, offset = -seq_start_pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
 
         # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
