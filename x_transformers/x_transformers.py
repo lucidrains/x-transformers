@@ -423,12 +423,9 @@ class RotaryEmbedding(nn.Module):
         self.scale_base = scale_base
         self.register_buffer('scale', scale)
 
-    def forward(self, seq_len, offset = None):
+    def forward(self, seq_len):
         device = self.inv_freq.device
         t = torch.arange(seq_len, device = device).type_as(self.inv_freq)
-
-        if exists(offset):
-            t = t + offset[..., None]
 
         t = t / self.interpolation_factor
 
@@ -1209,7 +1206,7 @@ class AttentionLayers(nn.Module):
 
         if exists(self.rotary_pos_emb):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
-            rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length, offset = seq_start_pos)
+            rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length)
 
         # assume cached key / values
 
