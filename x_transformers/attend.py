@@ -165,6 +165,12 @@ class Attend(nn.Module):
 
         causal = self.causal
 
+        # in the case of kv caching with one token (q_len == 1), just turn off causal masking
+        # in speculative decoding, this may go up to 5-6, so right aligned causal mask will be needed there
+
+        if q_len == 1 and causal:
+            causal = False
+
         # expand key padding mask
 
         if exists(mask):
@@ -246,6 +252,13 @@ class Attend(nn.Module):
 
         scale = default(self.scale, q.shape[-1] ** -0.5)
 
+        causal = self.causal
+
+        # handle kv cached decoding
+
+        if n == 1 and causal:
+            causal = False
+
         # handle grouped multi-query attention
 
         if kv_heads == 1:
@@ -295,7 +308,7 @@ class Attend(nn.Module):
         if exists(mask):
             dots = dots.masked_fill(~mask, mask_value)
 
-        if self.causal:
+        if causal:
             causal_mask = self.create_causal_mask(i, j, device = device)
             dots = dots.masked_fill(causal_mask, mask_value)
 
