@@ -208,15 +208,15 @@ class AbsolutePositionalEmbedding(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.emb = nn.Embedding(max_seq_len, dim)
 
-    def forward(self, x, pos = None, offset = None):
+    def forward(self, x, pos = None, seq_start_pos = None):
         seq_len, device = x.shape[1], x.device
         assert seq_len <= self.max_seq_len, f'you are passing in a sequence length of {seq_len} but your absolute positional embedding has a max sequence length of {self.max_seq_len}'
 
         if not exists(pos):
             pos = torch.arange(seq_len, device = device)
 
-        if exists(offset):
-            pos = (pos + offset[..., None]).clamp(min = 0)
+        if exists(seq_start_pos):
+            pos = (pos - seq_start_pos[..., None]).clamp(min = 0)
 
         pos_emb = self.emb(pos)
         pos_emb = pos_emb * self.scale
@@ -233,14 +233,14 @@ class ScaledSinusoidalEmbedding(nn.Module):
         inv_freq = theta ** -freq_seq
         self.register_buffer('inv_freq', inv_freq, persistent = False)
 
-    def forward(self, x, pos = None, offset = None):
+    def forward(self, x, pos = None, seq_start_pos = None):
         seq_len, device = x.shape[1], x.device
 
         if not exists(pos):
             pos = torch.arange(seq_len, device = device)
 
-        if exists(offset):
-            pos = pos + offset[..., None]
+        if exists(seq_start_pos):
+            pos = pos - seq_start_pos[..., None]
 
         emb = einsum('i, j -> i j', pos, self.inv_freq)
         emb = torch.cat((emb.sin(), emb.cos()), dim = -1)
@@ -381,7 +381,7 @@ class AlibiPositionalBias(nn.Module):
         h, device = self.total_heads, self.device
 
         if exists(self.bias) and self.bias.shape[-1] >= j and self.bias.shape[-2] >= i:
-            return self.bias[..., :i, :j]
+            return self.bias[..., -i:, -j:]
 
         bias = self.get_bias(i, j, device)
         bias = bias * self.slopes
@@ -838,7 +838,10 @@ class Attention(nn.Module):
             if self.rotary_embed_values:
                 v = apply_rotary_pos_emb(v, freqs, k_xpos_scale)
 
-        input_mask = context_mask if has_context else mask
+        input_mask = context_mask
+
+        if not exists(input_mask) and not has_context:
+            input_mask = mask
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
@@ -1192,7 +1195,7 @@ class AttentionLayers(nn.Module):
         # handle left padded sequences
 
         if exists(seq_start_pos):
-            seq_arange = torch.arange(x.shape[-1], device = x.device, dtype = torch.long)
+            seq_arange = torch.arange(x.shape[-2], device = x.device, dtype = torch.long)
             left_pad_mask = seq_arange >= seq_start_pos[..., None]
 
             if exists(self_attn_kv_mask):
@@ -1478,7 +1481,7 @@ class TransformerWrapper(nn.Module):
         # absolute positional embedding
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(x, pos = pos, offset = -seq_start_pos) if not external_pos_emb else pos
+        pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
 
         # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
