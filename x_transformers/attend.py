@@ -165,16 +165,28 @@ class Attend(nn.Module):
 
         causal = self.causal
 
+        # expand key padding mask
+
         if exists(mask):
             assert mask.ndim == 4
             mask = mask.expand(batch, heads, q_len, k_len)
 
-            # manually handle causal mask, if another mask was given
+        # handle kv cache - this should be bypassable in updated flash attention 2
 
-            if causal:
-                causal_mask = self.create_causal_mask(q_len, k_len, device = device)
-                mask = mask & ~causal_mask
-                causal = False
+        if k_len > q_len and causal:
+            causal_mask = self.create_causal_mask(q_len, k_len, device = device)
+            if not exists(mask):
+                mask = causal_mask
+            else:
+                mask = mask & causal_mask
+            causal = False
+
+        # manually handle causal mask, if another mask was given
+
+        if exits(mask) and causal:
+            causal_mask = self.create_causal_mask(q_len, k_len, device = device)
+            mask = mask & ~causal_mask
+            causal = False
 
         # handle alibi positional bias
         # convert from bool to float
