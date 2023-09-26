@@ -189,9 +189,17 @@ class Attend(nn.Module):
 
         # manually handle causal mask, if another mask was given
 
+        row_is_entirely_masked = None
+
         if exists(mask) and causal:
             causal_mask = self.create_causal_mask(q_len, k_len, device = device)
             mask = mask & ~causal_mask
+
+            # protect against an entire row being masked out
+
+            row_is_entirely_masked = ~mask.any(dim = -1)
+            mask[..., 0] = mask[..., 0] | row_is_entirely_masked
+
             causal = False
 
         # handle alibi positional bias
@@ -230,6 +238,11 @@ class Attend(nn.Module):
                 dropout_p = self.dropout if self.training else 0., 
                 is_causal = causal
             )
+
+        # for a row that is entirely masked out, should zero out the output of that row token
+
+        if exists(row_is_entirely_masked):
+            out = out.masked_fill(row_is_entirely_masked[..., None], 0.)
 
         return out, Intermediates()
 
