@@ -380,7 +380,7 @@ class CascadingHeads(nn.Module):
         attn_bias = to_single_heads(attn_bias, dim = 0) if exists(attn_bias) else ((None,) * heads)
         prev_attn = to_single_heads(prev_attn) if exists(prev_attn) else ((None,) * heads)
 
-        # now loop through each head, without output of previous head summed with the next head
+        # now loop through each head, adding the output of the previous head to the next head's query
         # thus cascading
 
         all_outs = []
