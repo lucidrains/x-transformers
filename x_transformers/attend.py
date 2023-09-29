@@ -158,7 +158,7 @@ class Attend(nn.Module):
 
         if self.qk_norm:
             default_scale = q.shape[-1] ** -0.5
-            q = q * (default_scale / self.scale)
+            q = q * (self.scale / default_scale)
 
         # Check if mask exists and expand to compatible shape
         # The mask is B L, so it would have to be expanded to B H N L
