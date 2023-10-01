@@ -1225,6 +1225,8 @@ Update 2: <a href="https://arxiv.org/abs/2305.19268">Counter</a> to Tim's assert
 
 Update 3: Used by <a href="https://www.adept.ai/blog/persimmon-8b">8B parameter LLM</a> successfully
 
+Update 4: a MetaAI group found that they can <a href="https://arxiv.org/abs/2309.16588">alleviate outliers</a> by adding `register tokens`, also known as `memory tokens` from earlier literature (Burtsev et al). Perhaps what should be tried next is see if qk norm can be improved in the presence of memory tokens.
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
