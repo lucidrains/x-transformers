@@ -297,7 +297,7 @@ enc = Encoder(
 
 https://arxiv.org/abs/2006.11527
 
-Proposes adding learned tokens, akin to CLS tokens, named memory tokens, that is passed through the attention layers alongside the input tokens.
+Proposes adding learned tokens, akin to CLS tokens, named memory tokens, that is passed through the attention layers alongside the input tokens. This setting is compatible with both encoder and decoder training.
 
 ```python
 import torch
@@ -314,6 +314,8 @@ model = TransformerWrapper(
     )
 )
 ```
+
+Update: MetaAI researchers <a href="https://arxiv.org/abs/2309.16588">have found</a> that adding memory tokens (they call them register tokens), alleviates outliers (which is suspected now to be a pathology of attention networks unable to <a href="https://arxiv.org/abs/2306.12929">attend to nothing</a>).
 
 ### Transformers Without Tears
 
