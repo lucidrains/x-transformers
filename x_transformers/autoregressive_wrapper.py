@@ -142,6 +142,7 @@ class AutoregressiveWrapper(Module):
             beta = 0.5,
             alpha = 0.1
         ),
+        cache_kv = True,
         **kwargs
     ):
         max_seq_len, device = self.max_seq_len, prompts.device
@@ -193,13 +194,16 @@ class AutoregressiveWrapper(Module):
                     for inter in cache.attn_intermediates:
                         inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
 
-            logits, cache = self.net(
+            logits, new_cache = self.net(
                 x,
                 return_intermediates = True,
                 cache = cache,
                 seq_start_pos = seq_start_pos,
                 **kwargs
             )
+
+            if cache_kv and self.net.can_cache_kv:
+                cache = new_cache
 
             logits = logits[:, -1]
 
@@ -221,7 +225,8 @@ class AutoregressiveWrapper(Module):
                     assert amateur_logits.shape == logits.shape, 'logits dimension are not the same between amateur and expert model'
                     logits = contrastive_decode_fn(logits, amateur_logits, **amateur_contrastive_decode_kwargs)
 
-                    amateur_caches[i] = next_amateur_cache
+                    if cache_kv and amateur.can_cache_kv:
+                        amateur_caches[i] = next_amateur_cache
 
             # filter by top_k, top_p (nucleus), top_a, or custom
 

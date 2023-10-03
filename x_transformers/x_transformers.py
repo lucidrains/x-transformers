@@ -1442,10 +1442,15 @@ class TransformerWrapper(nn.Module):
         self.to_logits = nn.Linear(dim, logits_dim) if not tie_embedding else lambda t: t @ self.token_emb.emb.weight.t()
 
         # memory tokens (like [cls]) from Memory Transformers paper
+
         num_memory_tokens = default(num_memory_tokens, 0)
         self.num_memory_tokens = num_memory_tokens
         if num_memory_tokens > 0:
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
+
+        # whether can do cached kv decoding
+
+        self.can_cache_kv = self.num_memory_tokens == 0
 
     def init_(self):
         if self.l2norm_embed:
