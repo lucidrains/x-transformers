@@ -1335,6 +1335,7 @@ class ViTransformerWrapper(nn.Module):
         channels = 3,
         num_classes = None,
         post_emb_norm = False,
+        num_register_tokens = 0,
         emb_dropout = 0.
     ):
         super().__init__()
@@ -1347,6 +1348,12 @@ class ViTransformerWrapper(nn.Module):
         self.patch_size = patch_size
 
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, dim))
+
+        has_register_tokens = num_register_tokens > 0
+        self.has_register_tokens = has_register_tokens
+
+        if has_register_tokens:
+            self.register_tokens = nn.Parameter(torch.randn(num_register_tokens, dim))
 
         self.patch_to_embedding = nn.Sequential(
             nn.LayerNorm(patch_dim),
@@ -1366,7 +1373,7 @@ class ViTransformerWrapper(nn.Module):
         img,
         return_embeddings = False
     ):
-        p = self.patch_size
+        b, p = img.shape[0], self.patch_size
 
         x = rearrange(img, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
         x = self.patch_to_embedding(x)
@@ -1377,7 +1384,14 @@ class ViTransformerWrapper(nn.Module):
         x = self.post_emb_norm(x)
         x = self.dropout(x)
 
+        if self.has_register_tokens:
+            r = repeat(self.register_tokens, 'n d -> b n d', b = b)
+            x, ps = pack((x, r), 'b * d')
+
         x = self.attn_layers(x)
+
+        if self.has_register_tokens:
+            x, _ = unpack(x, ps, 'b * d')
 
         if not exists(self.mlp_head) or return_embeddings:
             return x
@@ -1398,13 +1412,14 @@ class TransformerWrapper(nn.Module):
         emb_dropout = 0.,
         post_emb_norm = False,
         num_memory_tokens = None,
+        memory_tokens_interspersed_every = None,
         tie_embedding = False,
         logits_dim = None,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         l2norm_embed = False,
         emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
-        attn_z_loss_weight = 1e-4
+        attn_z_loss_weight = 1e-4,
     ):
         super().__init__()
         assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
@@ -1448,6 +1463,8 @@ class TransformerWrapper(nn.Module):
         if num_memory_tokens > 0:
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
 
+        self.memory_tokens_interspersed_every = memory_tokens_interspersed_every
+
         # whether can do cached kv decoding
 
         self.can_cache_kv = self.num_memory_tokens == 0
@@ -1480,7 +1497,7 @@ class TransformerWrapper(nn.Module):
         cache: Optional[LayerIntermediates] = None,
         **kwargs
     ):
-        b, n, device, num_mem, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.emb_frac_gradient
+        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
 
         # absolute positional embedding
@@ -1518,13 +1535,26 @@ class TransformerWrapper(nn.Module):
 
         x = self.project_emb(x)
 
-        if num_mem > 0:
-            mem = repeat(self.memory_tokens, 'n d -> b n d', b = b)
-            x = torch.cat((mem, x), dim = 1)
+        if has_memory_tokens:
+            mem_every = self.memory_tokens_interspersed_every
+
+            if exists(mem_every):
+                assert mem_every > 0
+                assert isinstance(self.attn_layers, Decoder), 'only for decoder'
+                next_seq_len = math.ceil(n / mem_every) * mem_every
+
+                x = pad_at_dim(x, (0, next_seq_len - n), dim = -2, value = 0.)
+                x = rearrange(x, 'b (n m) d -> (b n) m d', m = mem_every)
+
+            mem = repeat(self.memory_tokens, 'n d -> b n d', b = x.shape[0])
+            x, mem_packed_shape = pack((mem, x), 'b * d')
 
             # auto-handle masking after appending memory tokens
-            if exists(mask):
-                mask = pad_at_dim(mask, (num_mem, 0), dim = -1, value = True)
+            if not exists(mem_every) and exists(mask):
+                mask = pad_at_dim(mask, (num_mems, 0), dim = -1, value = True)
+
+            if exists(mem_every):
+                x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
 
         if self.shift_mem_down and exists(mems):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
@@ -1532,7 +1562,16 @@ class TransformerWrapper(nn.Module):
 
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
 
-        mem, x = x[:, :num_mem], x[:, num_mem:]
+        if has_memory_tokens:
+            if exists(mem_every):
+                x = rearrange(x, 'b (n m) d -> (b n) m d', m = (mem_every + num_mems))
+
+            mem, x = unpack(x, mem_packed_shape, 'b * d')
+
+            if exists(mem_every):
+                x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
+
+            x = x[:, :n]
 
         if return_logits_and_embeddings:
             out = (self.to_logits(x), x)
