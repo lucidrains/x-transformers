@@ -14,7 +14,7 @@ from typing import List, Callable, Optional
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
 
-from x_transformers.attend import Attend, Intermediates, CascadingHeads
+from x_transformers.attend import Attend, Intermediates
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # constants
@@ -662,7 +662,6 @@ class Attention(nn.Module):
         shared_kv = False,
         value_dim_head = None,
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
-        cascading_heads = False,
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
         onnxable = False
@@ -673,7 +672,6 @@ class Attention(nn.Module):
         self.heads = heads
         self.causal = causal
         self.max_attend_past = max_attend_past
-
 
         assert not (exists(kv_heads) and one_kv_head), 'either attn_one_kv_head is set to True (in which case kv_heads is set to 1), or attn_kv_heads is set, but not both'
 
@@ -737,10 +735,6 @@ class Attention(nn.Module):
             flash = flash,
             onnxable = onnxable
         )
-
-        if cascading_heads:
-            # cascading heads - wrap the Attend logic
-            self.attend = CascadingHeads(self.attend)
 
         # head scaling
         self.head_scale = head_scale
