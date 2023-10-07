@@ -650,6 +650,7 @@ class Attention(nn.Module):
         num_mem_kv = 0,
         dropout = 0.,
         on_attn = False,
+        gate_value_heads = False,
         gate_values = False,
         zero_init_output = False,
         max_attend_past = None,
@@ -703,7 +704,14 @@ class Attention(nn.Module):
         if gate_values:
             self.to_v_gate = nn.Linear(dim, out_dim)
             nn.init.constant_(self.to_v_gate.weight, 0)
-            nn.init.constant_(self.to_v_gate.bias, 1)
+            nn.init.constant_(self.to_v_gate.bias, 10)
+
+        # add per head gating of the output values, from 'Attend to nothing' paper
+        self.to_v_head_gate = None
+        if gate_value_heads:
+            self.to_v_head_gate = nn.Linear(dim, heads)
+            nn.init.constant_(self.to_v_head_gate.weight, 0)
+            nn.init.constant_(self.to_v_head_gate.bias, 10)
 
         # cosine sim attention
         self.qk_norm = qk_norm
@@ -904,6 +912,12 @@ class Attention(nn.Module):
 
         if head_scale:
             out = out * self.head_scale_params
+
+        # per head gating, from https://arxiv.org/abs/2306.12929
+
+        if exists(self.to_v_head_gate):
+            head_gate = self.to_v_head_gate(x)
+            out = out * rearrange(head_gate, 'b n h -> b h n 1').sigmoid()
 
         # merge heads
 
