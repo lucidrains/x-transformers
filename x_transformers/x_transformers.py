@@ -1622,6 +1622,7 @@ class ContinuousTransformerWrapper(nn.Module):
         dim_out = None,
         emb_dim = None,
         max_mem_len = 0,
+        num_memory_tokens = None,
         post_emb_norm = False,
         emb_dropout = 0.,
         use_abs_pos_emb = True,
@@ -1646,10 +1647,21 @@ class ContinuousTransformerWrapper(nn.Module):
         self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
-        self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
+        # memory tokens
+
+        num_memory_tokens = default(num_memory_tokens, 0)
+        self.has_memory_tokens = num_memory_tokens > 0
+
+        if num_memory_tokens > 0:
+            self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
+
+        # attention layers
 
         self.attn_layers = attn_layers
 
+        # project in and out
+
+        self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
         self.project_out = nn.Linear(dim, dim_out) if exists(dim_out) else nn.Identity()
 
     def forward(
@@ -1665,10 +1677,18 @@ class ContinuousTransformerWrapper(nn.Module):
         prepend_embeds = None,
         **kwargs
     ):
+        batch = x.shape[0]
+
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
 
         x = self.post_emb_norm(x)
+
+        # memory tokens
+
+        if self.has_memory_tokens:
+            m = repeat(self.memory_tokens, 'm d -> b m d', b = batch)
+            x, mem_ps = pack([m, x], 'b * d')
 
         # whether to append embeds, as in PaLI, for image embeddings
 
@@ -1680,7 +1700,14 @@ class ContinuousTransformerWrapper(nn.Module):
 
         x = self.emb_dropout(x)
 
+        # attention layers
+
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
+
+        # splice out memory tokens
+
+        if self.has_memory_tokens:
+            m, x = unpack(x, mem_ps, 'b * d')
 
         out = self.project_out(x) if not return_embeddings else x
 
