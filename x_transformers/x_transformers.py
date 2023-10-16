@@ -1690,6 +1690,10 @@ class ContinuousTransformerWrapper(nn.Module):
             m = repeat(self.memory_tokens, 'm d -> b m d', b = batch)
             x, mem_ps = pack([m, x], 'b * d')
 
+            if exists(mask):
+                num_mems = m.shape[-2]
+                mask = pad_at_dim(mask, (num_mems, 0), dim = -1, value = True)
+
         # whether to append embeds, as in PaLI, for image embeddings
 
         if exists(prepend_embeds):
