@@ -28,6 +28,7 @@ class LayerIntermediates:
     layer_hiddens: Optional[List[Tensor]] = None
     attn_z_loss: Optional[Tensor] = None
     mems: Optional[Tensor] = None
+    memory_tokens: Optional[Tensor] = None
 
 # helpers
 
@@ -1576,6 +1577,8 @@ class TransformerWrapper(nn.Module):
 
             mem, x = unpack(x, mem_packed_shape, 'b * d')
 
+            intermediates.memory_tokens = mem
+
             if exists(mem_every):
                 x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
 
@@ -1712,6 +1715,7 @@ class ContinuousTransformerWrapper(nn.Module):
 
         if self.has_memory_tokens:
             m, x = unpack(x, mem_ps, 'b * d')
+            intermediates.memory_tokens = m
 
         out = self.project_out(x) if not return_embeddings else x
 
