@@ -6,7 +6,6 @@ from torch import nn, einsum, Tensor
 import torch.nn.functional as F
 
 from functools import partial, wraps
-from inspect import isfunction
 from collections import namedtuple
 from dataclasses import dataclass
 from typing import List, Callable, Optional
@@ -38,7 +37,7 @@ def exists(val):
 def default(val, d):
     if exists(val):
         return val
-    return d() if isfunction(d) else d
+    return d() if callable(d) else d
 
 def cast_tuple(val, depth):
     return val if isinstance(val, tuple) else (val,) * depth
@@ -1340,7 +1339,7 @@ class ViTransformerWrapper(nn.Module):
         *,
         image_size,
         patch_size,
-        attn_layers,
+        attn_layers: Encoder,
         channels = 3,
         num_classes = None,
         post_emb_norm = False,
@@ -1348,7 +1347,6 @@ class ViTransformerWrapper(nn.Module):
         emb_dropout = 0.
     ):
         super().__init__()
-        assert isinstance(attn_layers, Encoder), 'attention layers must be an Encoder'
         assert divisible_by(image_size, patch_size), 'image dimensions must be divisible by the patch size'
         dim = attn_layers.dim
         num_patches = (image_size // patch_size) ** 2
@@ -1414,7 +1412,7 @@ class TransformerWrapper(nn.Module):
         *,
         num_tokens,
         max_seq_len,
-        attn_layers,
+        attn_layers: AttentionLayers,
         emb_dim = None,
         max_mem_len = 0,
         shift_mem_down = 0,
@@ -1431,7 +1429,6 @@ class TransformerWrapper(nn.Module):
         attn_z_loss_weight = 1e-4,
     ):
         super().__init__()
-        assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
 
         dim = attn_layers.dim
         emb_dim = default(emb_dim, dim)
@@ -1608,124 +1605,6 @@ class TransformerWrapper(nn.Module):
 
         if return_intermediates:
             return out, intermediates
-
-        if return_attn:
-            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
-            return out, attn_maps
-
-        return out
-
-class ContinuousTransformerWrapper(nn.Module):
-    def __init__(
-        self,
-        *,
-        max_seq_len,
-        attn_layers,
-        dim_in = None,
-        dim_out = None,
-        emb_dim = None,
-        max_mem_len = 0,
-        num_memory_tokens = None,
-        post_emb_norm = False,
-        emb_dropout = 0.,
-        use_abs_pos_emb = True,
-        scaled_sinu_pos_emb = False
-    ):
-        super().__init__()
-        assert isinstance(attn_layers, AttentionLayers), 'attention layers must be one of Encoder or Decoder'
-
-        dim = attn_layers.dim
-
-        self.max_seq_len = max_seq_len
-
-        self.max_mem_len = max_mem_len
-
-        if not (use_abs_pos_emb and not attn_layers.has_pos_emb):
-            self.pos_emb = always(0)
-        elif scaled_sinu_pos_emb:
-            self.pos_emb = ScaledSinusoidalEmbedding(dim)
-        else:
-            self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len)
-
-        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
-        self.emb_dropout = nn.Dropout(emb_dropout)
-
-        # memory tokens
-
-        num_memory_tokens = default(num_memory_tokens, 0)
-        self.has_memory_tokens = num_memory_tokens > 0
-
-        if num_memory_tokens > 0:
-            self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
-
-        # attention layers
-
-        self.attn_layers = attn_layers
-
-        # project in and out
-
-        self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
-        self.project_out = nn.Linear(dim, dim_out) if exists(dim_out) else nn.Identity()
-
-    def forward(
-        self,
-        x,
-        return_embeddings = False,
-        return_intermediates = False,
-        return_mems = False,
-        mask = None,
-        return_attn = False,
-        mems = None,
-        pos = None,
-        prepend_embeds = None,
-        **kwargs
-    ):
-        batch = x.shape[0]
-
-        x = self.project_in(x)
-        x = x + self.pos_emb(x, pos = pos)
-
-        x = self.post_emb_norm(x)
-
-        # memory tokens
-
-        if self.has_memory_tokens:
-            m = repeat(self.memory_tokens, 'm d -> b m d', b = batch)
-            x, mem_ps = pack([m, x], 'b * d')
-
-            if exists(mask):
-                num_mems = m.shape[-2]
-                mask = pad_at_dim(mask, (num_mems, 0), dim = -1, value = True)
-
-        # whether to append embeds, as in PaLI, for image embeddings
-
-        if exists(prepend_embeds):
-            _, prepend_dim = prepend_embeds.shape[1:]
-            assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as model dimensions'
-
-            x = torch.cat((prepend_embeds, x), dim = -2)
-
-        x = self.emb_dropout(x)
-
-        # attention layers
-
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
-
-        # splice out memory tokens
-
-        if self.has_memory_tokens:
-            m, x = unpack(x, mem_ps, 'b * d')
-            intermediates.memory_tokens = m
-
-        out = self.project_out(x) if not return_embeddings else x
-
-        if return_intermediates:
-            return out, intermediates
-
-        if return_mems:
-            hiddens = intermediates.hiddens
-            new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), hiddens))
-            return out, new_mems
 
         if return_attn:
             attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
