@@ -2008,4 +2008,13 @@ generated = model.generate(start_emb, 17) # (17, 777)
 }
 ```
 
+```bibtex
+@inproceedings{Golkar2023xValAC,
+    title   = {xVal: A Continuous Number Encoding for Large Language Models},
+    author  = {Siavash Golkar and Mariel Pettee and Michael Eickenberg and Alberto Bietti and M. Cranmer and G{\'e}raud Krawezik and Francois Lanusse and Michael McCabe and Ruben Ohana and Liam Parker and Bruno R{\'e}galdo-Saint Blancard and Tiberiu Teşileanu and Kyunghyun Cho and Shirley Ho},
+    year    = {2023},
+    url     = {https://api.semanticscholar.org/CorpusID:263622222}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
