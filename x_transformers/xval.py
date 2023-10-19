@@ -57,7 +57,6 @@ class XValTransformerWrapper(nn.Module):
         tie_embedding = False,
         max_mem_len = 0,
         num_memory_tokens = None,
-        post_emb_norm = False,
         emb_dropout = 0.,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False
@@ -82,7 +81,6 @@ class XValTransformerWrapper(nn.Module):
         else:
             self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len)
 
-        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         # memory tokens
@@ -135,8 +133,6 @@ class XValTransformerWrapper(nn.Module):
         x = x * scale
 
         x = x + self.pos_emb(x, pos = pos)
-
-        x = self.post_emb_norm(x)
 
         # memory tokens
 
