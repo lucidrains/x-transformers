@@ -651,6 +651,7 @@ class Attention(nn.Module):
         dropout = 0.,
         on_attn = False,
         gate_value_heads = False,
+        swiglu_values = False,
         gate_values = False,
         zero_init_output = False,
         max_attend_past = None,
@@ -703,6 +704,7 @@ class Attention(nn.Module):
         self.to_v_gate = None
         if gate_values:
             self.to_v_gate = nn.Linear(dim, out_dim)
+            self.to_v_gate_activation = F.silu if swiglu_values else F.sigmoid
             nn.init.constant_(self.to_v_gate.weight, 0)
             nn.init.constant_(self.to_v_gate.bias, 10)
 
@@ -927,7 +929,7 @@ class Attention(nn.Module):
 
         if exists(self.to_v_gate):
             gates = self.to_v_gate(x)
-            out = out * gates.sigmoid()
+            out = out * self.to_v_gate_activation(gates)
 
         # combine the heads
 
