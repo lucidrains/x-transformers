@@ -1443,7 +1443,7 @@ loss.backward()
 start_ids = torch.randint(0, 4, (1, 1))
 start_nums = torch.randn(1, 1)
 
-ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17) # (17, 777)
+ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 # (1, 17), (1, 17), (1, 17)
 
