@@ -1403,6 +1403,8 @@ generated = model.generate(start_emb, 17) # (17, 777)
 
 This is promising work that resulted from the collaboration across many institutes (collectively known as Polymathic AI). They found that by offering a continuously scaled number token to the transformer, the transformer was able to generalize arithmetic and forecasting tasks better than the alternative encoding schemes.
 
+This is corroborated by some [prior work](https://github.com/lucidrains/tab-transformer-pytorch#ft-transformer)
+
 ```python
 import torch
 
