@@ -14,8 +14,6 @@ from einops import rearrange, repeat
 
 # constants
 
-EfficientAttentionConfig = namedtuple('EfficientAttentionConfig', ['enable_flash', 'enable_math', 'enable_mem_efficient'])
-
 @dataclass
 class Intermediates:
     qk_similarities: Optional[Tensor] = None
@@ -77,7 +75,12 @@ class Attend(nn.Module):
         qk_norm = False,
         flash = False,
         add_zero_kv = False,
-        onnxable = False
+        onnxable = False,
+        sdp_kwargs: dict = dict(
+            enable_flash = True,
+            enable_math = True,
+            enable_mem_efficient = True
+        )
     ):
         super().__init__()
         self.scale = scale
@@ -115,30 +118,7 @@ class Attend(nn.Module):
         self.flash = flash
         assert not (flash and version.parse(torch.__version__) < version.parse('2.0.0')), 'in order to use flash attention, you must be using pytorch 2.0 or above'
 
-        # determine efficient attention configs for cuda and cpu
-
-        self.cpu_config = EfficientAttentionConfig(True, True, True)
-        self.cuda_config = None
-
-        if not torch.cuda.is_available() or not flash:
-            return
-
-        device_properties = torch.cuda.get_device_properties(torch.device('cuda'))
-
-        major, minor = device_properties.major, device_properties.minor
-
-        if (major, minor) == (8, 0):
-            print_once('A100 GPU detected, using flash attention if input tensor is on cuda')
-            self.cuda_config = EfficientAttentionConfig(True, False, False)
-        elif (major, minor) == (9, 0):
-            print_once('H100 GPU detected, using flash attention')
-            self.cuda_config = EfficientAttentionConfig(True, False, False)
-        elif (major, minor) == (8, 9):
-            print_once('4090 GPU detected, using flash attention')
-            self.cuda_config = EfficientAttentionConfig(True, False, False)
-        else:
-            print_once('Non-A100 GPU detected, using math or mem efficient attention if input tensor is on cuda')
-            self.cuda_config = EfficientAttentionConfig(False, True, True)
+        self.sdp_kwargs = sdp_kwargs
 
     def flash_attn(
         self,
@@ -228,13 +208,9 @@ class Attend(nn.Module):
 
             mask = attn_bias
 
-        # Check if there is a compatible device for flash attention
-
-        config = self.cuda_config if is_cuda else self.cpu_config
-
         # pytorch 2.0 flash attn: q, k, v, mask, dropout, causal, softmax_scale
-        
-        with torch.backends.cuda.sdp_kernel(**config._asdict()):
+
+        with torch.backends.cuda.sdp_kernel(**self.sdp_kwargs):
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask = mask,
