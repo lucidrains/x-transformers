@@ -5,7 +5,8 @@ import torch.nn.functional as F
 from x_transformers.x_transformers import (
     AttentionLayers,
     ScaledSinusoidalEmbedding,
-    AbsolutePositionalEmbedding
+    AbsolutePositionalEmbedding,
+    always
 )
 
 # helper functions
