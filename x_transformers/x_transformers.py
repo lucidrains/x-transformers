@@ -1331,6 +1331,33 @@ class Decoder(AttentionLayers):
         assert 'causal' not in kwargs, 'cannot set causality on decoder'
         super().__init__(causal = True, **kwargs)
 
+class PrefixDecoder(AttentionLayers):
+    def __init__(self, **kwargs):
+        assert 'causal' not in kwargs, 'cannot set causality on decoder'
+        super().__init__(causal = False, **kwargs)
+
+    def forward(
+        self,
+        x,
+        *args,
+        attn_mask = None,
+        prefix_len = None,
+        **kwargs
+    ):
+        b, n, device = *x.shape[:2], x.device
+        causal_mask = torch.ones((n, n), device = device, dtype = torch.bool).triu(1)
+
+        forwarded_mask = ~causal_mask
+
+        if exists(prefix_len):
+            prefix_mask = torch.arange(n, device = device) < rearrange(prefix_len, 'b -> b 1 1 1')
+            forwarded_mask = forwarded_mask | prefix_mask
+
+        if exists(attn_mask):
+            forwarded_mask = forwarded_mask & attn_mask
+
+        return super().forward(x, *args, attn_mask = forwarded_mask, **kwargs)
+
 class CrossAttender(AttentionLayers):
     def __init__(self, **kwargs):
         super().__init__(cross_attend = True, only_cross = True, **kwargs)
