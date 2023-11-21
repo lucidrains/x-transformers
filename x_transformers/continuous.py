@@ -142,11 +142,13 @@ class ContinuousAutoregressiveWrapper(nn.Module):
         self,
         net: ContinuousTransformerWrapper,
         ignore_index = -100,
-        pad_value = 0
+        pad_value = 0,
+        loss_fn = nn.MSELoss(reduction = 'none')
     ):
         super().__init__()
         self.net = net
         self.max_seq_len = net.max_seq_len
+        self.loss_fn = loss_fn
 
     @torch.no_grad()
     def generate(self, start_tokens, seq_len, **kwargs):
@@ -187,9 +189,11 @@ class ContinuousAutoregressiveWrapper(nn.Module):
             kwargs['mask'] = mask
 
         out = self.net(inp, **kwargs)
-        loss = F.mse_loss(out, target, reduction = 'none')
+
+        loss = self.loss_fn(out, target)
 
         if exists(mask):
+            assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
             loss = loss[mask]
 
         return loss.mean()
