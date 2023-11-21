@@ -1341,7 +1341,7 @@ class PrefixDecoder(AttentionLayers):
         x,
         *args,
         attn_mask = None,
-        prefix_len = None,
+        prefix_attn_len = None,
         **kwargs
     ):
         b, n, device = *x.shape[:2], x.device
@@ -1349,8 +1349,11 @@ class PrefixDecoder(AttentionLayers):
 
         forwarded_mask = ~causal_mask
 
-        if exists(prefix_len):
-            prefix_mask = torch.arange(n, device = device) < rearrange(prefix_len, 'b -> b 1 1 1')
+        if exists(prefix_attn_len):
+            if isinstance(prefix_attn_len, int):
+                prefix_attn_len = torch.full((b,), prefix_attn_len, device = device)
+
+            prefix_mask = torch.arange(n, device = device) < rearrange(prefix_attn_len, 'b -> b 1 1 1')
             forwarded_mask = forwarded_mask | prefix_mask
 
         if exists(attn_mask):
