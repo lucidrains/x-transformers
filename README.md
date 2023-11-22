@@ -769,7 +769,7 @@ model = XTransformer(
 
 ### Transformer-XL recurrence
 
-You can also do Transformer-XL recurrence, by simply passing in a `max_mem_len` in the `TransformerWrapper` class, and then making sure your `Decoder` has `rel_pos_bias` set to `True`.
+You can also do Transformer-XL recurrence, by simply passing in a `max_mem_len` in the `TransformerWrapper` class, and then making sure your `Decoder` has `rel_pos_bias` (or `rotary_pos_emb`) set to `True`.
 
 Then, you can retrieve the memories at each step with the `return_mems` keyword and pass it to the next iteration.
 
