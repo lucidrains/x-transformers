@@ -1191,7 +1191,8 @@ class AttentionLayers(nn.Module):
         seq_start_pos: Optional[Tensor] = None,
         cache: Optional[LayerIntermediates] = None,
         cache_age = 1,
-        return_hiddens = False
+        return_hiddens = False,
+        rotary_pos_emb = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
 
@@ -1219,9 +1220,7 @@ class AttentionLayers(nn.Module):
 
         # rotary positions
 
-        rotary_pos_emb = None
-
-        if exists(self.rotary_pos_emb):
+        if not exists(rotary_pos_emb) and exists(self.rotary_pos_emb):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
             rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length)
 
