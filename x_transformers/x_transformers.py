@@ -641,6 +641,7 @@ class Attention(nn.Module):
         self,
         dim,
         dim_head = DEFAULT_DIM_HEAD,
+        dim_context = None,
         heads = 8,
         causal = False,
         flash = False,
@@ -669,6 +670,8 @@ class Attention(nn.Module):
         onnxable = False
     ):
         super().__init__()
+        dim_kv = default(dim_context, dim)
+
         self.scale = dim_head ** -0.5
 
         self.heads = heads
@@ -691,11 +694,11 @@ class Attention(nn.Module):
         out_dim = value_dim_head * heads
 
         self.to_q = nn.Linear(dim, q_dim, bias = False)
-        self.to_k = nn.Linear(dim, k_dim, bias = False)
+        self.to_k = nn.Linear(dim_kv, k_dim, bias = False)
 
         # shared key / values, for further memory savings during inference
         assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
-        self.to_v = nn.Linear(dim, v_dim, bias = False) if not shared_kv else None
+        self.to_v = nn.Linear(dim_kv, v_dim, bias = False) if not shared_kv else None
 
         # relations projection from tp-attention
         self.to_r = nn.Linear(dim, v_dim, bias = False) if tensor_product else None
@@ -1000,6 +1003,7 @@ class AttentionLayers(nn.Module):
 
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
+        cross_attn_kwargs, kwargs = groupby_prefix_and_trim('cross_attn_', kwargs)
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
 
@@ -1144,7 +1148,7 @@ class AttentionLayers(nn.Module):
             if layer_type == 'a':
                 layer = Attention(dim, heads = heads, causal = causal, **attn_kwargs)
             elif layer_type == 'c':
-                layer = Attention(dim, heads = heads, **attn_kwargs)
+                layer = Attention(dim, heads = heads, **{**attn_kwargs, **cross_attn_kwargs})
             elif layer_type == 'f':
                 layer = FeedForward(dim, **ff_kwargs)
                 layer = layer if not macaron else Scale(0.5, layer)
