@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from functools import partial, wraps
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Union
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
@@ -423,9 +423,15 @@ class RotaryEmbedding(nn.Module):
         self.scale_base = scale_base
         self.register_buffer('scale', scale)
 
-    def forward(self, seq_len):
+    def forward(self, seq_arange_or_len: Union[int, Tensor]):
         device = self.inv_freq.device
-        t = torch.arange(seq_len, device = device).type_as(self.inv_freq)
+
+        if isinstance(seq_arange_or_len, int):
+            t = torch.arange(seq_arange_or_len, device = device)
+        else:
+            t = seq_arange_or_len
+
+        t = t.type_as(self.inv_freq)
 
         t = t / self.interpolation_factor
 
