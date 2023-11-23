@@ -2,11 +2,14 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from einops import pack, repeat, unpack
+
 from x_transformers.x_transformers import (
     AttentionLayers,
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
-    always
+    always,
+    pad_at_dim
 )
 
 # helper functions
