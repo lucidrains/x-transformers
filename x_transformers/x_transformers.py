@@ -4,6 +4,7 @@ from random import random
 import torch
 from torch import nn, einsum, Tensor
 import torch.nn.functional as F
+from torch.cuda.amp import autocast
 
 from functools import partial, wraps
 from collections import namedtuple
@@ -423,6 +424,7 @@ class RotaryEmbedding(nn.Module):
         self.scale_base = scale_base
         self.register_buffer('scale', scale)
 
+    @autocast(enabled = False)
     def forward(self, seq_arange_or_len: Union[int, Tensor]):
         device = self.inv_freq.device
 
@@ -453,6 +455,7 @@ def rotate_half(x):
     x1, x2 = x.unbind(dim = -2)
     return torch.cat((-x2, x1), dim = -1)
 
+@autocast(enabled = False)
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len = freqs.shape[-1], t.shape[-2]
     freqs = freqs[-seq_len:, :]
