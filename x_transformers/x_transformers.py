@@ -856,6 +856,9 @@ class Attention(nn.Module):
         if not exists(input_mask) and not has_context:
             input_mask = mask
 
+            if exists(mem):
+                input_mask = pad_at_dim(input_mask, (mem.shape[-2], 0), dim = -1, value = True)
+
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
 
