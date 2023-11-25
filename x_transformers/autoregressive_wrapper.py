@@ -254,7 +254,7 @@ class AutoregressiveWrapper(Module):
 
         return out
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, return_outputs = False, **kwargs):
         seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
 
         inp, target = x[:, :-1], x[:, 1:]
@@ -284,4 +284,7 @@ class AutoregressiveWrapper(Module):
         if add_attn_z_loss:
             loss = loss + cache.attn_z_loss
 
-        return loss
+        if not return_outputs:
+            return loss
+
+        return loss, (logits, cache)
