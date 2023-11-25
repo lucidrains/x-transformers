@@ -23,12 +23,13 @@ DEFAULT_DIM_HEAD = 64
 
 @dataclass
 class LayerIntermediates:
-    hiddens: Optional[List[Tensor]] = None
+    hiddens:            Optional[List[Tensor]] = None   # all hiddens, before the final norm (in pre-norm architecture)
+    last_hidden:        Optional[Tensor] = None         # very last hidden after all attention layers, after the final norm
     attn_intermediates: Optional[List[Intermediates]] = None
-    layer_hiddens: Optional[List[Tensor]] = None
-    attn_z_loss: Optional[Tensor] = None
-    mems: Optional[Tensor] = None
-    memory_tokens: Optional[Tensor] = None
+    layer_hiddens:      Optional[List[Tensor]] = None
+    attn_z_loss:        Optional[Tensor] = None
+    mems:               Optional[Tensor] = None
+    memory_tokens:      Optional[Tensor] = None
 
 # helpers
 
@@ -1330,8 +1331,9 @@ class AttentionLayers(nn.Module):
 
         intermediates = LayerIntermediates(
             hiddens = hiddens,
+            last_hidden = x,
             attn_intermediates = intermediates,
-            layer_hiddens = layer_hiddens
+            layer_hiddens = layer_hiddens,
         )
 
         return x, intermediates
