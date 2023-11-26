@@ -1545,6 +1545,7 @@ class TransformerWrapper(nn.Module):
         mems = None,
         pos = None,
         prepend_embeds = None,
+        prepend_mask = None,
         sum_embeds = None,
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
@@ -1577,6 +1578,12 @@ class TransformerWrapper(nn.Module):
             assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as text model dimensions'
 
             x = torch.cat((prepend_embeds, x), dim = -2)
+
+            if exists(prepend_mask) or exists(mask):
+                mask = default(mask, lambda: torch.ones((b, n), device = device, dtype = torch.bool))
+                prepend_mask = default(prepend_mask, lambda: torch.ones((b, prepend_seq), device = device, dtype = torch.bool))
+
+                mask = torch.cat((prepend_mask, mask), dim = -1)
 
         # whether to reduce the gradient going to the embedding, from cogview paper, corroborated by GLM-130B model
 
@@ -1712,10 +1719,10 @@ class XTransformer(nn.Module):
 
     def forward(self, src, tgt, mask = None, attn_mask = None, src_prepend_embeds = None):
 
+        enc = self.encoder(src, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
+
         if exists(src_prepend_embeds) and exists(mask):
             mask = pad_at_dim(mask, (src_prepend_embeds.shape[-2], 0), dim = -1, value = True)
-
-        enc = self.encoder(src, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
 
         if self.training and self.cross_attn_tokens_dropout > 0:
             enc, mask = dropout_seq(enc, mask, self.cross_attn_tokens_dropout)
