@@ -85,9 +85,10 @@ class ContinuousTransformerWrapper(nn.Module):
         mems = None,
         pos = None,
         prepend_embeds = None,
+        prepend_mask = None,
         **kwargs
     ):
-        batch = x.shape[0]
+        batch, seq, device = *x.shape[:2], x.device
 
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
@@ -107,10 +108,17 @@ class ContinuousTransformerWrapper(nn.Module):
         # whether to append embeds, as in PaLI, for image embeddings
 
         if exists(prepend_embeds):
-            _, prepend_dim = prepend_embeds.shape[1:]
+            prepend_seq, prepend_dim = prepend_embeds.shape[1:]
+
             assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as model dimensions'
 
             x = torch.cat((prepend_embeds, x), dim = -2)
+
+            if exists(prepend_mask) or exists(mask):
+                mask = default(mask, lambda: torch.ones((batch, seq), device = device, dtype = torch.bool))
+                prepend_mask = default(prepend_mask, lambda: torch.ones((batch, prepend_seq), device = device, dtype = torch.bool))
+
+                mask = torch.cat((prepend_mask, mask), dim = -1)
 
         x = self.emb_dropout(x)
 
@@ -185,6 +193,8 @@ class ContinuousAutoregressiveWrapper(nn.Module):
 
     def forward(self, x, **kwargs):
         inp, target = x[:, :-1], x[:, 1:]
+
+        assert 'prepend_embeds' not in kwargs
 
         mask = kwargs.get('mask', None)
         if exists(mask) and mask.shape[1] == x.shape[1]:
