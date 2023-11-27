@@ -85,6 +85,7 @@ class ContinuousTransformerWrapper(nn.Module):
         mems = None,
         pos = None,
         prepend_embeds = None,
+        prepend_mask = None,
         **kwargs
     ):
         batch = x.shape[0]
@@ -111,6 +112,12 @@ class ContinuousTransformerWrapper(nn.Module):
             assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as model dimensions'
 
             x = torch.cat((prepend_embeds, x), dim = -2)
+
+            if exists(prepend_mask) or exists(mask):
+                mask = default(mask, lambda: torch.ones((b, n), device = device, dtype = torch.bool))
+                prepend_mask = default(prepend_mask, lambda: torch.ones((b, prepend_seq), device = device, dtype = torch.bool))
+
+                mask = torch.cat((prepend_mask, mask), dim = -1)
 
         x = self.emb_dropout(x)
 
