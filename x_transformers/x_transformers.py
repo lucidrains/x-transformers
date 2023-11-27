@@ -197,7 +197,7 @@ class TokenEmbedding(nn.Module):
         self.emb = nn.Embedding(num_tokens, dim)
 
     def forward(self, x):
-        token_emb = self.emb(x)
+        token_emb = self.emb(x.long())
         return l2norm(token_emb) if self.l2norm_embed else token_emb
 
 # positional embeddings
@@ -425,14 +425,15 @@ class RotaryEmbedding(nn.Module):
         self.scale_base = scale_base
         self.register_buffer('scale', scale)
 
-    @autocast(enabled = False)
-    def forward(self, seq_arange_or_len: Union[int, Tensor]):
+    def forward_from_seq_len(self, seq_len):
         device = self.inv_freq.device
 
-        if isinstance(seq_arange_or_len, int):
-            t = torch.arange(seq_arange_or_len, device = device)
-        else:
-            t = seq_arange_or_len
+        t = torch.arange(seq_len, device = device)
+        return self.forward(t)
+
+    @autocast(enabled = False)
+    def forward(self, t):
+        device = self.inv_freq.device
 
         t = t.type_as(self.inv_freq)
 
@@ -798,7 +799,8 @@ class Attention(nn.Module):
         return_intermediates = False,
         cache: Optional[Intermediates] = None,
     ):
-        b, n, _, h, kv_h, head_scale, device, has_context = *x.shape, self.heads, self.kv_heads, self.head_scale, x.device, exists(context)
+        b, n, h, kv_h, head_scale, device, has_context = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, x.device, exists(context)
+
         kv_input = default(context, x)
 
         q_input = x
@@ -1235,7 +1237,7 @@ class AttentionLayers(nn.Module):
 
         if not exists(rotary_pos_emb) and exists(self.rotary_pos_emb):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
-            rotary_pos_emb = self.rotary_pos_emb(max_rotary_emb_length)
+            rotary_pos_emb = self.rotary_pos_emb.forward_from_seq_len(max_rotary_emb_length)
 
         # assume cached key / values
 
@@ -1361,7 +1363,7 @@ class PrefixDecoder(AttentionLayers):
         prefix_attn_len = None,
         **kwargs
     ):
-        b, n, device = *x.shape[:2], x.device
+        b, n, device = x.shape[0], x.shape[1], x.device
         causal_mask = torch.ones((n, n), device = device, dtype = torch.bool).triu(1)
 
         forwarded_mask = ~causal_mask
@@ -1491,7 +1493,7 @@ class TransformerWrapper(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
 
-        if not (use_abs_pos_emb and not attn_layers.has_pos_emb):
+        if max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.has_pos_emb):
             self.pos_emb = always(0)
         elif scaled_sinu_pos_emb:
             self.pos_emb = ScaledSinusoidalEmbedding(emb_dim)
@@ -1553,7 +1555,7 @@ class TransformerWrapper(nn.Module):
         cache: Optional[LayerIntermediates] = None,
         **kwargs
     ):
-        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = *x.shape, x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
+        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
 
         # absolute positional embedding
