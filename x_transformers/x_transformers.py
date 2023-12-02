@@ -1,5 +1,6 @@
 import math
 from random import random
+from typing import Dict
 
 import torch
 from torch import nn, einsum, Tensor
@@ -1464,6 +1465,7 @@ class TransformerWrapper(nn.Module):
         num_tokens,
         max_seq_len,
         attn_layers: AttentionLayers,
+        embed_num_tokens: Dict[str, int] = dict(),
         emb_dim = None,
         max_mem_len = 0,
         shift_mem_down = 0,
@@ -1500,7 +1502,16 @@ class TransformerWrapper(nn.Module):
         else:
             self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed = l2norm_embed)
 
-        self.emb_frac_gradient = emb_frac_gradient # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
+        # additional embeddings - say type embedding from BERT
+
+        self.embeds = None
+
+        if len(embed_num_tokens) > 0:
+            self.embeds = nn.ModuleDict({f'{name}_embed': nn.Embedding(num_tokens, emb_dim) for name, num_tokens in embed_num_tokens.items()})
+
+        # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
+
+        self.emb_frac_gradient = emb_frac_gradient
 
         self.post_emb_norm = nn.LayerNorm(emb_dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
@@ -1548,6 +1559,7 @@ class TransformerWrapper(nn.Module):
         pos = None,
         prepend_embeds = None,
         prepend_mask = None,
+        embed_ids: Dict[str, Tensor] = None,
         sum_embeds = None,
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
@@ -1563,6 +1575,17 @@ class TransformerWrapper(nn.Module):
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
+
+        # add additional embeddings
+
+        if exists(self.embeds) and exists(embed_ids):
+            for name, embed_id in embed_ids.items():
+                embed_key = f'{name}_embed'
+
+                assert embed_key in self.embeds
+                embed = self.embeds[embed_key](embed_id)
+
+                x = x + embed
 
         # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
 
