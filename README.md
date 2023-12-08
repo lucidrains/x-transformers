@@ -941,6 +941,8 @@ More of Eric's experimental results can be found <a href="https://github.com/bob
 
 You can use this type of relative position if you wish to train at smaller sequence lengths and have it generalize to longer ones, for both autoregressive and bidirectional models.
 
+Update: <a href="https://www.kaggle.com/competitions/stanford-ribonanza-rna-folding/discussion/460121">First place RNA folding using dynamic positional bias</a>
+
 ```python
 import torch
 from x_transformers import TransformerWrapper, Decoder
