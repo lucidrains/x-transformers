@@ -238,15 +238,19 @@ class AutoregressiveWrapper(Module):
 
             out = torch.cat((out, sample), dim=-1)
 
-            if exists(eos_token):
-                is_eos_tokens = (out == eos_token)
+            if not exists(eos_token):
+                continue
 
-                if is_eos_tokens.any(dim = -1).all():
-                    # mask out everything after the eos tokens
-                    shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
-                    mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
-                    out = out.masked_fill(mask, self.pad_value)
-                    break
+            is_eos_tokens = (out == eos_token)
+
+            if is_eos_tokens.any(dim = -1).all():
+                break
+
+        if exists(eos_token):
+            # mask out everything after the eos tokens
+            shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
+            mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
+            out = out.masked_fill(mask, self.pad_value)
 
         out = out[:, t:]
 
