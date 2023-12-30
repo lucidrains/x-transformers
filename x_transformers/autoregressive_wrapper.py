@@ -188,6 +188,10 @@ class AutoregressiveWrapper(Module):
         for _ in range(seq_len):
 
             if restrict_to_max_seq_len:
+                max_len_exceeded = out.shape[-1] > max_seq_len
+
+                assert not (cache_kv and max_len_exceeded and self.net.can_cache_kv_outside_max_seq_len), 'the network cannot use cached key values when decoding outside the max sequence length. most likely because you are using absolute positional embeeding. you can switch to rotary embeddings to resolve this issue'
+
                 x = out[:, -max_seq_len:]
 
                 if exists(cache):
