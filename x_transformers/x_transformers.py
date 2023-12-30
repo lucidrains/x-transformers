@@ -1495,7 +1495,9 @@ class TransformerWrapper(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
 
-        if max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.has_pos_emb):
+        no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.has_pos_emb)
+
+        if no_abs_pos_emb:
             self.pos_emb = always(0)
         elif scaled_sinu_pos_emb:
             self.pos_emb = ScaledSinusoidalEmbedding(emb_dim)
@@ -1536,6 +1538,7 @@ class TransformerWrapper(nn.Module):
         # whether can do cached kv decoding
 
         self.can_cache_kv = self.num_memory_tokens == 0
+        self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def init_(self):
         if self.l2norm_embed:
