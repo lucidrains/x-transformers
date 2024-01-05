@@ -1,6 +1,7 @@
 import math
 from random import random
 from typing import Dict
+from packaging import version
 
 import torch
 from torch import nn, einsum, Tensor
@@ -502,7 +503,6 @@ class LayerNorm(nn.Module):
     def __init__(self, dim):
         """
         bias-less layernorm has been shown to be more stable. most newer models have moved towards rmsnorm, also bias-less
-        latest pytorch actually has a way to turn this off in nn.LayerNorm
         """
         super().__init__()
         self.gamma = nn.Parameter(torch.ones(dim))
@@ -510,6 +510,9 @@ class LayerNorm(nn.Module):
 
     def forward(self, x):
         return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
+
+if version.parse(torch.__version__) >= version.parse('2.1.0'):
+    LayerNorm = partial(nn.LayerNorm, bias = False)
 
 class RMSNorm(nn.Module):
     def __init__(self, dim):
