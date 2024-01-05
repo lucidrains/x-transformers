@@ -304,7 +304,7 @@ class DynamicPositionBias(nn.Module):
 
         self.mlp.append(Sequential(
             nn.Linear(1, dim),
-            nn.LayerNorm(dim) if norm else None,
+            LayerNorm(dim) if norm else None,
             nn.SiLU()
         ))
 
@@ -498,6 +498,19 @@ class ScaleNorm(nn.Module):
         norm = torch.norm(x, dim = -1, keepdim = True)
         return x / norm.clamp(min = self.eps) * self.g
 
+class LayerNorm(nn.Module):
+    def __init__(self, dim):
+        """
+        bias-less layernorm has been shown to be more stable. most newer models have moved towards rmsnorm, also bias-less
+        latest pytorch actually has a way to turn this off in nn.LayerNorm
+        """
+        super().__init__()
+        self.gamma = nn.Parameter(torch.ones(dim))
+        self.register_buffer("beta", torch.zeros(dim))
+
+    def forward(self, x):
+        return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
+
 class RMSNorm(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -634,7 +647,7 @@ class FeedForward(nn.Module):
 
         self.ff = Sequential(
             project_in,
-            nn.LayerNorm(inner_dim) if post_act_ln else None,
+            LayerNorm(inner_dim) if post_act_ln else None,
             nn.Dropout(dropout),
             nn.Linear(inner_dim, dim_out, bias = not no_bias)
         )
@@ -1083,7 +1096,7 @@ class AttentionLayers(nn.Module):
         elif use_simple_rmsnorm:
             norm_class = SimpleRMSNorm
         else:
-            norm_class = nn.LayerNorm
+            norm_class = LayerNorm
 
         norm_fn = partial(norm_class, dim)
 
@@ -1415,12 +1428,12 @@ class ViTransformerWrapper(nn.Module):
             self.register_tokens = nn.Parameter(torch.randn(num_register_tokens, dim))
 
         self.patch_to_embedding = nn.Sequential(
-            nn.LayerNorm(patch_dim),
+            LayerNorm(patch_dim),
             nn.Linear(patch_dim, dim),
-            nn.LayerNorm(dim)
+            LayerNorm(dim)
         )
 
-        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
+        LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.dropout = nn.Dropout(emb_dropout)
 
         self.attn_layers = attn_layers
@@ -1515,7 +1528,7 @@ class TransformerWrapper(nn.Module):
 
         self.emb_frac_gradient = emb_frac_gradient
 
-        self.post_emb_norm = nn.LayerNorm(emb_dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = LayerNorm(emb_dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
@@ -1524,7 +1537,7 @@ class TransformerWrapper(nn.Module):
         self.init_()
 
         logits_dim = default(logits_dim, num_tokens)
-        self.to_logits = nn.Linear(dim, logits_dim) if not tie_embedding else lambda t: t @ self.token_emb.emb.weight.t()
+        self.to_logits = nn.Linear(dim, logits_dim, bias = False) if not tie_embedding else lambda t: t @ self.token_emb.emb.weight.t()
 
         # memory tokens (like [cls]) from Memory Transformers paper
 

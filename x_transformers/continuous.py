@@ -8,6 +8,7 @@ from x_transformers.x_transformers import (
     AttentionLayers,
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
+    LayerNorm,
     always,
     pad_at_dim
 )
@@ -54,7 +55,7 @@ class ContinuousTransformerWrapper(nn.Module):
         else:
             self.pos_emb = AbsolutePositionalEmbedding(dim, max_seq_len)
 
-        self.post_emb_norm = nn.LayerNorm(dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
         # memory tokens
@@ -71,8 +72,8 @@ class ContinuousTransformerWrapper(nn.Module):
 
         # project in and out
 
-        self.project_in = nn.Linear(dim_in, dim) if exists(dim_in) else nn.Identity()
-        self.project_out = nn.Linear(dim, dim_out) if exists(dim_out) else nn.Identity()
+        self.project_in = nn.Linear(dim_in, dim, bias = False) if exists(dim_in) else nn.Identity()
+        self.project_out = nn.Linear(dim, dim_out, bias = False) if exists(dim_out) else nn.Identity()
 
     def forward(
         self,
