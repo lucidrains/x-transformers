@@ -74,7 +74,7 @@ class XValTransformerWrapper(nn.Module):
 
         self.max_mem_len = max_mem_len
 
-        if not (use_abs_pos_emb and not attn_layers.has_pos_emb):
+        if not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb):
             self.pos_emb = always(0)
         elif scaled_sinu_pos_emb:
             self.pos_emb = ScaledSinusoidalEmbedding(dim)
