@@ -1028,6 +1028,7 @@ class AttentionLayers(nn.Module):
         zero_init_branch_output = False,
         layer_dropout = 0.,
         cross_attn_tokens_dropout = 0.,
+        disable_abs_pos_emb = None,
         **kwargs
     ):
         super().__init__()
@@ -1044,7 +1045,7 @@ class AttentionLayers(nn.Module):
         self.causal = causal
         self.layers = nn.ModuleList([])
 
-        self.has_pos_emb = rel_pos_bias or rotary_pos_emb
+        self.disable_abs_pos_emb = default(disable_abs_pos_emb, (rel_pos_bias or rotary_pos_emb))
 
         rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
 
@@ -1511,7 +1512,7 @@ class TransformerWrapper(nn.Module):
         self.l2norm_embed = l2norm_embed
         self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
 
-        no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.has_pos_emb)
+        no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb)
 
         if no_abs_pos_emb:
             self.pos_emb = always(0)
