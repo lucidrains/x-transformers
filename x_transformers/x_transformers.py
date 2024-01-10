@@ -880,7 +880,9 @@ class Attention(nn.Module):
             input_mask = mask
 
             if exists(input_mask) and exists(mem):
-                input_mask = pad_at_dim(input_mask, (mem.shape[-2], 0), dim = -1, value = True)
+                # TODO: treat each batch individually.
+                attend = torch.any(mem)
+                input_mask = pad_at_dim(input_mask, (mem.shape[-2], 0), dim = -1, value = attend)
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
@@ -1254,8 +1256,10 @@ class AttentionLayers(nn.Module):
         # rotary positions
 
         if not exists(rotary_pos_emb) and exists(self.rotary_pos_emb):
-            max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
-            rotary_pos_emb = self.rotary_pos_emb.forward_from_seq_len(max_rotary_emb_length)
+            M = max(list(map(lambda m: m.shape[1] if exists(m) else 0, mems)))
+            T = x.shape[1]
+            t = torch.arange(-M, T)
+            rotary_pos_emb = self.rotary_pos_emb.forward(t)
 
         # assume cached key / values
 
