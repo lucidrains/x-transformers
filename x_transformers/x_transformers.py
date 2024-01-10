@@ -880,9 +880,10 @@ class Attention(nn.Module):
             input_mask = mask
 
             if exists(input_mask) and exists(mem):
-                # TODO: treat each batch individually.
-                attend = torch.any(mem)
-                input_mask = pad_at_dim(input_mask, (mem.shape[-2], 0), dim = -1, value = attend)
+                M           = mem.shape[1]
+                attend      = torch.any(mem.flatten(1), dim=1)
+                pad         = repeat(attend, 'b -> b m', m=M)
+                input_mask  = torch.cat([pad, mask], 1)
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
