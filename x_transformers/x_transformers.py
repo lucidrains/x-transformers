@@ -881,7 +881,7 @@ class Attention(nn.Module):
 
             if exists(input_mask) and exists(mem):
                 M           = mem.shape[1]
-                attend      = torch.any(mem.flatten(1), dim=1)
+                attend      = torch.any(mem.flatten(1).bool(), dim=1)
                 pad         = repeat(attend, 'b -> b m', m=M)
                 input_mask  = torch.cat([pad, mask], 1)
 
