@@ -1329,6 +1329,9 @@ class AttentionLayers(nn.Module):
             if exists(pre_norm):
                 x = pre_norm(x)
 
+                if exists(layer_mem):
+                    layer_mem = pre_norm(layer_mem)
+
             if layer_type == 'a':
                 out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, return_intermediates = True)
             elif layer_type == 'c':
