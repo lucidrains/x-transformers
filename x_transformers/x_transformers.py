@@ -435,7 +435,7 @@ class RotaryEmbedding(nn.Module):
 
     @autocast(enabled = False)
     def forward(self, t):
-        device = self.inv_freq.device
+        device, seq_len = self.inv_freq.device, t.shape[-1]
 
         t = t.type_as(self.inv_freq)
 
