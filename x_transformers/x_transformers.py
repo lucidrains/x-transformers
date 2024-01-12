@@ -813,6 +813,7 @@ class Attention(nn.Module):
         rotary_pos_emb = None,
         prev_attn = None,
         mem = None,
+        mem_mask = None,
         return_intermediates = False,
         cache: Optional[Intermediates] = None,
     ):
@@ -879,8 +880,15 @@ class Attention(nn.Module):
         if not exists(input_mask) and not has_context:
             input_mask = mask
 
-            if exists(input_mask) and exists(mem):
-                input_mask = pad_at_dim(input_mask, (mem.shape[-2], 0), dim = -1, value = True)
+            if (exists(input_mask) or exists(mem_mask)) and exists(mem):
+                seq_len, mem_len = n, mem.shape[-2]
+
+                if not exists(mem_mask):
+                    input_mask = pad_at_dim(input_mask, (mem_len, 0), dim = -1, value = True)
+                elif not exists(input_mask):
+                    input_mask = pad_at_dim(mem_mask, (0, seq_len), dim = -1, value = True)
+                else:
+                    input_mask = torch.cat((mem_mask, input_mask), dim = -1)
 
         if self.num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
@@ -1221,6 +1229,7 @@ class AttentionLayers(nn.Module):
         attn_mask = None,
         self_attn_kv_mask = None,
         mems = None,
+        mem_masks = None,
         seq_start_pos: Optional[Tensor] = None,
         cache: Optional[LayerIntermediates] = None,
         cache_age = 1,
@@ -1239,6 +1248,7 @@ class AttentionLayers(nn.Module):
         prev_cross_attn = None
 
         mems = mems.copy() if exists(mems) else [None] * self.num_attn_layers
+        mem_masks = mem_masks.copy() if exists(mem_masks) else [None] * self.num_attn_layers
 
         # handle left padded sequences
 
@@ -1255,7 +1265,12 @@ class AttentionLayers(nn.Module):
 
         if not exists(rotary_pos_emb) and exists(self.rotary_pos_emb):
             max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
-            rotary_pos_emb = self.rotary_pos_emb.forward_from_seq_len(max_rotary_emb_length)
+
+            maybe_mem = mems[0] # todo - handle edge case where different layers get different memory lengths. don't think this will ever come up but who knows
+            mem_len = maybe_mem.shape[1] if exists(maybe_mem) else 0
+
+            pos = torch.arange(x.shape[1] + mem_len, device = x.device) - mem_len
+            rotary_pos_emb = self.rotary_pos_emb(pos)
 
         # assume cached key / values
 
@@ -1296,7 +1311,9 @@ class AttentionLayers(nn.Module):
             if layer_type == 'a':
                 if return_hiddens:
                     hiddens.append(x)
+
                 layer_mem = mems.pop(0) if mems else None
+                layer_mem_mask = mem_masks.pop(0) if mem_masks else None
 
             if layer_type == 'c':
                 if self.training and self.cross_attn_tokens_dropout > 0.:
@@ -1313,7 +1330,7 @@ class AttentionLayers(nn.Module):
                 x = pre_norm(x)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), return_intermediates = True)
             elif layer_type == 'f':
@@ -1576,6 +1593,7 @@ class TransformerWrapper(nn.Module):
         return_mems = False,
         return_attn = False,
         mems = None,
+        mem_masks = None,
         pos = None,
         prepend_embeds = None,
         prepend_mask = None,
@@ -1669,7 +1687,7 @@ class TransformerWrapper(nn.Module):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
             mems = [*mems_r, *mems_l]
 
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
 
         if has_memory_tokens:
             if exists(mem_every):
