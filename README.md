@@ -2076,4 +2076,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Rafailov2023DirectPO,
+    title   = {Direct Preference Optimization: Your Language Model is Secretly a Reward Model},
+    author  = {Rafael Rafailov and Archit Sharma and Eric Mitchell and Stefano Ermon and Christopher D. Manning and Chelsea Finn},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2305.18290},
+    url     = {https://api.semanticscholar.org/CorpusID:258959321}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
