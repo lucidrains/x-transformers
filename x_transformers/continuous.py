@@ -84,6 +84,7 @@ class ContinuousTransformerWrapper(nn.Module):
         mask = None,
         return_attn = False,
         mems = None,
+        mem_masks = None,
         pos = None,
         prepend_embeds = None,
         prepend_mask = None,
@@ -125,7 +126,7 @@ class ContinuousTransformerWrapper(nn.Module):
 
         # attention layers
 
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, return_hiddens = True, **kwargs)
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, return_hiddens = True, **kwargs)
 
         # splice out memory tokens
 
