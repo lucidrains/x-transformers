@@ -132,10 +132,10 @@ class Attend(nn.Module):
         # kv shape torch.Size([1, 512, 64]) -> torch.Size([1, 8, 512, 64])
 
         if k.ndim == 3:
-            k = rearrange(k, 'b ... -> b 1 ...').expand_as(q)
+            k = repeat(k, 'b ... -> b h ...', h = q.shape[1])
 
         if v.ndim == 3:
-            v = rearrange(v, 'b ... -> b 1 ...').expand_as(q)
+            v = repeat(v, 'b ... -> b h ...', h = q.shape[1])
 
         # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
 
