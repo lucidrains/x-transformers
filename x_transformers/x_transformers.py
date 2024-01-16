@@ -788,8 +788,8 @@ class Attention(nn.Module):
         # add memory key / values
         self.num_mem_kv = num_mem_kv
         if num_mem_kv > 0:
-            self.mem_k = nn.Parameter(torch.randn(heads, num_mem_kv, dim_head))
-            self.mem_v = nn.Parameter(torch.randn(heads, num_mem_kv, dim_head))
+            self.mem_k = nn.Parameter(torch.randn(kv_heads, num_mem_kv, dim_head))
+            self.mem_v = nn.Parameter(torch.randn(kv_heads, num_mem_kv, dim_head))
 
         # attention on attention
         self.attn_on_attn = on_attn
