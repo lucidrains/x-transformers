@@ -1457,7 +1457,7 @@ class ViTransformerWrapper(nn.Module):
             LayerNorm(dim)
         )
 
-        LayerNorm(dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = LayerNorm(dim) if post_emb_norm else nn.Identity()
         self.dropout = nn.Dropout(emb_dropout)
 
         self.attn_layers = attn_layers
