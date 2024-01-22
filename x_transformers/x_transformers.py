@@ -57,6 +57,9 @@ def maybe(fn):
         return fn(x, *args, **kwargs)
     return inner
 
+def at_most_one_of(*bools):
+    return sum(map(int, bools)) <= 1
+
 class always():
     def __init__(self, val):
         self.val = val
@@ -1467,7 +1470,8 @@ class ViTransformerWrapper(nn.Module):
     def forward(
         self,
         img,
-        return_embeddings = False
+        return_embeddings = False,
+        return_logits_and_embeddings = False
     ):
         b, p = img.shape[0], self.patch_size
 
@@ -1484,16 +1488,23 @@ class ViTransformerWrapper(nn.Module):
             r = repeat(self.register_tokens, 'n d -> b n d', b = b)
             x, ps = pack((x, r), 'b * d')
 
-        x = self.attn_layers(x)
+        embed = self.attn_layers(x)
 
         if self.has_register_tokens:
-            x, _ = unpack(x, ps, 'b * d')
+            embed, _ = unpack(embed, ps, 'b * d')
+
+        assert at_most_one_of(return_embeddings, return_logits_and_embeddings)
 
         if not exists(self.mlp_head) or return_embeddings:
-            return x
+            return embed
 
-        x = x.mean(dim = -2)
-        return self.mlp_head(x)
+        pooled = embed.mean(dim = -2)
+        logits = self.mlp_head(pooled)
+
+        if not return_logits_and_embeddings:
+            return logits
+
+        return logits, embed
 
 class TransformerWrapper(nn.Module):
     def __init__(
