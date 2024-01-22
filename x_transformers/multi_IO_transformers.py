@@ -1,3 +1,5 @@
+import sys
+
 from x_transformers.x_transformers import *
 
 import math
@@ -21,15 +23,15 @@ class MultiIOTransformerWrapper(nn.Module):
             pre_attn_layers: list[AttentionLayers] = None,
             concat_emb_dim: bool = True,
             attn_layers: AttentionLayers,
-            embed_num_tokens: Dict[str, int] = dict(),  # not sure how to utilize
+            embed_num_tokens: Dict[str, int] = dict(),
             emb_dim: list[int] or int = None,
-            max_mem_len=0,  # not sure how to utilize
-            shift_mem_down=0,  # not sure how to utilize
+            max_mem_len=0,
+            shift_mem_down=0,
             emb_dropout=0.,
             post_emb_norm=False,
             post_attn_layers: list[AttentionLayers] = None,
-            num_memory_tokens=None,  # not sure how to utilize
-            memory_tokens_interspersed_every=None,  # not sure how to utilize
+            num_memory_tokens=None,
+            memory_tokens_interspersed_every=None,
             tie_embedding=False,
             logits_dim: list[int] or int = None,
             use_abs_pos_emb=True,
@@ -92,101 +94,127 @@ class MultiIOTransformerWrapper(nn.Module):
                 emb_frac_gradient=emb_frac_gradient,
                 attn_z_loss_weight=attn_z_loss_weight,
             )
-        self.emb_dim = emb_dim if not pre_attn_layers else [layer.dim for layer in pre_attn_layers]
-        self.num_tokens = num_tokens if not pre_attn_layers else [layer.num_tokens for layer in pre_attn_layers]
-
-        self.max_seq_len = max_seq_len
-
-        self.max_mem_len = max_mem_len
-        self.shift_mem_down = shift_mem_down
-
-        self.pre_attn_layers = pre_attn_layers
-        if pre_attn_layers is not None:
-            assert type(num_tokens) == list, 'num_tokens must be a list of number of tokens for each input'
-            assert len(pre_attn_layers) == len(num_tokens), 'number of pre_attn_layers must match number of inputs'
-            if concat_emb_dim:
-                # assert that sum of embedding dimensions is equal to the model dimension
-                assert sum(emb_dim) == dim, 'sum of embedding dimensions must be equal to the model dimension'
-
-        self.concat_emb_dim = concat_emb_dim if pre_attn_layers else False
-
-        self.post_attn_layers = post_attn_layers
-
-        if post_attn_layers is not None:
-            assert type(logits_dim) == list, 'logits_dim must be a list of logits dimension for each output'
-            assert len(post_attn_layers) == len(logits_dim), 'number of post_attn_layers must match number of outputs'
-
-        self.l2norm_embed = l2norm_embed
-
-        self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed=l2norm_embed) if not self.multi_input \
-            else [TokenEmbedding(emb_dim[i], num_tokens[i], l2norm_embed=l2norm_embed) for i in \
-                  range(len(num_tokens))]
-
-        no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb)
-
-        if no_abs_pos_emb:
-            self.pos_emb = always(0)
-        elif scaled_sinu_pos_emb:
-            self.pos_emb = ScaledSinusoidalEmbedding(emb_dim)
         else:
-            self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed=l2norm_embed)
+            self.emb_dim = emb_dim if (pre_attn_layers is None) else [layer.dim for layer in pre_attn_layers]
+            self.num_tokens = num_tokens
 
-        # additional embeddings - say type embedding from BERT
+            self.max_seq_len = max_seq_len
 
-        self.embeds = None
+            self.max_mem_len = max_mem_len
+            self.shift_mem_down = shift_mem_down
 
-        if len(embed_num_tokens) > 0:
-            self.embeds = nn.ModuleDict(
-                {f'{name}_embed': nn.Embedding(num_tokens, emb_dim) for name, num_tokens in embed_num_tokens.items()})
+            self.pre_attn_layers = pre_attn_layers
+            if pre_attn_layers is not None:
+                assert type(num_tokens) == list, 'num_tokens must be a list of number of tokens for each input'
+                assert len(pre_attn_layers) == len(num_tokens), 'number of pre_attn_layers must match number of inputs'
+                if concat_emb_dim:
+                    # assert that sum of embedding dimensions is equal to the model dimension
+                    assert sum(self.emb_dim) == dim, 'sum of embedding dimensions must be equal to the model dimension'
 
-        # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
+            self.concat_emb_dim = concat_emb_dim if pre_attn_layers else False
 
-        self.emb_frac_gradient = emb_frac_gradient
-        if self.pre_attn_layers is not None:
-            self.post_emb_norm = [LayerNorm(emb_dim[i]) if post_emb_norm else nn.Identity() for i in
-                                  range(len(emb_dim))]
-            self.emb_dropout = [nn.Dropout(emb_dropout) for i in range(len(emb_dim))]
-            self.project_emb = [nn.Linear(emb_dim[i], dim) if emb_dim[i] != dim else nn.Identity() for i in
-                                range(len(emb_dim))]
-        else:
-            self.post_emb_norm = LayerNorm(emb_dim) if post_emb_norm else nn.Identity()
-            self.emb_dropout = nn.Dropout(emb_dropout)
-            self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
+            self.post_attn_layers = post_attn_layers
 
-        self.attn_layers = attn_layers
+            if post_attn_layers is not None:
+                assert type(logits_dim) == list, 'logits_dim must be a list of logits dimension for each output'
+                assert len(post_attn_layers) == len(
+                    logits_dim), 'number of post_attn_layers must match number of outputs'
 
-        self.init_()
+            self.l2norm_embed = l2norm_embed
 
-        logits_dim = default(logits_dim, num_tokens)
-        if type(logits_dim) == list:
-            self.to_logits = [(nn.Linear(dim, d, bias=False) for d in logits_dim) if not tie_embedding else lambda \
-                    t: t @ self.token_emb.emb.weight.t()]
-        else:
-            self.to_logits = nn.Linear(dim, logits_dim, bias=False) if not tie_embedding else lambda \
-                    t: t @ self.token_emb.emb.weight.t()
+            self.token_emb = [TokenEmbedding(self.emb_dim[i], num_tokens[i], l2norm_embed=l2norm_embed) for i in \
+                              range(len(num_tokens))]
 
-        # memory tokens (like [cls]) from Memory Transformers paper
+            no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb)
 
-        num_memory_tokens = default(num_memory_tokens, 0)
-        self.num_memory_tokens = num_memory_tokens
-        if num_memory_tokens > 0:
-            self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
+            if no_abs_pos_emb:
+                self.pos_emb = always(0)
+            elif scaled_sinu_pos_emb:
+                self.pos_emb = ScaledSinusoidalEmbedding(emb_dim)
+            else:
+                self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed=l2norm_embed)
 
-        self.memory_tokens_interspersed_every = memory_tokens_interspersed_every
+            # additional embeddings - say type embedding from BERT
 
-        # whether can do cached kv decoding
+            self.embeds = None
 
-        self.can_cache_kv = self.num_memory_tokens == 0
-        self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
+            if len(embed_num_tokens) > 0:
+                if self.pre_attn_layers is not None:
+                    self.embeds = [nn.ModuleDict({f'{name}_embed': nn.Embedding(num_tokens, self.emb_dim[i])
+                                                  for name, num_tokens in embed_num_tokens.items()}) for i in
+                                   range(len(self.emb_dim))]
+                else:
+                    self.embeds = nn.ModuleDict(
+                        {f'{name}_embed': nn.Embedding(num_tokens, self.emb_dim) for name, num_tokens in
+                         embed_num_tokens.items()})
+
+            # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
+
+            self.emb_frac_gradient = emb_frac_gradient
+            if self.pre_attn_layers is not None:
+                self.post_emb_norm = [LayerNorm(self.emb_dim[i]) if post_emb_norm else nn.Identity() for i in
+                                      range(len(self.emb_dim))]
+                self.emb_dropout = [nn.Dropout(emb_dropout) for i in range(len(self.emb_dim))]
+                self.project_emb = [
+                    nn.Linear(self.emb_dim[i], dim) if self.emb_dim[i] != self.pre_attn_layers[i].dim else nn.Identity()
+                    for i in
+                    range(len(self.emb_dim))]
+            else:
+                self.post_emb_norm = LayerNorm(self.emb_dim) if post_emb_norm else nn.Identity()
+                self.emb_dropout = nn.Dropout(emb_dropout)
+                self.project_emb = nn.Linear(self.emb_dim, dim) if self.emb_dim != dim else nn.Identity()
+
+            self.attn_layers = attn_layers
+
+            self.init_()
+
+            logits_dim = default(logits_dim, num_tokens)
+            if type(logits_dim) == list:
+                if self.multi_input:
+                    self.to_logits = [nn.Linear(dim, d, bias=False) for d in logits_dim] if not tie_embedding else \
+                        lambda t: [t @ self.token_emb[i].emb.weight.t() for i in range(len(logits_dim))]
+                else:
+                    self.to_logits = [
+                        (nn.Linear(dim, d, bias=False) for d in logits_dim) if not tie_embedding else lambda \
+                                t: t @ self.model.token_emb.emb.weight.t()]
+            else:
+                if self.multi_input:
+                    self.to_logits = nn.Linear(dim, logits_dim, bias=False) if not tie_embedding else sum(lambda \
+                                                                                                                  t: t @
+                                                                                                                     self.token_emb[
+                                                                                                                         i].emb.weight.t()
+                                                                                                          for i in
+                                                                                                          range(
+                                                                                                              len(self.token_emb)))
+                else:
+                    self.to_logits = nn.Linear(dim, logits_dim, bias=False) if not tie_embedding else lambda \
+                            t: t @ self.model.token_emb.emb.weight.t()
+
+            # memory tokens (like [cls]) from Memory Transformers paper
+
+            self.num_memory_tokens = num_memory_tokens
+            if type(self.num_memory_tokens) == list:
+                assert len(num_memory_tokens) == len(
+                    self.emb_dim), 'number of memory tokens must match number of inputs'
+                self.memory_tokens = nn.ParameterList(
+                    [nn.Parameter(torch.randn(num_memory_tokens[i], self.emb_dim[i])) for i in
+                     range(len(self.emb_dim))])
+
+            self.memory_tokens_interspersed_every = memory_tokens_interspersed_every
+
+            # whether can do cached kv decoding
+
+            self.can_cache_kv = self.num_memory_tokens == 0
+            self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def init_(self):
         if self.l2norm_embed:
-            nn.init.normal_(self.token_emb.emb.weight, std=1e-5)
-            if not isinstance(self.pos_emb, always):
-                nn.init.normal_(self.pos_emb.emb.weight, std=1e-5)
-            return
-
-        nn.init.kaiming_normal_(self.token_emb.emb.weight)
+            for i in range(len(self.token_emb)):
+                nn.init.normal_(self.token_emb[i].emb.weight, std=1e-5)
+                if not isinstance(self.pos_emb, always):
+                    nn.init.normal_(self.pos_emb[i].emb.weight, std=1e-5)
+        for i in range(len(self.token_emb)):
+            nn.init.kaiming_normal_(self.token_emb[i].emb.weight)
 
     def forward(
             self,
@@ -211,36 +239,52 @@ class MultiIOTransformerWrapper(nn.Module):
             **kwargs
     ):
         global intermediates_model, cache_pre_attn_layers, cache_model, cache_post_attn_layers, intermediates_pre_attn_layers
-        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[
-            1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
+
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
-        if self.pre_attn_layers is not None and self.post_attn_layers is not None:
-            cache_pre_attn_layers, cache_model, cache_post_attn_layers = cache
-        elif self.pre_attn_layers is not None:
-            cache_pre_attn_layers, cache_model = cache
-        elif self.post_attn_layers is not None:
-            cache_model, cache_post_attn_layers = cache
 
         if not self.multi_input and not self.multi_output:
             return self.model(x, return_embeddings, return_logits_and_embeddings, return_intermediates, mask,
-                              return_mems, return_attn, mems, mem_masks, pos, prepend_mask, embed_ids, sum_embeds,
-                              return_attn_z_loss, attn_z_loss_weight, seq_start_pos, cache)
+                              return_mems, return_attn, mems, mem_masks, pos, prepend_embeds, prepend_mask, embed_ids,
+                              sum_embeds, return_attn_z_loss, attn_z_loss_weight, seq_start_pos, cache)
+        if cache is not None:
+            if self.pre_attn_layers is not None and self.post_attn_layers is not None:
+                cache_pre_attn_layers, cache_model, cache_post_attn_layers = cache
+            elif self.pre_attn_layers is not None:
+                cache_pre_attn_layers, cache_model = cache
+                cache_post_attn_layers = None
+            elif self.post_attn_layers is not None:
+                cache_model, cache_post_attn_layers = cache
+                cache_pre_attn_layers = None
+            else:
+                cache_model = cache
+                cache_pre_attn_layers = None
+                cache_post_attn_layers = None
+        else:
+            cache_pre_attn_layers = None
+            cache_model = None
+            cache_post_attn_layers = None
 
         if self.multi_input:
-            assert len(x[:, :, -1]) == len(self.pre_attn_layers), 'number of inputs must match number of ' \
-                                                                  'pre_attn_layers'
-            assert len(x[:, :, -1]) == len(self.num_tokens), 'number of inputs must match number of num_tokens'
-            assert len(x[:, :, -1]) == len(self.emb_dim), 'number of inputs must match number of emb_dim'
+            b, n, device, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.emb_frac_gradient
+            if self.num_memory_tokens is not None:
+                num_mems, has_memory_tokens = self.num_memory_tokens, True
+            else:
+                num_mems, has_memory_tokens = 0, False
+            assert x.shape[-1] == len(self.pre_attn_layers), 'number of inputs must match number of ' \
+                                                             'pre_attn_layers'
+            assert x.shape[-1] == len(self.num_tokens), 'number of inputs must match number of num_tokens'
+            assert x.shape[-1] == len(self.emb_dim), 'number of inputs must match number of emb_dim'
             external_pos_emb = exists(pos) and pos.dtype != torch.long
             pos_emb = self.pos_emb(x, pos=pos, seq_start_pos=seq_start_pos) if not external_pos_emb else pos
             intermediates_pre_attn_layers = []
-            for i in range(len(x[:, :, -1])):
+            outx = []
+            for i in range(x.shape[-1]):
                 x_i = x[:, :, i]
-                x_i = self.token_emb(x_i) + pos_emb
+                x_i = self.token_emb[i](x_i) + pos_emb
                 if exists(self.embeds):
-                    assert len(embed_ids) == len(self.embeds)
+                    assert len(embed_ids[i]) == len(self.embeds)
 
-                    for name, embed_id in embed_ids.items():
+                    for name, embed_id in embed_ids[i].items():
                         embed_key = f'{name}_embed'
 
                         assert embed_key in self.embeds
@@ -248,31 +292,83 @@ class MultiIOTransformerWrapper(nn.Module):
 
                         x_i = x_i + embed
                 x_i = self.post_emb_norm[i](x_i)
+
+                if exists(prepend_embeds):
+                    prepend_seq, prepend_dim = prepend_embeds[i].shape[1:]
+                    assert prepend_dim == x.shape[
+                        -1], 'prepended embeddings need to have same dimensions as text model dimensions'
+                    x = torch.cat((prepend_embeds[i], x), dim=-2)
+                    if exists(prepend_mask) or exists(mask):
+                        mask = default(mask, lambda: torch.ones((b, n), device=device, dtype=torch.bool))
+                        prepend_mask = default(prepend_mask[i],
+                                               lambda: torch.ones((b, prepend_seq), device=device, dtype=torch.bool))
+                        mask = torch.cat((prepend_mask, mask), dim=-1)
+
                 if emb_frac_gradient < 1:
                     assert emb_frac_gradient > 0
-                    x_i = x_i * emb_frac_gradient + x.detach() * (1 - emb_frac_gradient)
+                    x_i = x_i * emb_frac_gradient + x_i.detach() * (1 - emb_frac_gradient)
                 x_i = self.emb_dropout[i](x_i)
                 x_i = self.project_emb[i](x_i)
+
+                if has_memory_tokens:
+                    mem_every = self.memory_tokens_interspersed_every[i]
+
+                    if exists(mem_every):
+                        assert mem_every > 0
+                        assert isinstance(self.attn_layers, Decoder), 'only for decoder'
+                        next_seq_len = math.ceil(n / mem_every) * mem_every
+
+                        x_i = pad_at_dim(x_i, (0, next_seq_len - n), dim=-2, value=0.)
+                        x_i = rearrange(x_i, 'b (n m) d -> (b n) m d', m=mem_every)
+
+                    mem = repeat(self.memory_tokens[i], 'n d -> b n d', b=x_i.shape[0])
+                    x_i, mem_packed_shape = pack((mem, x), 'b * d')
+
+                    # auto-handle masking after appending memory tokens
+                    if not exists(mem_every) and exists(mask):
+                        mask = pad_at_dim(mask, (num_mems, 0), dim=-1, value=True)
+
+                    if exists(mem_every):
+                        x_i = rearrange(x, '(b n) m d -> b (n m) d', b=b)
+
+                if self.shift_mem_down and exists(mems):
+                    mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
+                    mems = [*mems_r, *mems_l]
 
                 if self.pre_attn_layers is not None:
                     if return_mems or return_attn or return_intermediates or return_attn_z_loss:
                         x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask, mems=mems,
-                                                                                    cache=cache_pre_attn_layers[i],
+                                                                                    cache=cache_pre_attn_layers[
+                                                                                        i] if cache_pre_attn_layers is not None else None,
                                                                                     return_hiddens=True,
                                                                                     seq_start_pos=seq_start_pos,
                                                                                     **kwargs)
                         intermediates_pre_attn_layers.append(intermediates_pre_attn_layer)
                     else:
-                        x_i = self.pre_attn_layers[i](x_i, mask=mask, mems=mems, cache=cache_pre_attn_layers[i],
+                        x_i = self.pre_attn_layers[i](x_i, mask=mask, mems=mems, cache=cache_pre_attn_layers[
+                            i] if cache_pre_attn_layers is not None else None,
                                                       return_hiddens=False,
                                                       seq_start_pos=seq_start_pos, **kwargs)
+                if has_memory_tokens:
+                    if exists(mem_every):
+                        x_i = rearrange(x, 'b (n m) d -> (b n) m d', m=(mem_every + self.num_memory_tokens))
+
+                    mem, x_i = unpack(x, mem_packed_shape, 'b * d')
+
+                    intermediates_model.memory_tokens = mem
+
+                    if exists(mem_every):
+                        x_i = rearrange(x, '(b n) m d -> b (n m) d', b=b)
+
+                    x_i = x_i[:, :n]
                 if i == 0:
-                    x = x_i
+                    outx = x_i
                 else:
                     if self.concat_emb_dim:
-                        x = torch.cat((x, x_i), dim=-1)
+                        outx = torch.cat((x, x_i), dim=-1)
                     else:
-                        x = x + x_i
+                        outx = x + x_i
+            x = outx
         else:
             if return_mems or return_attn or return_intermediates or return_attn_z_loss:
                 x, intermediates_model = self.model(x, True, False, return_intermediates, mask,
@@ -281,8 +377,8 @@ class MultiIOTransformerWrapper(nn.Module):
                                                     return_attn_z_loss, attn_z_loss_weight, seq_start_pos, cache_model)
             else:
                 x = self.model(x, True, False, return_intermediates, mask,
-                           return_mems, return_attn, mems, mem_masks, pos, prepend_mask, embed_ids, sum_embeds,
-                           return_attn_z_loss, attn_z_loss_weight, seq_start_pos, cache_model)
+                               return_mems, return_attn, mems, mem_masks, pos, prepend_mask, embed_ids, sum_embeds,
+                               return_attn_z_loss, attn_z_loss_weight, seq_start_pos, cache_model)
 
         if self.multi_output:
             if self.post_attn_layers is not None:
@@ -339,26 +435,34 @@ class MultiIOTransformerWrapper(nn.Module):
                     return out, (intermediates_model, attn_maps)
 
                 return out
+            else:
+                # work on later
+                return "wait a bit"
         else:
-            # if has_memory_tokens:
-            #     if exists(mem_every):
-            #        x = rearrange(x, 'b (n m) d -> (b n) m d', m=(mem_every + num_mems))
+            if self.num_memory_tokens is not None:
+                n = x.shape[1]
+                mem_every = self.memory_tokens_interspersed_every
+                if exists(mem_every):
+                    x = rearrange(x, 'b (n m) d -> (b n) m d', m=(mem_every + self.num_memory_tokens))
 
-            # mem, x = unpack(x, mem_packed_shape, 'b * d')
+                mem, x = unpack(x, mem_packed_shape, 'b * d')
 
-            # intermediates_model.memory_tokens = mem
+                intermediates_model.memory_tokens = mem
 
-            # if exists(mem_every):
-            #    x = rearrange(x, '(b n) m d -> b (n m) d', b=b)
+                if exists(mem_every):
+                    x = rearrange(x, '(b n) m d -> b (n m) d', b=b)
 
-            x = x[:, :n]
+                x = x[:, :n]
 
             if return_logits_and_embeddings:
-                out = (self.to_logits(x), x)
+                if type(self.to_logits) == list:
+                    out = (list(self.to_logits[i](x) for i in range(len(self.to_logits))), x)
+                else:
+                    out = (self.to_logits(x), x)
             elif return_embeddings:
                 out = x
             else:
-                out = self.to_logits(x)
+                out = list(self.to_logits[i](x) for i in range(len(self.to_logits)))
 
             if return_attn_z_loss:
                 pre_softmax_attns = list(map(lambda t: t.pre_softmax_attn, intermediates_model.attn_intermediates))
@@ -378,116 +482,10 @@ class MultiIOTransformerWrapper(nn.Module):
 
             if return_intermediates:
                 if self.pre_attn_layers is not None:
-                    return out,  (intermediates_pre_attn_layers, intermediates_model)
+                    return out, (intermediates_pre_attn_layers, intermediates_model)
 
             if return_attn:
                 attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates_model.attn_intermediates))
                 return out, attn_maps
 
             return out
-            # multi_input and multi_output
-            # multi_input = [..., x inputs]
-        """
-        # absolute positional embedding
-        external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(x, pos=pos, seq_start_pos=seq_start_pos) if not external_pos_emb else pos
-        x = self.token_emb(x) + pos_emb
-        # add additional embeddings
-        if exists(self.embeds):
-            assert len(embed_ids) == len(self.embeds)
-    
-            for name, embed_id in embed_ids.items():
-                embed_key = f'{name}_embed'
-    
-                assert embed_key in self.embeds
-                embed = self.embeds[embed_key](embed_id)
-    
-                x = x + embed
-        # for summing embeddings passed externally - needs this for self-conditioning in non-autoregressive training
-        if exists(sum_embeds):
-            x = x + sum_embeds
-        # post embedding norm, purportedly leads to greater stabilization
-        x = self.post_emb_norm(x)
-        # whether to append embeds, as in PaLI, for image embeddings
-        if exists(prepend_embeds):
-            prepend_seq, prepend_dim = prepend_embeds.shape[1:]
-            assert prepend_dim == x.shape[
-                -1], 'prepended embeddings need to have same dimensions as text model dimensions'
-            x = torch.cat((prepend_embeds, x), dim=-2)
-            if exists(prepend_mask) or exists(mask):
-                mask = default(mask, lambda: torch.ones((b, n), device=device, dtype=torch.bool))
-                prepend_mask = default(prepend_mask,
-                                       lambda: torch.ones((b, prepend_seq), device=device, dtype=torch.bool))
-                mask = torch.cat((prepend_mask, mask), dim=-1)
-        # whether to reduce the gradient going to the embedding, from cogview paper, corroborated by GLM-130B model
-        if emb_frac_gradient < 1:
-            assert emb_frac_gradient > 0
-            x = x * emb_frac_gradient + x.detach() * (1 - emb_frac_gradient)
-        # embedding dropout
-        x = self.emb_dropout(x)
-        x = self.project_emb(x)
-        if has_memory_tokens:
-            mem_every = self.memory_tokens_interspersed_every
-            if exists(mem_every):
-                assert mem_every > 0
-                assert isinstance(self.attn_layers, Decoder), 'only for decoder'
-                next_seq_len = math.ceil(n / mem_every) * mem_every
-                x = pad_at_dim(x, (0, next_seq_len - n), dim=-2, value=0.)
-                x = rearrange(x, 'b (n m) d -> (b n) m d', m=mem_every)
-            mem = repeat(self.memory_tokens, 'n d -> b n d', b=x.shape[0])
-            x, mem_packed_shape = pack((mem, x), 'b * d')
-            # auto-handle masking after appending memory tokens
-            if not exists(mem_every) and exists(mask):
-                mask = pad_at_dim(mask, (num_mems, 0), dim=-1, value=True)
-            if exists(mem_every):
-                x = rearrange(x, '(b n) m d -> b (n m) d', b=b)
-        if self.shift_mem_down and exists(mems):
-            mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
-            mems = [*mems_r, *mems_l]
-        x, intermediates = self.attn_layers(x, mask=mask, mems=mems, mem_masks=mem_masks, cache=cache,
-                                            return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
-    
-        if has_memory_tokens:
-            if exists(mem_every):
-                x = rearrange(x, 'b (n m) d -> (b n) m d', m=(mem_every + num_mems))
-    
-            mem, x = unpack(x, mem_packed_shape, 'b * d')
-    
-            intermediates.memory_tokens = mem
-    
-            if exists(mem_every):
-                x = rearrange(x, '(b n) m d -> b (n m) d', b=b)
-    
-            x = x[:, :n]
-    
-        if return_logits_and_embeddings:
-            out = (self.to_logits(x), x)
-        elif return_embeddings:
-            out = x
-        else:
-            out = self.to_logits(x)
-    
-        if return_attn_z_loss:
-            pre_softmax_attns = list(map(lambda t: t.pre_softmax_attn, intermediates.attn_intermediates))
-            intermediates.attn_z_loss = calc_z_loss(pre_softmax_attns, weight=attn_z_loss_weight)
-            return_intermediates = True
-    
-        if return_mems:
-            hiddens = intermediates.hiddens
-            new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(mems) else hiddens
-            new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
-    
-            if not return_intermediates:
-                return out, new_mems
-    
-            intermediates.mems = new_mems
-    
-        if return_intermediates:
-            return out, intermediates
-    
-        if return_attn:
-            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
-            return out, attn_maps
-    
-        return out
-        """
