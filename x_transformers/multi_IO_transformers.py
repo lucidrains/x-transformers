@@ -1,5 +1,3 @@
-import sys
-
 from x_transformers.x_transformers import *
 
 import math
@@ -40,29 +38,6 @@ class MultiIOTransformerWrapper(nn.Module):
             emb_frac_gradient=1.,  # GLM-130B and Cogview successfully used this, set at 0.1
             attn_z_loss_weight=1e-4,
     ):
-        """
-        num_tokens: list of number of tokens for each input
-        max_seq_len: maximum sequence length
-        pre_attn_layers: list of AttentionLayers for each input
-        concat_emb_dim: whether to concat the embedding dimensions for each input or add them
-        attn_layers: AttentionLayers for the whole model (not compatible with singular num_tokens)
-        embed_num_tokens: dictionary of number of tokens for each embedding
-        emb_dim: list of embedding dimensions for each input (not applicable with pre_attn_layers)
-        max_mem_len: maximum memory length
-        shift_mem_down: shift memory down
-        emb_dropout: embedding dropout
-        post_emb_norm: whether to use post embedding norm
-        post_attn_layers: list of AttentionLayers for each input after the main AttentionLayers
-        num_memory_tokens: number of memory tokens
-        memory_tokens_interspersed_every: intersperse memory tokens every x tokens
-        tie_embedding: whether to tie the embedding and the logits layer
-        logits_dim: logits dimension (not applicable with tie_embedding or post_attn_layers)
-        use_abs_pos_emb: whether to use absolute positional embedding
-        scaled_sinu_pos_emb: whether to use scaled sinusoidal positional embedding
-        l2norm_embed: whether to use l2 normalization on the embedding
-        emb_frac_gradient: fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
-        attn_z_loss_weight: weight for the attention regularization loss
-        """
         super().__init__()
 
         dim = attn_layers.dim
@@ -108,17 +83,27 @@ class MultiIOTransformerWrapper(nn.Module):
                 assert type(num_tokens) == list, 'num_tokens must be a list of number of tokens for each input'
                 assert len(pre_attn_layers) == len(num_tokens), 'number of pre_attn_layers must match number of inputs'
                 if concat_emb_dim:
-                    # assert that sum of embedding dimensions is equal to the model dimension
-                    assert sum(self.emb_dim) == dim, 'sum of embedding dimensions must be equal to the model dimension'
+                    self.pre_attn_layers_map = nn.Linear(sum(self.emb_dim), dim) if sum(self.emb_dim) != dim else \
+                        nn.Identity()
+                    if sum(self.emb_dim) != dim:
+                        print('Warning! Since the embedding dimensions of the pre_attention layers are concatenated, '
+                              'the dimensions are added. As your model dimension is not equal to the sum of the '
+                              'embedding dimensions, a linear layer is added to project the concatenated embedding. '
+                              'If this is not desired, please change the model dimensions.')
+                else:
+                    # assert that all embedding dimensions are equal to the model dimension
+                    assert all(dim == d for d in self.emb_dim), 'all embedding dimensions must be equal to the model ' \
+                                                                'dimension since having concat_emb_dim means that ' \
+                                                                'the model dimension is added to the embedding '
 
             self.concat_emb_dim = concat_emb_dim if pre_attn_layers else False
 
             self.post_attn_layers = post_attn_layers
 
             if post_attn_layers is not None:
-                assert type(logits_dim) == list, 'logits_dim must be a list of logits dimension for each output'
-                assert len(post_attn_layers) == len(
-                    logits_dim), 'number of post_attn_layers must match number of outputs'
+                if logits_dim is not None:
+                    assert len(post_attn_layers) == len(
+                        logits_dim), 'number of post_attn_layers must match number of outputs'
 
             self.l2norm_embed = l2norm_embed
 
@@ -168,27 +153,18 @@ class MultiIOTransformerWrapper(nn.Module):
 
             self.init_()
 
-            logits_dim = default(logits_dim, num_tokens)
-            if type(logits_dim) == list:
-                if self.multi_input:
+            if self.post_attn_layers is not None:
+                if logits_dim is not None:
                     self.to_logits = [nn.Linear(dim, d, bias=False) for d in logits_dim] if not tie_embedding else \
                         lambda t: [t @ self.token_emb[i].emb.weight.t() for i in range(len(logits_dim))]
                 else:
-                    self.to_logits = [
-                        (nn.Linear(dim, d, bias=False) for d in logits_dim) if not tie_embedding else lambda \
-                                t: t @ self.model.token_emb.emb.weight.t()]
+                    self.to_logits = [nn.Identity() for _ in range(len(self.post_attn_layers))]
             else:
-                if self.multi_input:
-                    self.to_logits = nn.Linear(dim, logits_dim, bias=False) if not tie_embedding else sum(lambda \
-                                                                                                                  t: t @
-                                                                                                                     self.token_emb[
-                                                                                                                         i].emb.weight.t()
-                                                                                                          for i in
-                                                                                                          range(
-                                                                                                              len(self.token_emb)))
-                else:
+                if logits_dim is not None:
                     self.to_logits = nn.Linear(dim, logits_dim, bias=False) if not tie_embedding else lambda \
                             t: t @ self.model.token_emb.emb.weight.t()
+                else:
+                    self.to_logits = nn.Identity()
 
             # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -238,7 +214,7 @@ class MultiIOTransformerWrapper(nn.Module):
             cache=None,
             **kwargs
     ):
-        global intermediates_model, cache_pre_attn_layers, cache_model, cache_post_attn_layers, intermediates_pre_attn_layers
+        global intermediates_model, cache_pre_attn_layers, cache_model, cache_post_attn_layers, intermediates_pre_attn_layers, intermediates_pre_attn_layer, mem_packed_shape, mem_every
 
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
 
@@ -295,9 +271,9 @@ class MultiIOTransformerWrapper(nn.Module):
 
                 if exists(prepend_embeds):
                     prepend_seq, prepend_dim = prepend_embeds[i].shape[1:]
-                    assert prepend_dim == x.shape[
+                    assert prepend_dim == x_i.shape[
                         -1], 'prepended embeddings need to have same dimensions as text model dimensions'
-                    x = torch.cat((prepend_embeds[i], x), dim=-2)
+                    x_i = torch.cat((prepend_embeds[i], x_i), dim=-2)
                     if exists(prepend_mask) or exists(mask):
                         mask = default(mask, lambda: torch.ones((b, n), device=device, dtype=torch.bool))
                         prepend_mask = default(prepend_mask[i],
@@ -322,45 +298,39 @@ class MultiIOTransformerWrapper(nn.Module):
                         x_i = rearrange(x_i, 'b (n m) d -> (b n) m d', m=mem_every)
 
                     mem = repeat(self.memory_tokens[i], 'n d -> b n d', b=x_i.shape[0])
-                    x_i, mem_packed_shape = pack((mem, x), 'b * d')
+                    x_i, mem_packed_shape = pack((mem, x_i), 'b * d')
 
                     # auto-handle masking after appending memory tokens
                     if not exists(mem_every) and exists(mask):
                         mask = pad_at_dim(mask, (num_mems, 0), dim=-1, value=True)
 
                     if exists(mem_every):
-                        x_i = rearrange(x, '(b n) m d -> b (n m) d', b=b)
+                        x_i = rearrange(x_i, '(b n) m d -> b (n m) d', b=b)
 
                 if self.shift_mem_down and exists(mems):
                     mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
                     mems = [*mems_r, *mems_l]
 
                 if self.pre_attn_layers is not None:
-                    if return_mems or return_attn or return_intermediates or return_attn_z_loss:
-                        x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask, mems=mems,
-                                                                                    cache=cache_pre_attn_layers[
-                                                                                        i] if cache_pre_attn_layers is not None else None,
-                                                                                    return_hiddens=True,
-                                                                                    seq_start_pos=seq_start_pos,
-                                                                                    **kwargs)
-                        intermediates_pre_attn_layers.append(intermediates_pre_attn_layer)
-                    else:
-                        x_i = self.pre_attn_layers[i](x_i, mask=mask, mems=mems, cache=cache_pre_attn_layers[
-                            i] if cache_pre_attn_layers is not None else None,
-                                                      return_hiddens=False,
-                                                      seq_start_pos=seq_start_pos, **kwargs)
+                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask, mems=mems,
+                                                                                cache=cache_pre_attn_layers[
+                                                                                    i] if cache_pre_attn_layers is not None else None,
+                                                                                return_hiddens=True,
+                                                                                seq_start_pos=seq_start_pos,
+                                                                                **kwargs)
+                    intermediates_pre_attn_layers.append(intermediates_pre_attn_layer)
                 if has_memory_tokens:
                     if exists(mem_every):
-                        x_i = rearrange(x, 'b (n m) d -> (b n) m d', m=(mem_every + self.num_memory_tokens))
+                        x_i = rearrange(x_i, 'b (n m) d -> (b n) m d', m=(mem_every + self.num_memory_tokens[i]))
 
-                    mem, x_i = unpack(x, mem_packed_shape, 'b * d')
+                    mem, x_i = unpack(x_i, mem_packed_shape, 'b * d')
 
-                    intermediates_model.memory_tokens = mem
+                    intermediates_pre_attn_layer.memory_tokens = mem
 
                     if exists(mem_every):
-                        x_i = rearrange(x, '(b n) m d -> b (n m) d', b=b)
+                        x_i = rearrange(x_i, '(b n) m d -> b (n m) d', b=b)
 
-                    x_i = x_i[:, :n]
+                    x_i = x_i[:, :n]  # probably cause of issue currently
                 if i == 0:
                     outx = x_i
                 else:
@@ -369,6 +339,8 @@ class MultiIOTransformerWrapper(nn.Module):
                     else:
                         outx = x + x_i
             x = outx
+            if self.concat_emb_dim:
+                x = self.pre_attn_layers_map(x)
         else:
             if return_mems or return_attn or return_intermediates or return_attn_z_loss:
                 x, intermediates_model = self.model(x, True, False, return_intermediates, mask,
@@ -393,7 +365,8 @@ class MultiIOTransformerWrapper(nn.Module):
                         x_values.append(x)
                     else:
                         x_values.append(
-                            layer(x, mask=mask, mems=mems, mem_masks=mem_masks, cache=cache_post_attn_layers[i],
+                            layer(x, mask=mask, mems=mems, mem_masks=mem_masks,
+                                  cache=cache_post_attn_layers[i] if cache_post_attn_layers is not None else None,
                                   return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs))
                     outputs.append(self.to_logits[i](x_values[i]))
                 if return_logits_and_embeddings:
