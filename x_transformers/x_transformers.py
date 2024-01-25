@@ -438,19 +438,15 @@ class RotaryEmbedding(nn.Module):
 
     @autocast(enabled = False)
     def forward(self, t):
-        device, seq_len = self.inv_freq.device, t.shape[-1]
+        max_pos = t.max()+1
 
-        t = t.type_as(self.inv_freq)
-
-        t = t / self.interpolation_factor
-
-        freqs = torch.einsum('i , j -> i j', t, self.inv_freq)
+        freqs = torch.einsum('i , j -> i j', t.typ_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
         freqs = torch.cat((freqs, freqs), dim = -1)
 
         if not exists(self.scale):
             return freqs, 1.
 
-        power = (torch.arange(seq_len, device = device) - (seq_len // 2)) / self.scale_base
+        power = (t - (max_pos // 2)) / self.scale_base
         scale = self.scale ** rearrange(power, 'n -> n 1')
         scale = torch.cat((scale, scale), dim = -1)
 
@@ -466,6 +462,7 @@ def rotate_half(x):
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len = freqs.shape[-1], t.shape[-2]
     freqs = freqs[-seq_len:, :]
+    scale = scale[-seq_len:, :] if isinstance(scale, torch.Tensor) else scale
 
     if t.ndim == 4 and freqs.ndim == 3:
         freqs = rearrange(freqs, 'b n d -> b 1 n d')
@@ -1267,8 +1264,6 @@ class AttentionLayers(nn.Module):
         # rotary positions
 
         if not exists(rotary_pos_emb) and exists(self.rotary_pos_emb):
-            max_rotary_emb_length = max(list(map(lambda m: (m.shape[1] if exists(m) else 0) + x.shape[1], mems)))
-
             maybe_mem = mems[0] # todo - handle edge case where different layers get different memory lengths. don't think this will ever come up but who knows
             mem_len = maybe_mem.shape[1] if exists(maybe_mem) else 0
 
