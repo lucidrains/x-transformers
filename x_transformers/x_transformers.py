@@ -440,7 +440,7 @@ class RotaryEmbedding(nn.Module):
     def forward(self, t):
         max_pos = t.max()+1
 
-        freqs = torch.einsum('i , j -> i j', t.typ_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
+        freqs = torch.einsum('i , j -> i j', t.type_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
         freqs = torch.cat((freqs, freqs), dim = -1)
 
         if not exists(self.scale):
