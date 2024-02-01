@@ -16,18 +16,32 @@ def freeze_all_layers_(module):
     for param in module.parameters():
         param.requires_grad = False
 
-def log(t, eps = 1e-20):
-    return torch.log(t.clamp(min = eps))
-
-def log_prob(prob, indices, eps = 1e-20):
-    indices = rearrange(indices, '... -> ... 1')
-    log_probs = log(prob.gather(-1, indices), eps = eps)
-    return rearrange(log_probs, '... 1 -> ...')
-
 def log_prob_from_model_and_seq(model, seq):
     logits = model(seq)
-    prob = logits.softmax(dim = -1)
-    return log_prob(prob, seq)
+    log_prob = logits.log_softmax(dim = -1)
+    indices = rearrange(seq, '... -> ... 1')
+    log_probs = log_prob.gather(-1, indices)
+    return rearrange(log_probs, '... 1 -> ...')
+
+def masked_mean(log_probs, mask = None):
+    if not exists(mask):
+        return log_probs.mean(dim = -1)
+
+    log_probs = log_probs.masked_fill(~mask, 0.)
+    num = log_probs.sum(dim = -1)
+    den = mask.sum(dim = -1)
+    return num / den.clamp(min = 1e-5)
+
+def maybe_and_mask(*masks):
+    masks = [*filter(exists, masks)]
+    if len(masks) == 0:
+        return None
+
+    mask, *rest_masks = masks
+    for rest_mask in rest_masks:
+        mask = mask & rest_mask
+
+    return mask
 
 # main class
 
@@ -36,7 +50,8 @@ class DPO(Module):
         self,
         model: TransformerWrapper,
         *,
-        beta = 0.1
+        beta = 0.1,
+        pad_id = None
     ):
         super().__init__()
         self.policy_model = model
@@ -45,6 +60,7 @@ class DPO(Module):
         freeze_all_layers_(self.ref_model)
 
         self.beta = beta
+        self.pad_id = pad_id
 
     def parameters(self):
         return self.policy_model.parameters()
@@ -53,10 +69,20 @@ class DPO(Module):
         self,
         preferred_seq,
         unpreferred_seq,
-        prompt_mask = None
+        *,
+        prompt_mask,
+        preferred_seq_mask = None,
+        unpreferred_seq_mask = None,
     ):
         assert preferred_seq.ndim == 2
         assert preferred_seq.shape == unpreferred_seq.shape
+
+        if exists(self.pad_id):
+            if not exists(preferred_seq_mask):
+                preferred_seq_mask = preferred_seq != self.pad_id
+
+            if not exists(unpreferred_seq_mask):
+                unpreferred_seq_mask = unpreferred_seq != self.pad_id
 
         """
         Following Appendix B in https://arxiv.org/abs/2305.18290
@@ -70,12 +96,19 @@ class DPO(Module):
         policy_preferred_logprob = log_prob_from_model_and_seq(self.policy_model, preferred_seq)
         policy_unpreferred_logprob = log_prob_from_model_and_seq(self.policy_model, unpreferred_seq)
 
+        # masked mean of log probs
+
+        preferred_seq_mask = maybe_and_mask(~prompt_mask, preferred_seq_mask)
+        unpreferred_seq_mask = maybe_and_mask(~prompt_mask, unpreferred_seq_mask)
+
+        ref_preferred_logprob, policy_preferred_logprob = map(lambda t: masked_mean(t, preferred_seq_mask), (ref_preferred_logprob, policy_preferred_logprob))
+        ref_unpreferred_logprob, policy_unpreferred_logprob = map(lambda t: masked_mean(t, unpreferred_seq_mask), (ref_unpreferred_logprob, policy_unpreferred_logprob))
+
+        # main dpo formula
+
         policy_logratios = policy_preferred_logprob - policy_unpreferred_logprob
         ref_logratios = ref_preferred_logprob - ref_unpreferred_logprob
 
         losses = -F.logsigmoid(self.beta * (policy_logratios - ref_logratios))
-
-        if exists(prompt_mask):
-            losses = losses[~prompt_mask]
 
         return losses.mean()
