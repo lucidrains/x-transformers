@@ -1327,7 +1327,7 @@ class AttentionLayers(nn.Module):
             if exists(pre_norm):
                 x = pre_norm(x)
 
-                if exists(layer_mem):
+                if layer_type == 'a' and exists(layer_mem):
                     layer_mem = pre_norm(layer_mem)
 
             if layer_type == 'a':
