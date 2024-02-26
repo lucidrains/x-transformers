@@ -84,7 +84,6 @@ class Attend(nn.Module):
     ):
         super().__init__()
         self.scale = scale
-        self.qk_norm = qk_norm
 
         self.causal = causal
         self.create_causal_mask = onnx_create_causal_mask if onnxable else create_causal_mask
@@ -139,7 +138,7 @@ class Attend(nn.Module):
 
         # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
 
-        if self.qk_norm:
+        if exists(self.scale):
             default_scale = q.shape[-1] ** -0.5
             q = q * (self.scale / default_scale)
 
