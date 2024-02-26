@@ -139,9 +139,11 @@ class Attend(nn.Module):
 
         # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
 
+        scale = self.scale
         if self.qk_norm:
             default_scale = q.shape[-1] ** -0.5
             q = q * (self.scale / default_scale)
+            scale = None
 
         # Check if mask exists and expand to compatible shape
         # The mask is B L, so it would have to be expanded to B H N L
@@ -215,7 +217,8 @@ class Attend(nn.Module):
                 q, k, v,
                 attn_mask = mask,
                 dropout_p = self.dropout if self.training else 0., 
-                is_causal = causal
+                is_causal = causal,
+                scale = scale
             )
 
         # for a row that is entirely masked out, should zero out the output of that row token
