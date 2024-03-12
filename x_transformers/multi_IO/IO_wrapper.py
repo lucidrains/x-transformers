@@ -1,14 +1,4 @@
 from x_transformers.x_transformers import *
-
-import math
-from typing import Dict
-from typing import Optional
-
-import torch
-from einops import rearrange, repeat, pack, unpack
-from torch import nn, Tensor
-
-from x_transformers import *
 from x_transformers.x_transformers import AttentionLayers
 
 
@@ -48,6 +38,7 @@ class MultiIOTransformerWrapper(nn.Module):
 
         self.multi_input = ((input_attn_layers is not None) or (type(num_tokens) == list) or (type(emb_dim) == list))
         self.multi_output = (output_attn_layers is not None) or (type(logits_dim) == list)
+        self.max_seq_len = max_seq_len
         if not self.multi_input:
             self.model = TransformerWrapper(
                 num_tokens=num_tokens,
@@ -69,11 +60,12 @@ class MultiIOTransformerWrapper(nn.Module):
                 emb_frac_gradient=emb_frac_gradient,
                 attn_z_loss_weight=attn_z_loss_weight,
             )
+            self.pre_attn_layers = None
+            self.post_attn_layers = None
+
         else:
             self.emb_dim = emb_dim if (input_attn_layers is None) else [layer.dim for layer in input_attn_layers]
             self.num_tokens = num_tokens
-
-            self.max_seq_len = max_seq_len
 
             self.max_mem_len = max_mem_len
             self.shift_mem_down = shift_mem_down
@@ -81,7 +73,8 @@ class MultiIOTransformerWrapper(nn.Module):
             self.pre_attn_layers = input_attn_layers
             if input_attn_layers is not None:
                 assert type(num_tokens) == list, 'num_tokens must be a list of number of tokens for each input'
-                assert len(input_attn_layers) == len(num_tokens), 'number of input_attn_layers must match number of inputs'
+                assert len(input_attn_layers) == len(
+                    num_tokens), 'number of input_attn_layers must match number of inputs'
                 if concat_emb_dim:
                     self.pre_attn_layers_map = nn.Linear(sum(self.emb_dim), dim) if sum(self.emb_dim) != dim else \
                         nn.Identity()
@@ -189,7 +182,8 @@ class MultiIOTransformerWrapper(nn.Module):
             else:
                 if logits_dim is not None:
                     if tie_embedding:
-                        self.logits = [lambda t: t @ self.token_emb[i].emb.weight.t() if self.multi_input else lambda t: t @ self.model.token_emb.emb.weight.t() for i in range(len(logits_dim)) ]
+                        self.logits = [lambda t: t @ self.token_emb[i].emb.weight.t() if self.multi_input else lambda
+                            t: t @ self.model.token_emb.emb.weight.t() for i in range(len(logits_dim))]
                     else:
                         self.to_logits = [nn.Linear(dim, d, bias=False) for d in logits_dim]
                 else:
@@ -226,7 +220,6 @@ class MultiIOTransformerWrapper(nn.Module):
             cache=None,
             **kwargs
     ):
-        global intermediates_model, cache_pre_attn_layers, cache_model, cache_post_attn_layers, intermediates_pre_attn_layers, intermediates_pre_attn_layer, mem_packed_shape, mem_every
 
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
 
@@ -265,7 +258,7 @@ class MultiIOTransformerWrapper(nn.Module):
             external_pos_emb = exists(pos) and pos.dtype != torch.long
             pos_emb = self.pos_emb(x, pos=pos, seq_start_pos=seq_start_pos) if not external_pos_emb else pos
             intermediates_pre_attn_layers = []
-            outx = []
+            out_x = []
             for i in range(x.shape[-1]):
                 x_i = x[:, :, i]
                 x_i = self.token_emb[i](x_i) + pos_emb
@@ -344,15 +337,18 @@ class MultiIOTransformerWrapper(nn.Module):
 
                     x_i = x_i[:, :n]  # probably cause of issue currently
                 if i == 0:
-                    outx = x_i
+                    out_x = x_i
                 else:
                     if self.concat_emb_dim:
-                        outx = torch.cat((x, x_i), dim=-1)
+                        out_x = torch.cat((x, x_i), dim=-1)
                     else:
-                        outx = x + x_i
-            x = outx
+                        out_x = x + x_i
+            x = out_x
             if self.concat_emb_dim:
                 x = self.pre_attn_layers_map(x)
+
+            x, intermediates_model = self.attn_layers(x, mask=mask, mems=mems, mem_masks=mem_masks, cache=cache_model,
+                                                      return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
         else:
             if return_hiddens:
                 x, intermediates_model = self.model(x, return_embeddings, return_logits_and_embeddings,
@@ -375,7 +371,8 @@ class MultiIOTransformerWrapper(nn.Module):
                     post_x = self.post_mapping[i](x)
                     if return_hiddens:
                         post_x, inter = layer(post_x, mask=mask, mems=mems, mem_masks=mem_masks,
-                                              cache=cache_post_attn_layers[i],
+                                              cache=cache_post_attn_layers[
+                                                  i] if cache_post_attn_layers is not None else None,
                                               return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
                         intermediates_post.append(inter)
                         x_values.append(post_x)
@@ -492,4 +489,3 @@ class MultiIOTransformerWrapper(nn.Module):
                 return out, attn_maps
 
             return out
-
