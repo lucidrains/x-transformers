@@ -3,6 +3,52 @@ from x_transformers.x_transformers import AttentionLayers
 
 
 class MultiIOTransformerWrapper(nn.Module):
+    def __init__(self, num_tokens,
+                 max_seq_len,
+                 input_attn_layers,
+                 concat_emb_dim,
+                 attn_layers,
+                 output_attn_layers,
+                 logits_dim,
+                 use_abs_pos_emb=True,
+                 scaled_sinu_pos_emb=False,
+                 l2norm_embed=False, ):
+        super().__init__()
+        self.num_tokens = num_tokens
+        self.max_seq_len = max_seq_len
+        self.input_attn_layers = input_attn_layers
+        self.concat_emb_dim = concat_emb_dim
+        self.attn_layers = attn_layers
+        self.output_attn_layers = output_attn_layers
+        self.logits_dim = logits_dim
+        self.emb_dim = [layer.dim for layer in input_attn_layers]
+        self.token_emb = [TokenEmbedding(self.emb_dim[i], num_tokens[i]) for i in range(len(num_tokens))]
+        if use_abs_pos_emb:
+            self.pos_emb = [AbsolutePositionalEmbedding(emb, max_seq_len, l2norm_embed=l2norm_embed) for emb in self.emb_dim]
+        elif scaled_sinu_pos_emb:
+            self.pos_emb = [ScaledSinusoidalEmbedding(emb) for emb in self.emb_dim]
+        else:
+            self.pos_emb = always(0)
+
+    def forward(self, x, pos=None, seq_start_pos=None):
+        pos_emb = self.pos_emb(x, pos=pos, seq_start_pos=seq_start_pos)
+        for i in range(x.shape[-1]):
+            x_i = x[:, :, i]
+            x_i = self.token_emb[i](x_i) + pos_emb
+            x_i = self.input_attn_layers[i](x_i)
+            if self.concat_emb_dim:
+                x = torch.cat((x, x_i), dim=-1)
+            else:
+                x = x + x_i
+        x = self.attn_layers(x)
+        outputs = []
+        for i, layer in enumerate(self.output_attn_layers):
+            outputs.append(layer(x))
+        return outputs
+
+
+"""
+class MultiIOTransformerWrapper(nn.Module):
     def __init__(
             self,
             *,
@@ -489,3 +535,4 @@ class MultiIOTransformerWrapper(nn.Module):
                 return out, attn_maps
 
             return out
+"""

@@ -1,6 +1,7 @@
 from x_transformers.autoregressive_wrapper import *
 
 
+
 class MultiOAutoregressiveWrapper(Module):
     def __init__(
             self,
