@@ -1,66 +1,6 @@
 from x_transformers.x_transformers import *
 from x_transformers.x_transformers import AttentionLayers
 
-"""
-class MultiIOTransformerWrapper(nn.Module):
-    def __init__(self, num_tokens:list[int],
-                 max_seq_len:int,
-                 input_attn_layers:list[AttentionLayers],
-                 attn_layers:AttentionLayers,
-                 output_attn_layers:list[AttentionLayers]=None,
-                 concat_emb_dim=True,
-                 logits_dim=None,
-                 use_abs_pos_emb=True,
-                 scaled_sinu_pos_emb=False,
-                 l2norm_embed=False):
-        super().__init__()
-        self.num_tokens = num_tokens
-        self.max_seq_len = max_seq_len
-        self.input_attn_layers = input_attn_layers
-        self.concat_emb_dim = concat_emb_dim
-        self.attn_layers = attn_layers
-        self.output_attn_layers = output_attn_layers
-        self.logits_dim = logits_dim if logits_dim is not None else num_tokens
-        self.to_logits = [nn.Linear(output_attn_layers[i].dim, self.logits_dim[i]) for i in range(len(self.logits_dim))] if output_attn_layers is not None else [nn.Linear(attn_layers.dim, self.logits_dim[i]) for i in range(len(self.logits_dim))]
-        self.emb_dim = [layer.dim for layer in input_attn_layers]
-        self.token_emb = [TokenEmbedding(self.emb_dim[i], num_tokens[i]) for i in range(len(num_tokens))]
-        if use_abs_pos_emb:
-            self.pos_emb = [AbsolutePositionalEmbedding(emb, max_seq_len, l2norm_embed=l2norm_embed) for emb in self.emb_dim]
-        elif scaled_sinu_pos_emb:
-            self.pos_emb = [ScaledSinusoidalEmbedding(emb) for emb in self.emb_dim]
-        else:
-            self.pos_emb = [always(0) for _ in self.emb_dim]
-
-    def forward(self, x, pos=None, seq_start_pos=None):
-        x_output = None
-        for i in range(x.shape[-1]):
-            x_i = x[:, :, i]
-            pos_emb = self.pos_emb[i](x_i, pos=pos, seq_start_pos=seq_start_pos)
-            x_i = self.token_emb[i](x_i) + pos_emb
-            x_i = self.input_attn_layers[i](x_i)
-            if self.concat_emb_dim:
-                if x_output is None:
-                    x_output = x_i
-                else:
-                    x_output = torch.cat((x_output, x_i), dim=-1)
-            else:
-                if x_output is None:
-                    x_output = x_i
-                else:
-                    x_output = x_output + x_i
-        x_output = self.attn_layers(x_output)
-        outputs = []
-        if self.output_attn_layers is not None:
-            for i, layer in enumerate(self.output_attn_layers):
-                outputs.append(self.to_logits[i](layer(x_output)))
-        else:
-            for i in range(len(self.logits_dim)):
-                outputs.append(self.to_logits[i](x_output))
-        return outputs
-
-"""
-
-
 class MultiIOTransformerWrapper(nn.Module):
     def __init__(
             self,
