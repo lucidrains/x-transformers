@@ -6,6 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="e89f890f-bc6e-4061-90aa-84142178ba7c" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/IOtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/IOtest.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/IO_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/IO_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/autoregressive_multiO.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/autoregressive_multiO.py" afterDir="false" />
     </list>
@@ -39,7 +40,7 @@
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/ilove/Downloads&quot;
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ilove/CODING/PYStuff/x-transformers-multiIO/iotest2.py&quot;
   },
   &quot;keyToStringList&quot;: {
     &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
@@ -52,7 +53,7 @@
       <recent name="C:\Users\ilove\CODING\PYStuff\x-transformers-multiIO\x_transformers\multi_IO" />
     </key>
   </component>
-  <component name="RunManager">
+  <component name="RunManager" selected="Python.IOtest">
     <configuration name="IOtest" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="x-transformers-multiIO" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -75,6 +76,32 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="iotest2" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
+      <module name="x-transformers-multiIO" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="C:\Users\ilove\anaconda3\python.exe" />
+      <option name="SDK_NAME" value="C:\Users\ilove\anaconda3" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/iotest2.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <list>
+      <item itemvalue="Python.IOtest" />
+      <item itemvalue="Python.iotest2" />
+    </list>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
 </project>
