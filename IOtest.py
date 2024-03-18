@@ -26,7 +26,7 @@ for i in range(10000):
 print(sum(p.numel() for p in model.parameters()))
 print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 """
-
+"""
 # multi input to multi output
 model = MultiOAutoregressiveWrapper(
     outputs=2,
@@ -74,7 +74,7 @@ for i in range(5000):
     optimizer.step()
     print(loss)
 print(model(x, return_outputs=True)[1][0])
-
+"""
 # 1.4163
 # 1.4083
 # print(model.generate(prompts=torch.Tensor([[[0, 1]]]).float(), seq_len=1))
@@ -82,7 +82,7 @@ print(model(x, return_outputs=True)[1][0])
 # 9336
 # for i in range(100):
 
-"""
+
 model = MultiIOTransformerWrapper(
     num_tokens=8,
     max_seq_len=10,
@@ -94,8 +94,8 @@ model = MultiIOTransformerWrapper(
     output_attn_layers=[
         Decoder(dim=1, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, ),
         Decoder(dim=2, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, )],
-    memory_tokens_interspersed_every=1,
-    num_memory_tokens=2,
+    #memory_tokens_interspersed_every=1,
+    #num_memory_tokens=2,
     tie_embedding=False,
     l2norm_embed=True,
     emb_frac_gradient=0.1,
@@ -114,6 +114,7 @@ x = torch.Tensor(torch.randint(1, 3, (1, 10))).float()
 print(x)
 print(model(x))
 
+print("MODEL 2")
 model = MultiIOTransformerWrapper(
     num_tokens=[8, 4, 5],
     max_seq_len=10,
@@ -127,8 +128,8 @@ model = MultiIOTransformerWrapper(
         Decoder(dim=2, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, ),
         Decoder(dim=1, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, ),
         Decoder(dim=1, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, )],
-    memory_tokens_interspersed_every=[1, 1, 1],
-    num_memory_tokens=[2, 1, 1],
+    #memory_tokens_interspersed_every=[1, 1, 1],
+    #num_memory_tokens=[2, 1, 1],
     tie_embedding=False,
     l2norm_embed=True,
     emb_frac_gradient=0.1,
@@ -145,4 +146,4 @@ model = MultiIOTransformerWrapper(
 )
 x = torch.Tensor(torch.randint(1, 3, (1, 10, 3))).float()
 print(x)
-print(model(x))"""
+print(model(x))
