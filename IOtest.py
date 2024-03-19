@@ -67,7 +67,7 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 # x = torch.Tensor(torch.randint(1, 3, (1, 10, 2))).float()
 # print(x)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-x = torch.Tensor([[[0, 1, 2], [0, 2, 2]]]).long()
+x = torch.Tensor([[[0, 1, 2], [0, 2, 2], [0, 2, 2]]]).long()
 #print(x.shape)
 for i in range(5000):
     loss = model(x)

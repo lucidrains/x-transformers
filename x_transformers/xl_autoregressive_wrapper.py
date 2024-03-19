@@ -42,9 +42,10 @@ class XLAutoregressiveWrapper(nn.Module):
         filter_logits_fn = top_k,
         filter_thres = 0.9,
         mems = None,
+        filter_kwargs: dict = dict(),
         **kwargs
     ):
-        device, max_seq_len = start_tokens.device, self.max_seq_len
+        device, greedy, max_seq_len = start_tokens.device, temperature == 0., self.max_seq_len
 
         start_tokens, ps = pack([start_tokens], '* n')
 
@@ -88,10 +89,12 @@ class XLAutoregressiveWrapper(nn.Module):
             mems = cache.mems
 
             logits = logits[:, -1]
-            filtered_logits = filter_logits_fn(logits, thres = filter_thres)
-            probs = F.softmax(filtered_logits / temperature, dim=-1)
-
-            sample = torch.multinomial(probs, 1)
+            if greedy:
+                sample = logits.argmax(dim=-1, keepdim=True)
+            else:
+                filtered_logits_i = filter_logits_fn(logits, thres = filter_thres, **filter_kwargs)
+                probs = F.softmax(filtered_logits_i / temperature, dim=-1)
+                sample = torch.multinomial(probs, 1)
 
             if is_last_segment_tokens:
                 curr_pos = curr_segment_len

@@ -31,9 +31,10 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             filter_logits_fn=top_k,
             filter_thres=0.9,
             mems=None,
+            filter_kwargs: dict = dict(),
             **kwargs
     ):
-        device, max_seq_len = start_tokens.device, self.max_seq_len
+        device, greedy, max_seq_len = start_tokens.device, temperature==0, self.max_seq_len
 
         start_tokens, ps = pack([start_tokens], '* n')
 
@@ -78,11 +79,13 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
 
             sample = torch.Tensor([])
             for i in range(self.outputs):
-                logits = logits[i][:, -1]
-                filtered_logits_i = filter_logits_fn(logits, thres=filter_thres)
-                probs_i = F.softmax(filtered_logits_i / temperature, dim=-1)
-
-                sample_i = torch.multinomial(probs_i, 1)
+                logits_i = logits[i][:, -1]
+                if greedy:
+                    sample_i = logits_i.argmax(dim=-1, keepdim=True)
+                else:
+                    filtered_logits_i = filter_logits_fn(logits_i, **filter_kwargs)
+                    probs_i = F.softmax(filtered_logits_i / temperature, dim=-1)
+                    sample_i = torch.multinomial(probs_i, 1)
 
                 sample = torch.cat((sample, sample_i), dim=-1)
                 out = torch.cat((out, sample), dim=-1)
@@ -134,11 +137,12 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 chunk,
                 mems=mems,
                 return_mems=True,
+                return_intermediates=True,
                 **kwargs
             )
-            #print(logits_)
-            logits = logits_#[0]
-            #mems = logits_[1]
+
+            logits = logits_[0]
+            mems = logits_[1]
             loss = None
             #print(logits.shape)
             for i in range(self.outputs):

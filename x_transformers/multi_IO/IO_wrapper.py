@@ -255,6 +255,9 @@ class MultiIOTransformerWrapper(nn.Module):
             cache_pre_attn_layers = None
             cache_model = None
             cache_post_attn_layers = None
+        attn_maps_pre = None
+        attn_maps = None
+
 
         if self.multi_input:
             b, n, device, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.emb_frac_gradient
@@ -342,6 +345,32 @@ class MultiIOTransformerWrapper(nn.Module):
                         out_x = out_x + x_i
             x = out_x
             x = self.pre_attn_layers_map(x)
+
+            """
+            Process pre-attention layer outputs
+            """
+            if return_attn:
+                attn_maps_pre = list(
+                    map(lambda t: t.post_softmax_attn, intermediates_pre_attn_layers.attn_intermediates))
+
+            if return_attn_z_loss:
+                pre_softmax_attns = list(list(map(lambda t: t.pre_softmax_attn, intermediate.attn_intermediates))
+                                         for intermediate in intermediates_pre_attn_layers)
+                for i in range(len(intermediates_pre_attn_layers)):
+                    intermediates_pre_attn_layers[i].attn_z_loss = calc_z_loss(pre_softmax_attns[i],
+                                                                              weight=attn_z_loss_weight)
+                return_intermediates = True
+
+            if return_mems:
+                for i in range(len(intermediates_pre_attn_layers)):
+                    hiddens = intermediates_pre_attn_layers[i].hiddens
+                    new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(
+                        mems) else hiddens
+                    new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
+
+                    intermediates_pre_attn_layers[i].mems = new_mems
+                    intermediates_pre_attn_layers[i].mems = hiddens
+
             x, intermediates_model = self.attn_layers(x, mask=mask, mems=mems, mem_masks=mem_masks, cache=cache_model,
                                                       return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
         else:
@@ -356,6 +385,29 @@ class MultiIOTransformerWrapper(nn.Module):
                 x = self.model(x, False, False, False, mask,
                                False, False, mems, mem_masks, pos, prepend_embeds, prepend_mask, embed_ids,
                                sum_embeds, False, attn_z_loss_weight, seq_start_pos, cache)
+
+        """
+        Output processing for middle layers
+        """
+        if return_attn:
+            attn_maps = list(
+                map(lambda t: t.post_softmax_attn, intermediates_model.attn_intermediates))
+
+        if return_attn_z_loss:
+            pre_softmax_attns = list(list(map(lambda t: t.pre_softmax_attn, intermediate.attn_intermediates))
+                                     for intermediate in intermediates_model)
+
+            intermediates_model.attn_z_loss = calc_z_loss(pre_softmax_attns[i],
+                                                                 weight=attn_z_loss_weight)
+            return_intermediates = True
+
+        if return_mems:
+            hiddens = intermediates_model.hiddens
+            new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(
+                mems) else hiddens
+            new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
+            intermediates_model.mems = new_mems
+            intermediates_model.mems = hiddens
 
         if self.multi_output:
             if self.post_attn_layers is not None:
@@ -411,9 +463,12 @@ class MultiIOTransformerWrapper(nn.Module):
                         return out, (intermediates_model, intermediates_post)
 
                 if return_attn:
-                    attn_maps = list(list(map(lambda t: t.post_softmax_attn, intermediate.attn_intermediates))
+                    attn_maps_post = list(list(map(lambda t: t.post_softmax_attn, intermediate.attn_intermediates))
                                      for intermediate in intermediates_post)
-                    return out, (intermediates_model, attn_maps)
+                    if attn_maps_pre is not None:
+                        return out, (attn_maps_pre, attn_maps, attn_maps_post)
+                    else:
+                        return out, (attn_maps, attn_maps_post)
 
                 return out
             else:
@@ -426,7 +481,6 @@ class MultiIOTransformerWrapper(nn.Module):
                     out = x
                 else:
                     out = x_values
-
                 if return_intermediates:
                     if self.pre_attn_layers is not None:
                         return out, (intermediates_pre_attn_layers, intermediates_model)
@@ -479,9 +533,11 @@ class MultiIOTransformerWrapper(nn.Module):
             if return_intermediates:
                 if self.pre_attn_layers is not None:
                     return out, (intermediates_pre_attn_layers, intermediates_model)
+                else:
+                    return out, intermediates_model
 
             if return_attn:
-                attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates_model.attn_intermediates))
                 return out, attn_maps
+
 
             return out
