@@ -75,7 +75,7 @@ for i in range(5000):
     loss.backward()
     optimizer.step()
     print(loss)
-print(model(x, return_outputs=True)[1][0])
+#print(model(x)[1][0])
 
 # 1.4163
 # 1.4083

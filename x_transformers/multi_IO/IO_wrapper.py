@@ -98,27 +98,30 @@ class MultiIOTransformerWrapper(nn.Module):
 
             self.l2norm_embed = l2norm_embed
 
-            self.token_emb = [TokenEmbedding(self.emb_dim[i], num_tokens[i], l2norm_embed=l2norm_embed) for i in
-                              range(len(num_tokens))]
+            self.token_emb = torch.nn.ModuleList(
+                [TokenEmbedding(self.emb_dim[i], num_tokens[i], l2norm_embed=l2norm_embed) for i in
+                 range(len(num_tokens))])
 
             no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb)
 
             if no_abs_pos_emb:
                 self.pos_emb = [always(0) for _ in self.emb_dim]
             elif scaled_sinu_pos_emb:
-                self.pos_emb = [ScaledSinusoidalEmbedding(emb_dim) for emb_dim in self.emb_dim]
+                self.pos_emb = torch.nn.ModuleList([ScaledSinusoidalEmbedding(emb_dim) for emb_dim in self.emb_dim])
             else:
-                self.pos_emb = [AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed=l2norm_embed) for emb_dim
-                                in self.emb_dim]
+                self.pos_emb = torch.nn.ModuleList(
+                    [AbsolutePositionalEmbedding(emb_dim, max_seq_len, l2norm_embed=l2norm_embed) for emb_dim
+                     in self.emb_dim])
             # additional embeddings - say type embedding from BERT
 
             self.embeds = None
 
             if len(embed_num_tokens) > 0:
                 if self.pre_attn_layers is not None:
-                    self.embeds = [nn.ModuleDict({f'{name}_embed': nn.Embedding(num_tokens, self.emb_dim[i])
-                                                  for name, num_tokens in embed_num_tokens.items()}) for i in
-                                   range(len(self.emb_dim))]
+                    self.embeds = torch.nn.ModuleList(
+                        [nn.ModuleDict({f'{name}_embed': nn.Embedding(num_tokens, self.emb_dim[i])
+                                        for name, num_tokens in embed_num_tokens.items()}) for i in
+                         range(len(self.emb_dim))])
                 else:
                     self.embeds = nn.ModuleDict(
                         {f'{name}_embed': nn.Embedding(num_tokens, self.emb_dim) for name, num_tokens in
@@ -128,13 +131,14 @@ class MultiIOTransformerWrapper(nn.Module):
 
             self.emb_frac_gradient = emb_frac_gradient
             if self.pre_attn_layers is not None:
-                self.post_emb_norm = [LayerNorm(self.emb_dim[i]) if post_emb_norm else nn.Identity() for i in
-                                      range(len(self.emb_dim))]
-                self.emb_dropout = [nn.Dropout(emb_dropout) for _ in range(len(self.emb_dim))]
-                self.project_emb = [
+                self.post_emb_norm = torch.nn.ModuleList(
+                    [LayerNorm(self.emb_dim[i]) if post_emb_norm else nn.Identity() for i in
+                     range(len(self.emb_dim))])
+                self.emb_dropout = torch.nn.ModuleList([nn.Dropout(emb_dropout) for _ in range(len(self.emb_dim))])
+                self.project_emb = torch.nn.ModuleList([
                     nn.Linear(self.emb_dim[i], dim) if self.emb_dim[i] != self.pre_attn_layers[i].dim else nn.Identity()
                     for i in
-                    range(len(self.emb_dim))]
+                    range(len(self.emb_dim))])
             else:
                 self.post_emb_norm = LayerNorm(self.emb_dim) if post_emb_norm else nn.Identity()
                 self.emb_dropout = nn.Dropout(emb_dropout)
@@ -168,9 +172,10 @@ class MultiIOTransformerWrapper(nn.Module):
         if self.multi_output:
             self.post_attn_layers = output_attn_layers
             if self.post_attn_layers is not None:
-                self.post_mapping = [nn.Linear(dim, self.post_attn_layers[i].dim)
-                                     if dim != self.post_attn_layers[i].dim else nn.Identity() for i in
-                                     range(len(self.post_attn_layers))]
+                self.post_mapping = torch.nn.ModuleList([nn.Linear(dim, self.post_attn_layers[i].dim)
+                                                         if dim != self.post_attn_layers[i].dim else nn.Identity() for i
+                                                         in
+                                                         range(len(self.post_attn_layers))])
                 if any(dim != self.post_attn_layers[i].dim for i in range(len(self.post_attn_layers))):
                     print('Note: Since the model dimension is not equal to the output_attn_layers dimension, '
                           'a linear layer is added to project the model dimension to the output_attn_layers dimension. '
@@ -181,19 +186,21 @@ class MultiIOTransformerWrapper(nn.Module):
                     if tie_embedding:
                         assert all(self.post_attn_layers[i].dim == self.post_attn_layers[i].dim for i in range(
                             len(self.post_attn_layers))), 'if tie_embedding is True, the dimensions of the input and output attn layers must be equal'
-                    self.to_logits = [nn.Linear(dim, d, bias=False) for d in logits_dim] if not tie_embedding else \
-                        lambda t: [t @ self.token_emb[i].emb.weight.t() for i in range(len(logits_dim))]
+                    self.to_logits = torch.nn.ModuleList(
+                        [nn.Linear(dim, d, bias=False) for d in logits_dim]) if not tie_embedding else \
+                        lambda t: ([t @ self.token_emb[i].emb.weight.t() for i in range(len(logits_dim))])
                 else:
-                    self.to_logits = [nn.Linear(self.post_attn_layers[i].dim, self.post_attn_layers[i].dim, bias=False)
-                                      for i in
-                                      range(len(self.post_attn_layers))]
+                    self.to_logits = torch.nn.ModuleList(
+                        [nn.Linear(self.post_attn_layers[i].dim, self.post_attn_layers[i].dim, bias=False)
+                         for i in
+                         range(len(self.post_attn_layers))])
             else:
                 if logits_dim is not None:
                     if tie_embedding:
                         self.logits = [lambda t: t @ self.token_emb[i].emb.weight.t() if self.multi_input else lambda
                             t: t @ self.model.token_emb.emb.weight.t() for i in range(len(logits_dim))]
                     else:
-                        self.to_logits = [nn.Linear(dim, d, bias=False) for d in logits_dim]
+                        self.to_logits = torch.nn.ModuleList([nn.Linear(dim, d, bias=False) for d in logits_dim])
                 else:
                     self.to_logits = nn.Linear(dim, num_tokens, bias=False)
 
@@ -257,7 +264,6 @@ class MultiIOTransformerWrapper(nn.Module):
             cache_post_attn_layers = None
         attn_maps_pre = None
         attn_maps = None
-
 
         if self.multi_input:
             b, n, device, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.emb_frac_gradient
@@ -358,7 +364,7 @@ class MultiIOTransformerWrapper(nn.Module):
                                          for intermediate in intermediates_pre_attn_layers)
                 for i in range(len(intermediates_pre_attn_layers)):
                     intermediates_pre_attn_layers[i].attn_z_loss = calc_z_loss(pre_softmax_attns[i],
-                                                                              weight=attn_z_loss_weight)
+                                                                               weight=attn_z_loss_weight)
                 return_intermediates = True
 
             if return_mems:
@@ -398,7 +404,7 @@ class MultiIOTransformerWrapper(nn.Module):
                                      for intermediate in intermediates_model)
 
             intermediates_model.attn_z_loss = calc_z_loss(pre_softmax_attns[i],
-                                                                 weight=attn_z_loss_weight)
+                                                          weight=attn_z_loss_weight)
             return_intermediates = True
 
         if return_mems:
@@ -464,7 +470,7 @@ class MultiIOTransformerWrapper(nn.Module):
 
                 if return_attn:
                     attn_maps_post = list(list(map(lambda t: t.post_softmax_attn, intermediate.attn_intermediates))
-                                     for intermediate in intermediates_post)
+                                          for intermediate in intermediates_post)
                     if attn_maps_pre is not None:
                         return out, (attn_maps_pre, attn_maps, attn_maps_post)
                     else:
@@ -538,6 +544,5 @@ class MultiIOTransformerWrapper(nn.Module):
 
             if return_attn:
                 return out, attn_maps
-
 
             return out
