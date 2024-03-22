@@ -262,6 +262,20 @@ class MultiIOTransformerWrapper(nn.Module):
             cache_pre_attn_layers = None
             cache_model = None
             cache_post_attn_layers = None
+        mems_pre, mems_model, mems_post = None, None, None
+        if mems is not None:
+            if self.pre_attn_layers is not None and self.post_attn_layers is not None:
+                mems_pre, mems_model, mems_post = mems
+            elif self.pre_attn_layers is not None:
+                mems_pre, mems_model = mems
+                mems_post = None
+            elif self.post_attn_layers is not None:
+                mems_model, mems_post = mems
+                mems_pre = None
+            else:
+                mems_model = mems
+                mems_pre = None
+                mems_post = None
         attn_maps_pre = None
         attn_maps = None
 
@@ -276,7 +290,7 @@ class MultiIOTransformerWrapper(nn.Module):
             assert x.shape[-1] == len(self.num_tokens), 'number of inputs must match number of num_tokens'
             assert x.shape[-1] == len(self.emb_dim), 'number of inputs must match number of emb_dim'
             external_pos_emb = exists(pos) and pos.dtype != torch.long
-            intermediates_pre_attn_layers = []
+            intermediates_pre = []
             out_x = None
             for i in range(x.shape[-1]):
                 x_i = x[:, :, i]
@@ -309,39 +323,15 @@ class MultiIOTransformerWrapper(nn.Module):
                     x_i = x_i * emb_frac_gradient + x_i.detach() * (1 - emb_frac_gradient)
                 x_i = self.emb_dropout[i](x_i)
                 x_i = self.project_emb[i](x_i)
-                """ 
-                if has_memory_tokens:
-                    mem_every = self.memory_tokens_interspersed_every[i]
-
-                    if exists(mem_every):
-                        assert mem_every > 0
-                        assert isinstance(self.attn_layers, Decoder), 'only for decoder'
-                        next_seq_len = math.ceil(n / mem_every) * mem_every
-
-                        x_i = pad_at_dim(x_i, (0, next_seq_len - n), dim=-2, value=0.)
-                        x_i = rearrange(x_i, 'b (n m) d -> (b n) m d', m=mem_every)
-
-                    mem = repeat(self.memory_tokens[i], 'n d -> b n d', b=x_i.shape[0])
-                    x_i, mem_packed_shape = pack((mem, x_i), 'b * d')
-
-                    # auto-handle masking after appending memory tokens
-                    if not exists(mem_every) and exists(mask):
-                        mask = pad_at_dim(mask, (num_mems, 0), dim=-1, value=True)
-
-                    if exists(mem_every):
-                        x_i = rearrange(x_i, '(b n) m d -> b (n m) d', b=b)
-
-                if self.shift_mem_down and exists(mems):
-                    mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
-                    mems = [*mems_r, *mems_l]"""
                 if self.pre_attn_layers is not None:
-                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask, mems=mems,
+                    # print(x_i)
+                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask, mems=mems_pre[i] if exists(mems_pre) else None,
                                                                                 cache=cache_pre_attn_layers[
                                                                                     i] if cache_pre_attn_layers is not None else None,
                                                                                 return_hiddens=True,
                                                                                 seq_start_pos=seq_start_pos,
                                                                                 **kwargs)
-                    intermediates_pre_attn_layers.append(intermediates_pre_attn_layer)
+                    intermediates_pre.append(intermediates_pre_attn_layer)
                 if out_x is None:
                     out_x = x_i
                 else:
@@ -357,43 +347,49 @@ class MultiIOTransformerWrapper(nn.Module):
             """
             if return_attn:
                 attn_maps_pre = list(
-                    map(lambda t: t.post_softmax_attn, intermediates_pre_attn_layers.attn_intermediates))
+                    map(lambda t: t.post_softmax_attn, intermediates_pre.attn_intermediates))
 
             if return_attn_z_loss:
                 pre_softmax_attns = list(list(map(lambda t: t.pre_softmax_attn, intermediate.attn_intermediates))
-                                         for intermediate in intermediates_pre_attn_layers)
-                for i in range(len(intermediates_pre_attn_layers)):
-                    intermediates_pre_attn_layers[i].attn_z_loss = calc_z_loss(pre_softmax_attns[i],
-                                                                               weight=attn_z_loss_weight)
+                                         for intermediate in intermediates_pre)
+                for i in range(len(intermediates_pre)):
+                    intermediates_pre[i].attn_z_loss = calc_z_loss(pre_softmax_attns[i],
+                                                                   weight=attn_z_loss_weight)
                 return_intermediates = True
 
             if return_mems:
-                for i in range(len(intermediates_pre_attn_layers)):
-                    hiddens = intermediates_pre_attn_layers[i].hiddens
-                    new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(
-                        mems) else hiddens
+                mems_pre_out = []
+                for i in range(len(intermediates_pre)):
+                    hiddens = intermediates_pre[i].hiddens
+                    new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems_pre, hiddens))) if exists(
+                        mems_pre) else hiddens
                     new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
 
-                    intermediates_pre_attn_layers[i].mems = new_mems
-                    intermediates_pre_attn_layers[i].mems = hiddens
+                    if not return_intermediates:
+                        mems_pre_out.append(new_mems)
 
-            x, intermediates_model = self.attn_layers(x, mask=mask, mems=mems, mem_masks=mem_masks, cache=cache_model,
+                    intermediates_pre[i].mems = new_mems
+                    intermediates_pre[i].mems = hiddens
+
+            x, intermediates_model = self.attn_layers(x, mask=mask, mems=mems_model, mem_masks=mem_masks,
+                                                      cache=cache_model,
                                                       return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
         else:
             if return_hiddens:
                 x, intermediates_model = self.model(x, return_embeddings, return_logits_and_embeddings,
                                                     return_intermediates, mask,
-                                                    return_mems, return_attn, mems, mem_masks, pos, prepend_embeds,
+                                                    return_mems, return_attn, mems_model, mem_masks, pos,
+                                                    prepend_embeds,
                                                     prepend_mask, embed_ids,
                                                     sum_embeds, return_attn_z_loss, attn_z_loss_weight, seq_start_pos,
                                                     cache)
             else:
                 x = self.model(x, False, False, False, mask,
-                               False, False, mems, mem_masks, pos, prepend_embeds, prepend_mask, embed_ids,
+                               False, False, mems_model, mem_masks, pos, prepend_embeds, prepend_mask, embed_ids,
                                sum_embeds, False, attn_z_loss_weight, seq_start_pos, cache)
 
         """
-        Output processing for middle layers
+        Output processing for middle (model) layers
         """
         if return_attn:
             attn_maps = list(
@@ -409,9 +405,12 @@ class MultiIOTransformerWrapper(nn.Module):
 
         if return_mems:
             hiddens = intermediates_model.hiddens
-            new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(
-                mems) else hiddens
+            new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems_model, hiddens))) if exists(
+                mems_model) else hiddens
             new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
+
+            if not return_intermediates:
+                mems_model = new_mems
             intermediates_model.mems = new_mems
             intermediates_model.mems = hiddens
 
@@ -423,7 +422,7 @@ class MultiIOTransformerWrapper(nn.Module):
                 for i, layer in enumerate(self.post_attn_layers):
                     post_x = self.post_mapping[i](x)
                     if return_hiddens:
-                        post_x, inter = layer(post_x, mask=mask, mems=mems, mem_masks=mem_masks,
+                        post_x, inter = layer(post_x, mask=mask, mems=mems_post[i] if exists(mems_post) else None, mem_masks=mem_masks,
                                               cache=cache_post_attn_layers[
                                                   i] if cache_post_attn_layers is not None else None,
                                               return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
@@ -431,7 +430,7 @@ class MultiIOTransformerWrapper(nn.Module):
                         x_values.append(post_x)
                     else:
                         x_values.append(
-                            layer(post_x, mask=mask, mems=mems, mem_masks=mem_masks,
+                            layer(post_x, mask=mask, mems=mems_post[i], mem_masks=mem_masks,
                                   cache=cache_post_attn_layers[i] if cache_post_attn_layers is not None else None,
                                   return_hiddens=False, seq_start_pos=seq_start_pos, **kwargs))
                     outputs.append(self.to_logits[i](x_values[i]))
@@ -452,19 +451,22 @@ class MultiIOTransformerWrapper(nn.Module):
                 if return_mems:
                     for i in range(len(intermediates_post)):
                         hiddens = intermediates_post[i].hiddens
-                        new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(
-                            mems) else hiddens
+                        new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems_post, hiddens))) if exists(
+                            mems_post) else hiddens
                         new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), new_mems))
 
                         if not return_intermediates:
-                            return out, new_mems
+                            if self.pre_attn_layers is not None:
+                                return out, (mems_pre_out, mems_model, new_mems)
+                            else:
+                                return out, (mems_model, new_mems)
 
                         intermediates_post[i].mems = new_mems
                         intermediates_post[i].mems = hiddens
 
                 if return_intermediates:
                     if self.pre_attn_layers is not None:
-                        return out, (intermediates_pre_attn_layers, intermediates_model, intermediates_post)
+                        return out, (intermediates_pre, intermediates_model, intermediates_post)
                     else:
                         return out, (intermediates_model, intermediates_post)
 
@@ -481,6 +483,13 @@ class MultiIOTransformerWrapper(nn.Module):
                 x_values = []
                 for i in self.to_logits:
                     x_values.append(i(x))
+
+                if return_mems:
+                    if self.pre_attn_layers is not None:
+                        return x_values, (mems_pre, mems_model)
+                    else:
+                        return x_values, mems_model
+
                 if return_logits_and_embeddings:
                     out = (x_values, x)
                 elif return_embeddings:
@@ -489,27 +498,11 @@ class MultiIOTransformerWrapper(nn.Module):
                     out = x_values
                 if return_intermediates:
                     if self.pre_attn_layers is not None:
-                        return out, (intermediates_pre_attn_layers, intermediates_model)
+                        return out, (intermediates_pre, intermediates_model)
                     else:
                         return out, intermediates_model
                 return out
         else:
-            """
-            if self.num_memory_tokens is not None:
-                n = x.shape[1]
-                mem_every = self.memory_tokens_interspersed_every
-                if exists(mem_every):
-                    x = rearrange(x, 'b (n m) d -> (b n) m d', m=(mem_every + self.num_memory_tokens))
-
-                mem, x = unpack(x, mem_packed_shape, 'b * d')
-
-                intermediates_model.memory_tokens = mem
-
-                if exists(mem_every):
-                    x = rearrange(x, '(b n) m d -> b (n m) d', b=b)
-
-                x = x[:, :n]
-            """
             if return_logits_and_embeddings:
                 if type(self.to_logits) == list:
                     out = (list(self.to_logits[i](x) for i in range(len(self.to_logits))), x)
@@ -538,7 +531,7 @@ class MultiIOTransformerWrapper(nn.Module):
 
             if return_intermediates:
                 if self.pre_attn_layers is not None:
-                    return out, (intermediates_pre_attn_layers, intermediates_model)
+                    return out, (intermediates_pre, intermediates_model)
                 else:
                     return out, intermediates_model
 

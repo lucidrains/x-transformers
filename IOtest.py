@@ -31,10 +31,10 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 # multi input to multi output
 model = MultiOXLAutoregressiveWrapper(
     outputs=2,
-    #add_attn_z_loss=True,
+    # add_attn_z_loss=True,
     pad_value=torch.Tensor([0, 0, 0]),
     net=MultiIOTransformerWrapper(
-        num_tokens=[4, 4, 4],
+        num_tokens=[3, 3, 3],
         autoregressive=True,
         max_seq_len=2,
         # use_abs_pos_emb=True,
@@ -67,15 +67,15 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 # x = torch.Tensor(torch.randint(1, 3, (1, 10, 2))).float()
 # print(x)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-x = torch.Tensor([[[0, 1, 2], [0, 2, 2], [0, 2, 2]]]).long()
-#print(x.shape)
+x = torch.Tensor([[[0, 1, 2], [0, 2, 2], [0, 2, 2], [0,2,2]]]).long()
+# print(x.shape)
 for i in range(5000):
     loss = model(x)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     print(loss)
-#print(model(x)[1][0])
+# print(model(x)[1][0])
 
 # 1.4163
 # 1.4083

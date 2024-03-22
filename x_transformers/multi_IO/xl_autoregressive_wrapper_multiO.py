@@ -1,6 +1,6 @@
 from torch import Tensor
 
-from x_transformers.multi_IO import MultiIOTransformerWrapper
+from x_transformers.multi_IO.IO_wrapper import MultiIOTransformerWrapper
 from x_transformers.xl_autoregressive_wrapper import *
 
 
@@ -29,7 +29,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             start_tokens,
             seq_len,
             eos_token=None,
-            output_index_eos:dict = None,
+            output_index_eos: dict = None,
             temperature=1.,
             filter_logits_fn=top_k,
             filter_thres=0.9,
@@ -37,7 +37,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             filter_kwargs: dict = dict(),
             **kwargs
     ):
-        device, greedy, max_seq_len = start_tokens.device, temperature==0, self.max_seq_len
+        device, greedy, max_seq_len = start_tokens.device, temperature == 0, self.max_seq_len
 
         start_tokens, ps = pack([start_tokens], '* n')
 
@@ -86,7 +86,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 if greedy:
                     sample_i = logits_i.argmax(dim=-1, keepdim=True)
                 else:
-                    filtered_logits_i = filter_logits_fn(logits_i, thres = filter_thres,**filter_kwargs)
+                    filtered_logits_i = filter_logits_fn(logits_i, thres=filter_thres, **filter_kwargs)
                     probs_i = F.softmax(filtered_logits_i / temperature, dim=-1)
                     sample_i = torch.multinomial(probs_i, 1)
 
@@ -134,10 +134,11 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
         # go through each chunk and derive weighted losses
 
         total_loss = 0.
-        logits_total = None
-        mems_total = None
+        logits_total = []
+        mems_total = []
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
-            #print(chunk_labels)
+            # print(chunk_labels)
+            #print(mems)
             logits_ = self.net(
                 chunk,
                 mems=mems,
@@ -145,21 +146,17 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 return_intermediates=True,
                 **kwargs
             )
-
+            # print(chunk)
+            # print(torch.eq(chunk, self.pad_value.view(1, -1)))
             logits = logits_[0]
-            if logits_total is None:
-                logits_total = logits
-            else:
-                logits_total = torch.cat((logits_total, logits), dim=1)
+            #print(logits)
+            logits_total.append(logits)
             mems = logits_[1]
-            if mems_total is None:
-                mems_total = mems
-            else:
-                mems_total = torch.cat((mems_total, mems), dim=1)
+            mems_total.append(mems)
             loss = None
-            #print(logits.shape)
+            # print(logits.shape)
             for i in range(self.outputs):
-                #print(logits[i])
+                # print(logits[i])
                 loss_i = F.cross_entropy(
                     rearrange(logits[i], 'b n c -> b c n'),
                     chunk_labels[:, :, i].long(),
