@@ -32,7 +32,6 @@ class MultiOAutoregressiveWrapper(Module):
     def generate(
             self,
             prompts,
-
             seq_len,
             eos_token: Tensor = None,
             temperature=1.,
@@ -70,23 +69,6 @@ class MultiOAutoregressiveWrapper(Module):
 
         cache = None
 
-        # if doing contrastive decoding, turn off filter automatically
-        """
-        if exists(amateur_model):
-            amateur_model = cast_tuple(amateur_model)
-            contrastive_decode_kwargs = cast_tuple(contrastive_decode_kwargs)
-
-            assert len(amateur_model) == len(contrastive_decode_kwargs)
-
-            amateur_caches = [None] * len(amateur_model)
-            filter_logits_fn = identity
-
-            for i, module in enumerate(amateur_model):
-                if isinstance(module, AutoregressiveWrapper):
-                    amateur_model[i] = module.net
-
-                module.eval()
-        """
         # sampling up to seq_len
 
         for _ in range(seq_len):

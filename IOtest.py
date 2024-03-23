@@ -6,28 +6,30 @@ from x_transformers.multi_IO.xl_autoregressive_wrapper_multiO import MultiOXLAut
 from x_transformers import Decoder, AutoregressiveWrapper, TransformerWrapper
 import torch
 
-"""
 model = AutoregressiveWrapper(
-    MultiIOTransformerWrapper(
-        num_tokens=8,
+    pad_value=0,
+    net=TransformerWrapper(
+        num_tokens=5,
         max_seq_len=10,
         use_abs_pos_emb=True,
         emb_dropout=0.1,
         post_emb_norm=True,
-        attn_layers=Decoder(max_seq_len=10, dim=4, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, ))
+        attn_layers=Decoder(max_seq_len=10, dim=4, depth=1, heads=1, rotary_pos_emb=True, attn_flash=True,
+                            use_scalenorm=True, ff_glu=True, ))
 )
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-for i in range(10000):
-    x = torch.Tensor([[1,2,3]]).long()
+x = torch.Tensor([[1, 2, 3, 0, 0, 0, 0]]).long()
+for i in range(1000):
     loss = model(x)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     print(loss)
+print(model(x, return_outputs=True))
 print(sum(p.numel() for p in model.parameters()))
 print(sum(p.numel() for p in model.parameters() if p.requires_grad))
-"""
 
+"""
 # multi input to multi output
 model = MultiOXLAutoregressiveWrapper(
     outputs=2,
@@ -83,7 +85,7 @@ for i in range(5000):
 
 # 9336
 # for i in range(100):
-
+"""
 """
 model = MultiIOTransformerWrapper(
     num_tokens=8,

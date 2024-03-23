@@ -193,10 +193,10 @@ class ReluSquared(nn.Module):
 # embedding
 
 class TokenEmbedding(nn.Module):
-    def __init__(self, dim, num_tokens, l2norm_embed = False):
+    def __init__(self, dim, num_tokens, padding_idx=None, l2norm_embed = False):
         super().__init__()
         self.l2norm_embed = l2norm_embed
-        self.emb = nn.Embedding(num_tokens, dim)
+        self.emb = nn.Embedding(num_tokens, dim, padding_idx)
 
     def forward(self, x):
         token_emb = self.emb(x.long())
@@ -357,7 +357,7 @@ class AlibiPositionalBias(nn.Module):
         slopes = rearrange(slopes, 'h -> h 1 1')
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
-    
+
     def get_bias(self, i, j, device):
         i_arange = torch.arange(j - i, j, device = device)
         j_arange = torch.arange(j, device = device)
