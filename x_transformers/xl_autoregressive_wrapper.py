@@ -140,6 +140,7 @@ class XLAutoregressiveWrapper(nn.Module):
 
         total_loss = 0.        
 
+
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
 
             logits, mems = self.net(

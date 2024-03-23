@@ -163,20 +163,14 @@ class MultiOAutoregressiveWrapper(Module):
         seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
         inp, target = x[:, :-1], x[:, 1:]
         # print(inp.shape,target.shape)
-        inp = torch.where(inp == ignore_index, self.pad_value, inp)
-        """ 
-        if self.mask_prob > 0.:
-            rand = torch.randn(inp.shape, device=x.device)
-            rand[:, 0] = -torch.finfo(rand.dtype).max  # first token should not be masked out
-            num_mask = min(int(seq * self.mask_prob), seq - 1)
-            indices = rand.topk(num_mask, dim=-1).indices
-            mask = ~torch.zeros_like(inp).scatter(1, indices, 1.).bool()
-            kwargs.update(self_attn_kv_mask=mask)
-        """
+        #inp = torch.where(inp == ignore_index, self.pad_value, inp)
+        # inp is 2d tensor, pad value is 1d
+        mask = torch.eq(inp, self.pad_value)
         logits_ = self.net(
             inp,
             return_intermediates=True,
             return_attn_z_loss=add_attn_z_loss,
+            mask=mask,
             **kwargs
         )
         logits = logits_[0]
@@ -190,7 +184,7 @@ class MultiOAutoregressiveWrapper(Module):
             loss_i = F.cross_entropy(
                 rearrange(logits[i], 'b n c -> b c n'),
                 target[:, :, i].long(),
-                ignore_index=ignore_index
+                ignore_index=self.pad_value[i]
             )
 
             if add_attn_z_loss:
