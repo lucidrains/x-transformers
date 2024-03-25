@@ -7,7 +7,7 @@ class MultiOAutoregressiveWrapper(Module):
             self,
             net,
             pad_value: Tensor,
-            outputs: int,
+            outputs: int = None,
             ignore_index=-100,
             mask_prob=0.,
             add_attn_z_loss=False
@@ -19,6 +19,7 @@ class MultiOAutoregressiveWrapper(Module):
         self.max_seq_len = net.max_seq_len
         self.net = net
         if type(net) == MultiIOTransformerWrapper:
+            self.outputs = len(net.logits_dim)
             net.autoregressive = True
         # paper shows masking (MLM) in conjunction with autoregressive decoder-only training leads to big improvements https://arxiv.org/abs/2210.13432
         assert mask_prob < 1.
@@ -94,38 +95,19 @@ class MultiOAutoregressiveWrapper(Module):
             )
             logits = logits_[0]
             new_cache = logits_[1:]
-            if cache_kv and self.net.can_cache_kv:
-                cache = new_cache
+            # if cache_kv and self.net.can_cache_kv:
+            #    cache = new_cache
 
             # logits is a tuple of outputs
             # assert len(logits) == self.outputs
             sample = torch.Tensor([])
 
             for i in range(self.outputs):
-                #print(logits[0])
+
+                # print(logits[0])
                 logits_i = logits[i][:, -1]
                 # handle contrastive decoding, Li et al.
                 # https://arxiv.org/abs/2210.15097
-                """
-                if exists(amateur_model):
-                    for i, (amateur, amateur_cache, amateur_contrastive_decode_kwargs) in enumerate(
-                            zip(amateur_model, amateur_caches, contrastive_decode_kwargs)):
-                        amateur_logits, next_amateur_cache = amateur(
-                            x,
-                            return_intermediates=True,
-                            cache=amateur_cache,
-                            seq_start_pos=seq_start_pos,
-                            **kwargs
-                        )
-    
-                        amateur_logits = amateur_logits[:, -1]
-    
-                        assert amateur_logits.shape == logits.shape, 'logits dimension are not the same between amateur and expert model'
-                        logits = contrastive_decode_fn(logits, amateur_logits, **amateur_contrastive_decode_kwargs)
-    
-                        if cache_kv and amateur.can_cache_kv:
-                            amateur_caches[i] = next_amateur_cache
-                        """
                 # filter by top_k, top_p (nucleus), top_a, or custom
 
                 if greedy:
@@ -163,9 +145,9 @@ class MultiOAutoregressiveWrapper(Module):
         seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
         inp, target = x[:, :-1], x[:, 1:]
         # print(inp.shape,target.shape)
-        #inp = torch.where(inp == ignore_index, self.pad_value, inp)
+        # inp = torch.where(inp == ignore_index, self.pad_value, inp)
         # inp is 2d tensor, pad value is 1d
-        mask = torch.eq(inp, self.pad_value)
+        mask = torch.all(inp == self.pad_value, dim=2)
         logits_ = self.net(
             inp,
             return_intermediates=True,
@@ -176,7 +158,7 @@ class MultiOAutoregressiveWrapper(Module):
         logits = logits_[0]
         # print(logits)
         cache = logits_[1]
-        #print(len(cache))
+        # print(len(cache))
         loss = None
         for i in range(self.outputs):
             # print(logits[i].shape)
@@ -184,18 +166,18 @@ class MultiOAutoregressiveWrapper(Module):
             loss_i = F.cross_entropy(
                 rearrange(logits[i], 'b n c -> b c n'),
                 target[:, :, i].long(),
-                ignore_index=self.pad_value[i]
+                ignore_index=int(self.pad_value[i])
             )
 
             if add_attn_z_loss:
                 if self.net.post_attn_layers is not None:
-                    loss_i = loss_i + cache[len(cache)-1][i].attn_z_loss
+                    loss_i = loss_i + cache[len(cache) - 1][i].attn_z_loss
             if loss is None:
                 loss = loss_i
             else:
                 loss = loss + loss_i
         if add_attn_z_loss and self.net.post_attn_layers is None:
-            loss = loss + cache[len(cache)-1].attn_z_loss
+            loss = loss + cache[len(cache) - 1].attn_z_loss
         if not return_outputs:
             return loss
 

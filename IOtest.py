@@ -29,8 +29,59 @@ for i in range(5000):
 print(model(x, return_outputs=True))
 print(sum(p.numel() for p in model.parameters()))
 print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+#"""
+#"""
+# multi input to multi output
+model = MultiOAutoregressiveWrapper(
+    outputs=3,
+    # add_attn_z_loss=True,
+    pad_value=torch.Tensor([0, 0, 0]),
+    net=MultiIOTransformerWrapper(
+        num_tokens=[3, 3, 3],
+        autoregressive=True,
+        max_seq_len=5,
+        # use_abs_pos_emb=True,
+        input_attn_layers=[
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True),
+            # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True),
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True),
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True), ],
+        # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True)],
+        # output_attn_layers=[
+        #    AttentionLayers(dim=8, depth=1, heads=2, causal=True),
+        #    AttentionLayers(dim=8, depth=1, heads=2, causal=True),
+        # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, ),
+        #    AttentionLayers(dim=8, depth=1, heads=2, causal=True)],
+        # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, )],
+        # l2norm_embed=True,
+        attn_layers=AttentionLayers(
+            dim=12,
+            depth=2,
+            heads=4,
+            # rotary_pos_emb=True,
+            attn_flash=True,
+            # use_scalenorm=True,
+            # ff_glu=True,
+            causal=True
+        )
+    ))
+print(sum(p.numel() for p in model.parameters()))
+print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+# x = torch.Tensor(torch.randint(1, 3, (1, 10, 2))).float()
+# print(x)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+x = torch.Tensor([[[1, 1, 2], [1, 2, 0], [1, 2, 1], [0, 0, 0], [0, 0, 0]]]).long()
+# print(x.shape)
+for i in range(2000):
+    loss = model(x)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    print(loss)
+print(model(x, return_outputs=True)[1][0])
+print(model.generate(prompts=torch.Tensor([[[1, 1, 2]]]).float(), seq_len=3))
+#"""
 """
-
 # multi input to multi output
 model = MultiOXLAutoregressiveWrapper(
     outputs=2,
@@ -87,7 +138,7 @@ print(model(x, return_outputs=True))
 
 # 9336
 # for i in range(100):
-
+"""
 """
 model = MultiIOTransformerWrapper(
     num_tokens=8,

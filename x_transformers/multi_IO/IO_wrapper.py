@@ -150,17 +150,6 @@ class MultiIOTransformerWrapper(nn.Module):
 
             # memory tokens (like [cls]) from Memory Transformers paper
 
-            """ self.num_memory_tokens = num_memory_tokens
-            if type(self.num_memory_tokens) == list:
-                assert len(num_memory_tokens) == len(
-                    self.emb_dim), 'number of memory tokens must match number of inputs'
-                self.memory_tokens = nn.ParameterList(
-                    [nn.Parameter(torch.randn(num_memory_tokens[i], self.emb_dim[i])) for i in
-                     range(len(self.emb_dim))])
-
-            self.memory_tokens_interspersed_every = memory_tokens_interspersed_every"""
-
-            # whether can do cached kv decoding
 
             # self.can_cache_kv = self.num_memory_tokens == 0
             # self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
@@ -203,7 +192,7 @@ class MultiIOTransformerWrapper(nn.Module):
                         self.to_logits = torch.nn.ModuleList([nn.Linear(dim, d, bias=False) for d in logits_dim])
                 else:
                     self.to_logits = nn.Linear(dim, num_tokens, bias=False)
-
+        self.logits_dim = logits_dim
     def init_(self):
         if self.multi_input:
             if self.l2norm_embed:
@@ -325,7 +314,11 @@ class MultiIOTransformerWrapper(nn.Module):
                 x_i = self.project_emb[i](x_i)
                 if self.pre_attn_layers is not None:
                     # print(x_i)
-                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask, mems=mems_pre[i] if exists(mems_pre) else None,
+                    # print(x_i.shape, mask_i.shape)
+
+                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, attn_mask=mask,
+                                                                                mems=mems_pre[i] if exists(
+                                                                                    mems_pre) else None,
                                                                                 cache=cache_pre_attn_layers[
                                                                                     i] if cache_pre_attn_layers is not None else None,
                                                                                 return_hiddens=True,
@@ -371,7 +364,14 @@ class MultiIOTransformerWrapper(nn.Module):
                     intermediates_pre[i].mems = new_mems
                     intermediates_pre[i].mems = hiddens
 
-            x, intermediates_model = self.attn_layers(x, mask=mask, mems=mems_model, mem_masks=mem_masks,
+            """
+            Running the main attention layers of the model
+            """
+
+            # print(x.shape, mask.shape)
+            # make a random 1x 12 tensor
+
+            x, intermediates_model = self.attn_layers(x, attn_mask=mask, mems=mems_model, mem_masks=mem_masks,
                                                       cache=cache_model,
                                                       return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
         else:
@@ -414,6 +414,10 @@ class MultiIOTransformerWrapper(nn.Module):
             intermediates_model.mems = new_mems
             intermediates_model.mems = hiddens
 
+        """
+        Output processing
+        """
+
         if self.multi_output:
             if self.post_attn_layers is not None:
                 outputs = []
@@ -422,7 +426,9 @@ class MultiIOTransformerWrapper(nn.Module):
                 for i, layer in enumerate(self.post_attn_layers):
                     post_x = self.post_mapping[i](x)
                     if return_hiddens:
-                        post_x, inter = layer(post_x, mask=mask, mems=mems_post[i] if exists(mems_post) else None, mem_masks=mem_masks,
+                        post_x, inter = layer(post_x, attn_mask=mask,
+                                              mems=mems_post[i] if exists(mems_post) else None,
+                                              mem_masks=mem_masks,
                                               cache=cache_post_attn_layers[
                                                   i] if cache_post_attn_layers is not None else None,
                                               return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
@@ -430,7 +436,7 @@ class MultiIOTransformerWrapper(nn.Module):
                         x_values.append(post_x)
                     else:
                         x_values.append(
-                            layer(post_x, mask=mask, mems=mems_post[i], mem_masks=mem_masks,
+                            layer(post_x, attn_mask=mask, mems=mems_post[i], mem_masks=mem_masks,
                                   cache=cache_post_attn_layers[i] if cache_post_attn_layers is not None else None,
                                   return_hiddens=False, seq_start_pos=seq_start_pos, **kwargs))
                     outputs.append(self.to_logits[i](x_values[i]))
@@ -440,7 +446,9 @@ class MultiIOTransformerWrapper(nn.Module):
                     out = x_values
                 else:
                     out = outputs
-
+                """
+                Outputs Processing for multi-output attention layers
+                """
                 if return_attn_z_loss:
                     pre_softmax_attns = list(list(map(lambda t: t.pre_softmax_attn, intermediate.attn_intermediates))
                                              for intermediate in intermediates_post)
@@ -480,6 +488,9 @@ class MultiIOTransformerWrapper(nn.Module):
 
                 return out
             else:
+                """
+                Output processing for multi-output no attention layers
+                """
                 x_values = []
                 for i in self.to_logits:
                     x_values.append(i(x))
