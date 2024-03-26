@@ -274,14 +274,10 @@ class MultiIOTransformerWrapper(nn.Module):
             #    num_mems, has_memory_tokens = self.num_memory_tokens, True
             # else:
             #    num_mems, has_memory_tokens = 0, False
-            assert x.shape[-1] == len(self.pre_attn_layers), 'number of inputs must match number of ' \
-                                                             'input_attn_layers'
-            assert x.shape[-1] == len(self.num_tokens), 'number of inputs must match number of num_tokens'
-            assert x.shape[-1] == len(self.emb_dim), 'number of inputs must match number of emb_dim'
             external_pos_emb = exists(pos) and pos.dtype != torch.long
             intermediates_pre = []
             out_x = None
-            for i in range(x.shape[-1]):
+            for i in range(len(self.token_emb)):
                 x_i = x[:, :, i]
                 pos_emb = self.pos_emb[i](x_i, pos=pos, seq_start_pos=seq_start_pos) if not external_pos_emb else pos
                 x_i = self.token_emb[i](x_i) + pos_emb
@@ -313,8 +309,6 @@ class MultiIOTransformerWrapper(nn.Module):
                 x_i = self.emb_dropout[i](x_i)
                 x_i = self.project_emb[i](x_i)
                 if self.pre_attn_layers is not None:
-                    # print(x_i)
-                    # print(x_i.shape, mask_i.shape)
 
                     x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, attn_mask=mask,
                                                                                 mems=mems_pre[i] if exists(
@@ -367,10 +361,6 @@ class MultiIOTransformerWrapper(nn.Module):
             """
             Running the main attention layers of the model
             """
-
-            # print(x.shape, mask.shape)
-            # make a random 1x 12 tensor
-
             x, intermediates_model = self.attn_layers(x, attn_mask=mask, mems=mems_model, mem_masks=mem_masks,
                                                       cache=cache_model,
                                                       return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)

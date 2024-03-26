@@ -21,6 +21,9 @@ class MultiOAutoregressiveWrapper(Module):
         if type(net) == MultiIOTransformerWrapper:
             self.outputs = len(net.logits_dim)
             net.autoregressive = True
+            for i, token_emb in enumerate(net.token_emb):
+                token_emb.padding_idx = int(pad_value[i])
+                token_emb.emb.padding_idx = int(pad_value[i])
         # paper shows masking (MLM) in conjunction with autoregressive decoder-only training leads to big improvements https://arxiv.org/abs/2210.13432
         assert mask_prob < 1.
         self.mask_prob = mask_prob
