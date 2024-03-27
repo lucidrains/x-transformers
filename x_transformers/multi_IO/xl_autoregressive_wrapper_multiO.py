@@ -40,6 +40,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
     ):
         device, greedy, max_seq_len = prompts.device, temperature == 0, self.max_seq_len
 
+        self.pad_value = self.pad_value.to(device)
         #prompts, ps = pack([prompts], '* n')
 
         b, t, _ = prompts.shape
