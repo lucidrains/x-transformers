@@ -107,14 +107,14 @@ model = MultiOXLAutoregressiveWrapper(
     net=MultiIOTransformerWrapper(
         num_tokens=[3, 3, 3],
         autoregressive=True,
-        max_seq_len=2,
+        max_seq_len=3,
         shift_mem_down=1,
         # use_abs_pos_emb=True,
         input_attn_layers=torch.nn.ModuleList([
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True),
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True, attn_flash=True,),
             # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True),
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True),
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True), ]),
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True, attn_flash=True,),
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True, attn_flash=True,), ]),
         # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True)],
         # output_attn_layers=[
         #    AttentionLayers(dim=8, depth=1, heads=2, causal=True),
@@ -139,9 +139,10 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 # x = torch.Tensor(torch.randint(1, 3, (1, 10, 2))).float()
 # print(x)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
-# print(x.shape)
-for i in range(500):
+x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
+                     , [[1, 1, 2], [2, 0, 1], [2, 1, 2], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
+print(x.shape)
+for i in range(1000):
     loss = model(x)
     optimizer.zero_grad()
     loss.backward()

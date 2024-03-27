@@ -147,7 +147,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
         logits_total = None
         mems_total = []
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
-            mask = torch.all(chunk == self.pad_value, dim=-1)
+            mask = torch.all(chunk == self.pad_value, dim=2)
             if torch.all(mask, dim=1).all():
                 break
                 # essentially just breaking before the last chunk if the labels are all pad values
@@ -171,8 +171,9 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             mems_total.append(mems)
 
             loss = None
-            # print(logits.shape)
             for i in range(self.outputs):
+                if torch.all(chunk_labels[:, :, i].long()==self.pad_value[i]):
+                    continue
                 loss_i = F.cross_entropy(
                     rearrange(logits[i], 'b n c -> b c n'),
                     chunk_labels[:, :, i].long(),
@@ -183,7 +184,8 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                         loss = loss_i
                     else:
                         loss = loss + loss_i
-
+            if loss is None:
+                continue
             total_loss = total_loss + loss * loss_weight
         if not return_outputs:
             return total_loss
