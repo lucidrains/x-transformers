@@ -38,6 +38,7 @@ class MultiOAutoregressiveWrapper(Module):
             prompts,
             seq_len,
             eos_token: Tensor = None,
+            index_eos_token: dict[int, int] = None,
             temperature=1.,
             prompt_lens: Optional[Tensor] = None,
             filter_logits_fn: Callable = top_k,
@@ -104,7 +105,6 @@ class MultiOAutoregressiveWrapper(Module):
             # logits is a tuple of outputs
             # assert len(logits) == self.outputs
             sample = torch.Tensor([])
-
             for i in range(self.outputs):
 
                 # print(logits[0])
@@ -124,19 +124,32 @@ class MultiOAutoregressiveWrapper(Module):
                 # concat sample
             out = torch.cat((out, sample[None, :, :]), dim=1)
 
-            if not exists(eos_token):
+            if not exists(eos_token) and not exists(index_eos_token):
                 continue
 
+            continue_generation = True
+            if exists(index_eos_token):
+                for index, eos_token in index_eos_token.items():
+                    if torch.any((out == eos_token)[:, :, index], dim=-1):
+                        continue_generation = False
             if exists(eos_token):
                 is_eos_tokens = torch.all(torch.eq(out[:, :, :], eos_token), dim=-1)
                 if torch.any(is_eos_tokens, dim=-1):
-                    break
+                    continue_generation = False
+            if not continue_generation:
+                break
+
 
         if exists(eos_token):
             # mask out everything after the eos tokens
             shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
             mask = shifted_is_eos_tokens.float().cumsum(dim=-1) >= 1
             out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
+        if exists(index_eos_token):
+            for index, eos_token in index_eos_token.items():
+                shifted_is_eos_tokens = F.pad((out == eos_token)[:, :, index], (1, -1))
+                mask = shifted_is_eos_tokens.float() >= 1
+                out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
 
         out = out[:, t:]
 

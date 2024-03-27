@@ -31,6 +31,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             seq_len,
             eos_token=None,
             temperature=1.,
+            index_eos_token:dict[int,int]=None,
             filter_logits_fn=top_k,
             filter_thres=0.9,
             mems=None,
@@ -79,7 +80,6 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             )
             logits = logits_[0]
             cache = logits_[1]
-            print(logits)
             sample = torch.Tensor([])
             for i in range(self.outputs):
                 logits_i = logits[i][:, -1]
@@ -100,9 +100,18 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 if torch.any(is_eos_tokens, dim=-1):
                     break
 
-            if exists(eos_token):
-                # mask out everything after the eos tokens
-                shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
+            if exists(index_eos_token):
+                for index, eos_token in index_eos_token.items():
+                    if torch.any(torch.all(torch.eq(out[:, :, index], eos_token), dim=-1)):
+                        break
+        if exists(eos_token):
+            # mask out everything after the eos tokens
+            shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
+            mask = shifted_is_eos_tokens.float().cumsum(dim=-1) >= 1
+            out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
+        if exists(index_eos_token):
+            for index, eos_token in index_eos_token.items():
+                shifted_is_eos_tokens = F.pad(torch.all(torch.eq(out[:, :, index], eos_token), dim=-1), (1, -1))
                 mask = shifted_is_eos_tokens.float().cumsum(dim=-1) >= 1
                 out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
 
@@ -167,10 +176,11 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                     chunk_labels[:, :, i].long(),
                     ignore_index=int(self.pad_value[i])
                 )
-                if loss is None:
-                    loss = loss_i
-                else:
-                    loss = loss + loss_i
+                if not loss_i.isnan():
+                    if loss is None:
+                        loss = loss_i
+                    else:
+                        loss = loss + loss_i
 
             total_loss = total_loss + loss * loss_weight
         if not return_outputs:
