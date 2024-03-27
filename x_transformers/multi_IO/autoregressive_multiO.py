@@ -55,7 +55,6 @@ class MultiOAutoregressiveWrapper(Module):
         # assumes it is multi-output
         max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
 
-        self.pad_value = self.pad_value.to(device)
         # prompts, ps = pack([prompts], '* n')
 
         b, t, _ = prompts.shape
@@ -159,6 +158,7 @@ class MultiOAutoregressiveWrapper(Module):
         return out
 
     def forward(self, x, return_outputs=False, **kwargs):
+        self.pad_value = self.pad_value.to(x.device)
         seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
         inp, target = x[:, :-1], x[:, 1:]
         # print(inp.shape,target.shape)
