@@ -147,8 +147,8 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
         logits_total = None
         mems_total = []
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
-            mask = torch.all(chunk == self.pad_value, dim=2)
-            if torch.all(torch.all(chunk_labels == self.pad_value, dim=2), dim=1):
+            mask = torch.all(chunk == self.pad_value, dim=-1)
+            if torch.all(mask, dim=1).all():
                 break
                 # essentially just breaking before the last chunk if the labels are all pad values
             logits_ = self.net(

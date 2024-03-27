@@ -38,7 +38,7 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 print('generate_test: ', model.generate(prompts=torch.Tensor([[1, 2, 3]]).long(), seq_len=5))
 print('eos_test: ', model.generate(prompts=torch.Tensor([[2, 2, 3]]).long(), seq_len=5, eos_token=1))
 # """
-#"""
+"""
 # multi input to multi output
 model = MultiOAutoregressiveWrapper(
     outputs=3,
@@ -98,7 +98,7 @@ print('eos_index_test: ', model.generate(
     seq_len=5, temperature=0))
 # """
 
-"""
+# """
 # multi input to multi output
 model = MultiOXLAutoregressiveWrapper(
     outputs=3,
@@ -138,7 +138,7 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 # x = torch.Tensor(torch.randint(1, 3, (1, 10, 2))).float()
 # print(x)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0]]]).long()
+x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
 # print(x.shape)
 for i in range(500):
     loss = model(x)
@@ -149,15 +149,15 @@ for i in range(500):
 print('logits_test: ', model(x, return_outputs=True)[1][0])
 print('generate_test: ', model.generate(prompts=torch.Tensor([[[2, 1, 2]]]).float(), seq_len=3))
 print('eos_test: ', model.generate(
-                    prompts=torch.Tensor([[[2, 1, 2]]]).float(),
-                    eos_token=torch.Tensor([[[2, 2, 1]]]).float(),
-                    seq_len=3, temperature=0))
+    prompts=torch.Tensor([[[2, 1, 2]]]).float(),
+    eos_token=torch.Tensor([[[2, 2, 1]]]).float(),
+    seq_len=3, temperature=0))
 print('eos_index_test: ', model.generate(
     prompts=torch.Tensor([[[2, 1, 2]]]).float(),
     index_eos_token={0: 1},
     seq_len=3, temperature=0))
 
-#"""
+# """
 """
 model = MultiIOTransformerWrapper(
     num_tokens=8,
