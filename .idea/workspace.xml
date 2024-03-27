@@ -6,8 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="e89f890f-bc6e-4061-90aa-84142178ba7c" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/IOtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/IOtest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/xl_autoregressive_wrapper_multiO.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/xl_autoregressive_wrapper_multiO.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/IO_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/IO_wrapper.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,20 +32,20 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "WebServerToolWindowFactoryState": "false",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "C:/Users/ilove/CODING/PYStuff/MusicNet/Midi2Numpy/MIDI-Generator-with-Transformers"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ilove/CODING/PYStuff/MusicNet/Midi2Numpy/MIDI-Generator-with-Transformers&quot;
   },
-  "keyToStringList": {
-    "com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File": [
-      "Jupyter"
+  &quot;keyToStringList&quot;: {
+    &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
+      &quot;Jupyter&quot;
     ]
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\ilove\CODING\PYStuff\x-transformers-multiIO\x_transformers\multi_IO" />

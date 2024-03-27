@@ -108,12 +108,13 @@ model = MultiOXLAutoregressiveWrapper(
         num_tokens=[3, 3, 3],
         autoregressive=True,
         max_seq_len=2,
+        shift_mem_down=1,
         # use_abs_pos_emb=True,
-        input_attn_layers=[
+        input_attn_layers=torch.nn.ModuleList([
             AttentionLayers(dim=4, depth=1, heads=1, causal=True),
             # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True),
             AttentionLayers(dim=4, depth=1, heads=1, causal=True),
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True), ],
+            AttentionLayers(dim=4, depth=1, heads=1, causal=True), ]),
         # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True)],
         # output_attn_layers=[
         #    AttentionLayers(dim=8, depth=1, heads=2, causal=True),

@@ -9,7 +9,7 @@ class MultiIOTransformerWrapper(nn.Module):
             num_tokens: list[int] or int,
             max_seq_len,
             autoregressive=False,
-            input_attn_layers: torch.nn.ModuleList([AttentionLayers]) = None,
+            input_attn_layers: torch.nn.ModuleList = None,
             concat_emb_dim: bool = True,
             attn_layers: AttentionLayers,
             embed_num_tokens: Dict[str, int] = dict(),
@@ -18,7 +18,7 @@ class MultiIOTransformerWrapper(nn.Module):
             shift_mem_down=0,
             emb_dropout=0.,
             post_emb_norm=False,
-            output_attn_layers: torch.nn.ModuleList([AttentionLayers]) = None,
+            output_attn_layers: torch.nn.ModuleList = None,
             # num_memory_tokens=None,
             # memory_tokens_interspersed_every=None,
             tie_embedding=False,
@@ -150,7 +150,6 @@ class MultiIOTransformerWrapper(nn.Module):
 
             # memory tokens (like [cls]) from Memory Transformers paper
 
-
             # self.can_cache_kv = self.num_memory_tokens == 0
             # self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
         if self.autoregressive:
@@ -193,6 +192,7 @@ class MultiIOTransformerWrapper(nn.Module):
                 else:
                     self.to_logits = nn.Linear(dim, num_tokens, bias=False)
         self.logits_dim = logits_dim
+
     def init_(self):
         if self.multi_input:
             if self.l2norm_embed:
@@ -309,10 +309,12 @@ class MultiIOTransformerWrapper(nn.Module):
                 x_i = self.emb_dropout[i](x_i)
                 x_i = self.project_emb[i](x_i)
                 if self.pre_attn_layers is not None:
-
+                    cur_mem = mems_pre[i] if exists(mems_pre) else None
+                    if self.shift_mem_down and exists(cur_mem):
+                        mems_l, mems_r = cur_mem[:self.shift_mem_down], cur_mem[self.shift_mem_down:]
+                        cur_mem = [*mems_r, *mems_l]
                     x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, attn_mask=mask,
-                                                                                mems=mems_pre[i] if exists(
-                                                                                    mems_pre) else None,
+                                                                                mems=cur_mem,
                                                                                 cache=cache_pre_attn_layers[
                                                                                     i] if cache_pre_attn_layers is not None else None,
                                                                                 return_hiddens=True,
@@ -361,6 +363,9 @@ class MultiIOTransformerWrapper(nn.Module):
             """
             Running the main attention layers of the model
             """
+            if self.shift_mem_down and exists(mems_model):
+                mems_l, mems_r = mems_model[:self.shift_mem_down], mems_model[self.shift_mem_down:]
+                mems_model = [*mems_r, *mems_l]
             x, intermediates_model = self.attn_layers(x, attn_mask=mask, mems=mems_model, mem_masks=mem_masks,
                                                       cache=cache_model,
                                                       return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
@@ -415,9 +420,13 @@ class MultiIOTransformerWrapper(nn.Module):
                 x_values = []
                 for i, layer in enumerate(self.post_attn_layers):
                     post_x = self.post_mapping[i](x)
+                    mems_cur = mems_post[i] if exists(mems_post) else None
+                    if self.shift_mem_down and exists(mems_cur):
+                        mems_l, mems_r = mems_cur[:self.shift_mem_down], mems_cur[self.shift_mem_down:]
+                        mems_cur = [*mems_r, *mems_l]
                     if return_hiddens:
                         post_x, inter = layer(post_x, attn_mask=mask,
-                                              mems=mems_post[i] if exists(mems_post) else None,
+                                              mems=mems_cur,
                                               mem_masks=mem_masks,
                                               cache=cache_post_attn_layers[
                                                   i] if cache_post_attn_layers is not None else None,
@@ -426,7 +435,7 @@ class MultiIOTransformerWrapper(nn.Module):
                         x_values.append(post_x)
                     else:
                         x_values.append(
-                            layer(post_x, attn_mask=mask, mems=mems_post[i], mem_masks=mem_masks,
+                            layer(post_x, attn_mask=mask, mems=mems_cur,
                                   cache=cache_post_attn_layers[i] if cache_post_attn_layers is not None else None,
                                   return_hiddens=False, seq_start_pos=seq_start_pos, **kwargs))
                     outputs.append(self.to_logits[i](x_values[i]))
