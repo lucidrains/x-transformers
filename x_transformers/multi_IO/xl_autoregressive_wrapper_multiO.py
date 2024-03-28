@@ -81,7 +81,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             )
             logits = logits_[0]
             cache = logits_[1]
-            sample = torch.Tensor([])
+            sample = torch.Tensor([]).to(device)
             for i in range(self.outputs):
                 logits_i = logits[i][:, -1]
                 if greedy:

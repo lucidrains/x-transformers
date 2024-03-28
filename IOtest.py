@@ -142,6 +142,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
                      , [[1, 1, 2], [2, 0, 1], [2, 1, 2], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
 print(x.shape)
+#x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0], [0, 0, 0]]]).long()
+
 for i in range(1000):
     loss = model(x)
     optimizer.zero_grad()
