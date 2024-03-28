@@ -107,7 +107,7 @@ model = MultiOXLAutoregressiveWrapper(
     net=MultiIOTransformerWrapper(
         num_tokens=[3, 3, 3],
         autoregressive=True,
-        max_seq_len=3,
+        max_seq_len=4,
         shift_mem_down=1,
         # use_abs_pos_emb=True,
         input_attn_layers=torch.nn.ModuleList([
@@ -139,10 +139,15 @@ print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 # x = torch.Tensor(torch.randint(1, 3, (1, 10, 2))).float()
 # print(x)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
-                     , [[1, 1, 2], [2, 0, 1], [2, 1, 2], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
+#x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
+#                     , [[1, 1, 2], [2, 0, 1], [2, 1, 2], [1, 2, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
+#print(x.shape)
+x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0]]]).long()
 print(x.shape)
-#x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0], [0, 0, 0]]]).long()
+print(model(x))
+x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
+print(x.shape)
+print(model(x))
 
 for i in range(1000):
     loss = model(x)

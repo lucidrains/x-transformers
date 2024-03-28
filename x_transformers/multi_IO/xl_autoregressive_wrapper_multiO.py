@@ -139,17 +139,19 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
 
         split_x = x.split(max_seq_len, dim=1)
         split_labels = labels.split(max_seq_len, dim=1)
-        loss_weights = tuple(map(lambda t: t.shape[-1] / seq_len, split_x))
+        loss_weights = tuple(map(lambda t: t.shape[-2] / seq_len, split_x))
 
         # go through each chunk and derive weighted losses
 
         total_loss = 0.
         logits_total = None
         mems_total = []
+        padding_adjustment = 0
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
             mask = torch.all(chunk == self.pad_value, dim=2)
             if torch.all(mask, dim=1).all():
-                break
+                padding_adjustment += loss_weight
+                continue
                 # essentially just breaking before the last chunk if the labels are all pad values
             logits_ = self.net(
                 chunk,
@@ -174,6 +176,8 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             for i in range(self.outputs):
                 if torch.all(chunk_labels[:, :, i].long()==self.pad_value[i]):
                     continue
+                # get first indexes before padding starts
+                #print(chunk_labels[:, :, i].long() == self.pad_value[i])
                 loss_i = F.cross_entropy(
                     rearrange(logits[i], 'b n c -> b c n'),
                     chunk_labels[:, :, i].long(),
@@ -187,6 +191,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             if loss is None:
                 continue
             total_loss = total_loss + loss * loss_weight
+        total_loss = total_loss / (1 - padding_adjustment)
         if not return_outputs:
             return total_loss
 
