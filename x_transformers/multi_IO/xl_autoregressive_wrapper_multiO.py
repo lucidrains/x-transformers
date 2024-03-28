@@ -177,7 +177,6 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 if torch.all(chunk_labels[:, :, i].long()==self.pad_value[i]):
                     continue
                 # get first indexes before padding starts
-                #print(chunk_labels[:, :, i].long() == self.pad_value[i])
                 loss_i = F.cross_entropy(
                     rearrange(logits[i], 'b n c -> b c n'),
                     chunk_labels[:, :, i].long(),
@@ -189,9 +188,13 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                     else:
                         loss = loss + loss_i
             if loss is None:
+                padding_adjustment += loss_weight
                 continue
             total_loss = total_loss + loss * loss_weight
-        total_loss = total_loss / (1 - padding_adjustment)
+        if 0 < padding_adjustment < 1:
+            total_loss = total_loss / (1 - padding_adjustment)
+        if padding_adjustment == 1:
+            total_loss = torch.Tensor([0]).to(x.device)
         if not return_outputs:
             return total_loss
 
