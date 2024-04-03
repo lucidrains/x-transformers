@@ -77,6 +77,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 cache=cache,
                 return_mems=True,
                 return_intermediates=True,
+                mask=torch.zeros((b, x.shape[1])).bool().to(device),
                 **kwargs
             )
             logits = logits_[0]
@@ -90,7 +91,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                     filtered_logits_i = filter_logits_fn(logits_i, **filter_kwargs)
                     probs_i = F.softmax(filtered_logits_i / temperature, dim=-1)
                     sample_i = torch.multinomial(probs_i, 1)
-                sample = torch.cat((sample, sample_i), dim=-1)
+                sample = torch.cat((sample, sample_i), dim=1)
             out = torch.cat((out, sample[None, :, :]), dim=1)
             if is_last_segment_tokens:
                 curr_pos = curr_segment_len
@@ -103,7 +104,10 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
 
             if exists(index_eos_token):
                 for index, eos_token in index_eos_token.items():
-                    if torch.any(torch.all(torch.eq(out[:, :, index], eos_token), dim=-1)):
+                    print(out[:, :, index])
+                    print(out[:, :, index] == eos_token)
+                    print((out[:, :, index] == eos_token).any(dim=-1))
+                    if (out[:, :, index] == eos_token).any(dim=-1).all():
                         break
         if exists(eos_token):
             # mask out everything after the eos tokens
@@ -112,7 +116,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
         if exists(index_eos_token):
             for index, eos_token in index_eos_token.items():
-                shifted_is_eos_tokens = F.pad(torch.all(torch.eq(out[:, :, index], eos_token), dim=-1), (1, -1))
+                shifted_is_eos_tokens = F.pad(out[:, :, index] == eos_token, (1, -1))
                 mask = shifted_is_eos_tokens.float().cumsum(dim=-1) >= 1
                 out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
 
@@ -161,7 +165,6 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 mask=mask,
                 **kwargs
             )
-
             logits = logits_[0]
             if logits_total is None:
                 logits_total = logits

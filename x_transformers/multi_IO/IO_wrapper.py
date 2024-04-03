@@ -313,7 +313,7 @@ class MultiIOTransformerWrapper(nn.Module):
                     if self.shift_mem_down and exists(cur_mem):
                         mems_l, mems_r = cur_mem[:self.shift_mem_down], cur_mem[self.shift_mem_down:]
                         cur_mem = [*mems_r, *mems_l]
-                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, attn_mask=mask,
+                    x_i, intermediates_pre_attn_layer = self.pre_attn_layers[i](x_i, mask=mask,
                                                                                 mems=cur_mem,
                                                                                 cache=cache_pre_attn_layers[
                                                                                     i] if cache_pre_attn_layers is not None else None,
@@ -366,7 +366,7 @@ class MultiIOTransformerWrapper(nn.Module):
             if self.shift_mem_down and exists(mems_model):
                 mems_l, mems_r = mems_model[:self.shift_mem_down], mems_model[self.shift_mem_down:]
                 mems_model = [*mems_r, *mems_l]
-            x, intermediates_model = self.attn_layers(x, attn_mask=mask, mems=mems_model, mem_masks=mem_masks,
+            x, intermediates_model = self.attn_layers(x, mask=mask, mems=mems_model, mem_masks=mem_masks,
                                                       cache=cache_model,
                                                       return_hiddens=True, seq_start_pos=seq_start_pos, **kwargs)
         else:
@@ -425,7 +425,7 @@ class MultiIOTransformerWrapper(nn.Module):
                         mems_l, mems_r = mems_cur[:self.shift_mem_down], mems_cur[self.shift_mem_down:]
                         mems_cur = [*mems_r, *mems_l]
                     if return_hiddens:
-                        post_x, inter = layer(post_x, attn_mask=mask,
+                        post_x, inter = layer(post_x, mask=mask,
                                               mems=mems_cur,
                                               mem_masks=mem_masks,
                                               cache=cache_post_attn_layers[
@@ -435,7 +435,7 @@ class MultiIOTransformerWrapper(nn.Module):
                         x_values.append(post_x)
                     else:
                         x_values.append(
-                            layer(post_x, attn_mask=mask, mems=mems_cur,
+                            layer(post_x, mask=mask, mems=mems_cur,
                                   cache=cache_post_attn_layers[i] if cache_post_attn_layers is not None else None,
                                   return_hiddens=False, seq_start_pos=seq_start_pos, **kwargs))
                     outputs.append(self.to_logits[i](x_values[i]))

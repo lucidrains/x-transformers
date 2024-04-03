@@ -111,10 +111,10 @@ model = MultiOXLAutoregressiveWrapper(
         shift_mem_down=1,
         # use_abs_pos_emb=True,
         input_attn_layers=torch.nn.ModuleList([
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True, attn_flash=True,),
+            Decoder(dim=4, depth=1, heads=1, attn_flash=True,),
             # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True),
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True, attn_flash=True,),
-            AttentionLayers(dim=4, depth=1, heads=1, causal=True, attn_flash=True,), ]),
+            Decoder(dim=4, depth=1, heads=1, attn_flash=True,),
+            Decoder(dim=4, depth=1, heads=1, attn_flash=True,), ]),
         # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True)],
         # output_attn_layers=[
         #    AttentionLayers(dim=8, depth=1, heads=2, causal=True),
@@ -123,7 +123,7 @@ model = MultiOXLAutoregressiveWrapper(
         #    AttentionLayers(dim=8, depth=1, heads=2, causal=True)],
         # rotary_pos_emb=True, attn_flash=True, use_scalenorm=True, ff_glu=True, )],
         # l2norm_embed=True,
-        attn_layers=AttentionLayers(
+        attn_layers=Decoder(
             dim=12,
             depth=2,
             heads=4,
@@ -131,7 +131,6 @@ model = MultiOXLAutoregressiveWrapper(
             attn_flash=True,
             # use_scalenorm=True,
             # ff_glu=True,
-            causal=True
         )
     ))
 print(sum(p.numel() for p in model.parameters()))
@@ -144,11 +143,13 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 #print(x.shape)
 x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0]]]).long()
 print(x.shape)
-print(model(x))
-x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
+print(model(x, return_outputs=True))
+x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1], [1, 0, 0], [2, 2, 2], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]]).long()
 print(x.shape)
-print(model(x))
-
+print(model(x, return_outputs=True))
+#x = torch.Tensor([[[2, 1, 2], [2, 1, 0], [2, 2, 1]]]).long()
+#print(x.shape)
+#print(model(x, return_outputs=True))
 for i in range(1000):
     loss = model(x)
     optimizer.zero_grad()
@@ -160,11 +161,11 @@ print('generate_test: ', model.generate(prompts=torch.Tensor([[[2, 1, 2]]]).floa
 print('eos_test: ', model.generate(
     prompts=torch.Tensor([[[2, 1, 2]]]).float(),
     eos_token=torch.Tensor([[[2, 2, 1]]]).float(),
-    seq_len=3, temperature=0))
+    seq_len=100, temperature=0))
 print('eos_index_test: ', model.generate(
     prompts=torch.Tensor([[[2, 1, 2]]]).float(),
     index_eos_token={0: 1},
-    seq_len=3, temperature=0))
+    seq_len=100, temperature=0))
 
 # """
 """
