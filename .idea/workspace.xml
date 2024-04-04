@@ -6,8 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="e89f890f-bc6e-4061-90aa-84142178ba7c" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/IOtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/IOtest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/IO_wrapper.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/IO_wrapper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/xl_autoregressive_wrapper_multiO.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/xl_autoregressive_wrapper_multiO.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />

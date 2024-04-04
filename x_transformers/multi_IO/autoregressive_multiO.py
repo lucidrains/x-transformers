@@ -130,7 +130,7 @@ class MultiOAutoregressiveWrapper(Module):
             continue_generation = True
             if exists(index_eos_token):
                 for index, eos_token in index_eos_token.items():
-                    if torch.any((out == eos_token)[:, :, index], dim=-1):
+                    if (out[:, :, index] == eos_token).any(dim=-1):
                         continue_generation = False
             if exists(eos_token):
                 is_eos_tokens = torch.all(torch.eq(out[:, :, :], eos_token), dim=-1)
@@ -147,8 +147,8 @@ class MultiOAutoregressiveWrapper(Module):
             out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
         if exists(index_eos_token):
             for index, eos_token in index_eos_token.items():
-                shifted_is_eos_tokens = F.pad((out == eos_token)[:, :, index], (1, -1))
-                mask = shifted_is_eos_tokens.float() >= 1
+                shifted_is_eos_tokens = F.pad(out[:, :, index] == eos_token, (1, -1))
+                mask = shifted_is_eos_tokens.float().cumsum(dim=-1) >= 1
                 out = torch.where(mask.unsqueeze(-1), self.pad_value, out)
 
         out = out[:, t:]

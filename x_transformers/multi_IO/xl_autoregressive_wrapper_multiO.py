@@ -97,18 +97,19 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 curr_pos = curr_segment_len
                 curr_mems = cache
 
+            continue_generation = True
             if exists(eos_token):
                 is_eos_tokens = torch.all(torch.eq(out[:, :, :], eos_token), dim=-1)
                 if torch.any(is_eos_tokens, dim=-1):
-                    break
+                    continue_generation = False
 
             if exists(index_eos_token):
                 for index, eos_token in index_eos_token.items():
-                    print(out[:, :, index])
-                    print(out[:, :, index] == eos_token)
-                    print((out[:, :, index] == eos_token).any(dim=-1))
-                    if (out[:, :, index] == eos_token).any(dim=-1).all():
-                        break
+                    if (out[:, :, index] == eos_token).any(dim=-1):
+                        continue_generation = False
+            if not continue_generation:
+                break
+
         if exists(eos_token):
             # mask out everything after the eos tokens
             shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
