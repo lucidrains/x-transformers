@@ -489,16 +489,6 @@ class Scale(nn.Module):
 
         return (scale_fn(out[0]), *out[1:])
 
-class ScaleNorm(nn.Module):
-    def __init__(self, dim, eps = 1e-5):
-        super().__init__()
-        self.eps = eps
-        self.g = nn.Parameter(torch.ones(1) * (dim ** -0.5))
-
-    def forward(self, x):
-        norm = torch.norm(x, dim = -1, keepdim = True)
-        return x / norm.clamp(min = self.eps) * self.g
-
 class LayerNorm(nn.Module):
     def __init__(self, dim):
         """
@@ -513,6 +503,15 @@ class LayerNorm(nn.Module):
 
 if version.parse(torch.__version__) >= version.parse('2.1.0'):
     LayerNorm = partial(nn.LayerNorm, bias = False)
+
+class ScaleNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.scale = dim ** 0.5
+        self.g = nn.Parameter(torch.ones(1))
+
+    def forward(self, x):
+        return F.normalize(x, dim = -1) * self.scale * self.g
 
 class RMSNorm(nn.Module):
     def __init__(self, dim):
