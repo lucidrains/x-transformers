@@ -1437,11 +1437,10 @@ model = XValAutoregressiveWrapper(model)
 
 ids = torch.randint(0, 4, (1, 777))
 nums = torch.randn(1, 777)
-mask = torch.ones(1, 777).bool()
 
 # train on a lot of data above
 
-loss = model(ids, nums, mask = mask)
+loss = model(ids, nums)
 loss.backward()
 
 # then generate
