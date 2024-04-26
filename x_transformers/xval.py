@@ -271,7 +271,16 @@ class XValAutoregressiveWrapper(nn.Module):
 
         cross_entropy_loss = F.cross_entropy(logits, target, reduction = 'none', ignore_index = self.ignore_index)
 
+        # protect against nan in `x_num` input tensor
+
+        target_is_number_mask = target == self.net.numerical_token_id
+        x_num_target = x_num_target.masked_fill(~target_is_number_mask, 0.)
+
+        # ignore index
+
         target_mask = target != self.ignore_index
+
+        # numerical mse loss
 
         numerical_mse_loss = F.mse_loss(numerical_pred, x_num_target, reduction = 'none')
 
