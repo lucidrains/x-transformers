@@ -260,10 +260,19 @@ class XValAutoregressiveWrapper(nn.Module):
         inp, target = x[:, :-1], x[:, 1:]
         x_num_inp, x_num_target = x_num[:, :-1], x_num[:, 1:]
 
+        # ignore index
+
+        target_mask = target != self.ignore_index
+
+        # key padding mask
+
         mask = kwargs.get('mask', None)
-        if exists(mask) and mask.shape[1] == x.shape[1]:
-            mask = mask[:, :-1]
-            kwargs['mask'] = mask
+        if exists(mask):
+            target_mask &= mask
+
+            if mask.shape[1] == x.shape[1]:
+                mask = mask[:, :-1]
+                kwargs['mask'] = mask
 
         logits, numerical_pred = self.net(inp, x_num_inp, **kwargs)
 
@@ -276,21 +285,18 @@ class XValAutoregressiveWrapper(nn.Module):
         target_is_number_mask = target == self.net.numerical_token_id
         x_num_target = x_num_target.masked_fill(~target_is_number_mask, 0.)
 
-        # ignore index
-
-        target_mask = target != self.ignore_index
-
         # numerical mse loss
 
         numerical_mse_loss = F.mse_loss(numerical_pred, x_num_target, reduction = 'none')
 
         numerical_mse_loss = numerical_mse_loss * target_mask
+        numerical_mse_loss = numerical_mse_loss.masked_fill(~target_is_number_mask, 0.)
+
+        # combine losses
 
         loss = cross_entropy_loss + numerical_mse_loss * self.numerical_loss_weight
 
-        if exists(mask):
-            loss = loss[mask]
-
+        loss = loss[target_mask]
         loss = loss.mean()
 
         if not return_loss_breakdown:
