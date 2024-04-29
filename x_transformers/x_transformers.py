@@ -1,6 +1,5 @@
 import math
 from random import random
-from typing import Dict
 from packaging import version
 
 import torch
@@ -11,7 +10,7 @@ from torch.cuda.amp import autocast
 from functools import partial, wraps
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Callable, Optional, Union
+from typing import List, Dict, Tuple, Callable, Optional, Union
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
@@ -91,7 +90,10 @@ def l2norm(t, groups = 1):
     t = F.normalize(t, p = 2, dim = -1)
     return rearrange(t, '... g d -> ... (g d)')
 
-def pad_at_dim(t, pad, dim = -1, value = 0.):
+def pad_at_dim(t, pad: Tuple[int, int], dim = -1, value = 0.):
+    if pad == (0, 0):
+        return t
+
     dims_from_right = (- dim - 1) if dim < 0 else (t.ndim - dim - 1)
     zeros = ((0, 0) * dims_from_right)
     return F.pad(t, (*zeros, *pad), value = value)
@@ -816,7 +818,7 @@ class Attention(nn.Module):
         return_intermediates = False,
         cache: Optional[Intermediates] = None,
     ):
-        b, n, h, kv_h, head_scale, device, has_context = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, x.device, exists(context)
+        b, n, h, kv_h, head_scale, num_mem_kv, device, has_context = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context)
 
         kv_input = default(context, x)
 
@@ -895,9 +897,7 @@ class Attention(nn.Module):
 
         # maybe append memory key / values
 
-        has_mem_kv = self.num_mem_kv > 0
-
-        if has_mem_kv:
+        if num_mem_kv > 0:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
 
             if self.qk_norm:
@@ -933,6 +933,7 @@ class Attention(nn.Module):
             range_k = torch.arange(j, device = device)
             dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
             max_attend_past_mask = dist > self.max_attend_past
+            max_attend_past_mask = pad_at_dim(max_attend_past_mask, (num_mem_kv, 0), value = False, dim = -1) # handle memory key / values
             masks.append(max_attend_past_mask)
 
         if len(masks) > 0:
@@ -943,11 +944,7 @@ class Attention(nn.Module):
         attn_bias = None
         if exists(rel_pos):
             attn_bias = rel_pos(i, j)
-
-        # append with no bias for memory key / values
-
-        if exists(attn_bias) and has_mem_kv:
-            attn_bias = pad_at_dim(attn_bias, (self.num_mem_kv, 0), value = 0.)
+            attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
         # attention is all we need
 
