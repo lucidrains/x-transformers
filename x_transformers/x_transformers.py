@@ -889,7 +889,15 @@ class Attention(nn.Module):
                 else:
                     input_mask = torch.cat((mem_mask, input_mask), dim = -1)
 
-        if self.num_mem_kv > 0:
+        # i, j determined for relative positional bias, excluding memory key / values
+
+        i, j = map(lambda t: t.shape[-2], (q, k))
+
+        # maybe append memory key / values
+
+        has_mem_kv = self.num_mem_kv > 0
+
+        if has_mem_kv:
             mem_k, mem_v = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), (self.mem_k, self.mem_v))
 
             if self.qk_norm:
@@ -901,8 +909,6 @@ class Attention(nn.Module):
 
             if exists(input_mask):
                 input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
-
-        i, j = map(lambda t: t.shape[-2], (q, k))
 
         # determine masking
 
@@ -937,6 +943,11 @@ class Attention(nn.Module):
         attn_bias = None
         if exists(rel_pos):
             attn_bias = rel_pos(i, j)
+
+        # append with no bias for memory key / values
+
+        if has_mem_kv:
+            attn_bias = pad_at_dim(attn_bias, (self.num_mem_kv, 0), value = 0.)
 
         # attention is all we need
 
