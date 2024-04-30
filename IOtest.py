@@ -6,26 +6,31 @@ from x_transformers.multi_IO.xl_autoregressive_wrapper_multiO import MultiOXLAut
 from x_transformers import Decoder, AutoregressiveWrapper, TransformerWrapper, XLAutoregressiveWrapper
 import torch
 
-"""
+# """
 model = XLAutoregressiveWrapper(
     pad_value=0,  # padding now properly works, testing with 0/other values
     net=TransformerWrapper(
         num_tokens=5,
-        #max_seq_len=5,
+        # max_seq_len=5,
         max_seq_len=3,
         use_abs_pos_emb=True,
         emb_dropout=0.1,
         post_emb_norm=True,
         attn_layers=AttentionLayers(
             dim=5, depth=1, heads=1, flash_attn=True,
-            use_scalenorm=True, ff_glu=True, causal=True, sandwich_norm = True,
-            alibi_pos_bias = True,
-            alibi_num_heads = 1
+            use_scalenorm=True, ff_glu=True, causal=True, sandwich_norm=True,
+            alibi_pos_bias=True,
+            alibi_num_heads=1
         )
     )
 )
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-x = torch.Tensor([[2, 2, 3, 1, 2, 1, 1, 0, 0]]).long()
+x = torch.Tensor(
+    [[2, 2, 3, 1, 2, 1, 1, 1, 1, 2, 3, 1, 2, 1, 2, 3, 1, 1, 1, 2, 2, 3, 1, 2, 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 3,
+      2, 2, 3, 1, 2, 1, 1, 1, 1, 2, 3, 1, 2, 1, 2, 3, 1, 1, 1, 2, 2, 3, 1, 2, 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 3,
+      2, 2, 3, 1, 2, 1, 1, 1, 1, 2, 3, 1, 2, 1, 2, 3, 1, 1, 1, 2, 2, 3, 1, 2, 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 3,
+      2, 2, 3, 1, 2, 1, 1, 1, 1, 2, 3, 1, 2, 1, 2, 3, 1, 1, 1, 2, 2, 3, 1, 2, 1, 3, 1, 1, 1, 1, 2, 1, 3, 1, 3]]).long()
+print(x.shape)
 for i in range(1000):
     loss = model(x)
     optimizer.zero_grad()
@@ -98,7 +103,7 @@ print('eos_index_test: ', model.generate(
     seq_len=5, temperature=0))
 # """
 
-# """
+"""
 # multi input to multi output
 model = MultiOXLAutoregressiveWrapper(
     outputs=3,

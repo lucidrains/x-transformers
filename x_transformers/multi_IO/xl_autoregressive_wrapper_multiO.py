@@ -1,4 +1,4 @@
-from x_transformers.multi_IO.IO_wrapper import MultiIOTransformerWrapper
+from x_transformers import MultiIOTransformerWrapper
 from x_transformers.xl_autoregressive_wrapper import *
 from torch import Tensor
 
@@ -76,12 +76,12 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 mems=curr_mems,
                 cache=cache,
                 return_mems=True,
-                return_intermediates=True,
                 mask=torch.zeros((b, x.shape[1])).bool().to(device),
                 **kwargs
             )
-            logits = logits_[0]
+            logits = logits_[0].cpu()
             cache = logits_[1]
+            del logits_
             sample = torch.Tensor([]).to(device)
             for i in range(self.outputs):
                 logits_i = logits[i][:, -1]
@@ -132,57 +132,71 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             x,
             mems=None,
             return_outputs=False,
+            return_mems=False,
             **kwargs
     ):
         self.pad_value = self.pad_value.to(x.device)
+        if return_mems:
+            return_outputs=True
         ignore_index, max_seq_len = self.ignore_index, self.max_seq_len
-
+        device = x.device
         x, labels = x[:, :-1], x[:, 1:]
         seq_len = x.shape[1]
 
         # prepare chunks
-
         split_x = x.split(max_seq_len, dim=1)
         split_labels = labels.split(max_seq_len, dim=1)
         loss_weights = tuple(map(lambda t: t.shape[-2] / seq_len, split_x))
 
         # go through each chunk and derive weighted losses
-
         total_loss = 0.
         logits_total = None
-        mems_total = []
+        if return_mems:
+            mems_total = []
         padding_adjustment = 0
+        #print("before chunk loop: ", torch.cuda.memory_allocated()/1024**3)
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
+            #print("right before chunks used: ", torch.cuda.memory_allocated()/1024**3)
+            chunk = chunk.to(device)
             mask = torch.all(chunk == self.pad_value, dim=2)
             if torch.all(mask, dim=1).all():
                 padding_adjustment += loss_weight
                 continue
-                # essentially just breaking before the last chunk if the labels are all pad values
+
             logits_ = self.net(
                 chunk,
                 mems=mems,
                 return_mems=True,
-                return_intermediates=True,
                 mask=mask,
                 **kwargs
             )
-            logits = logits_[0]
+            #print("logits_ back: ", torch.cuda.memory_allocated()/1024**3)
+            del chunk, mask
+            #print("chunk mask del: ", torch.cuda.memory_allocated()/1024**3)
+            if device != "cpu":
+                torch.cuda.empty_cache()
+
+            logits = [logit.cpu() for logit in logits_[0]]
+            mems = logits_[1]
+            #del logits_
+            if device != "cpu":
+                torch.cuda.empty_cache()
+            #print("logits del: ", torch.cuda.memory_allocated()/1024**3)
             if logits_total is None:
-                logits_total = logits
+                logits_total = [logit for logit in logits]
             else:
                 for i in range(len(logits_total)):
                     logits_total[i] = torch.cat((logits_total[i], logits[i]), dim=1)
-
-            mems = logits_[1]
-            mems_total.append(mems)
+            if return_mems:
+                mems_total.append(mems)
 
             loss = None
+            chunk_labels = chunk_labels.to(device)
             for i in range(self.outputs):
                 if torch.all(chunk_labels[:, :, i].long()==self.pad_value[i]):
                     continue
-                # get first indexes before padding starts
                 loss_i = F.cross_entropy(
-                    rearrange(logits[i], 'b n c -> b c n'),
+                    rearrange(logits[i], 'b n c -> b c n').to(device),
                     chunk_labels[:, :, i].long(),
                     ignore_index=int(self.pad_value[i])
                 )
@@ -191,15 +205,22 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                         loss = loss_i
                     else:
                         loss = loss + loss_i
+            del logits, chunk_labels
+            #print("logits, chunk label  del: ", torch.cuda.memory_allocated()/1024**3)
+            if device != "cpu":
+                torch.cuda.empty_cache()
+
             if loss is None:
                 padding_adjustment += loss_weight
                 continue
             total_loss = total_loss + loss * loss_weight
+
         if 0 < padding_adjustment < 1:
             total_loss = total_loss / (1 - padding_adjustment)
         if padding_adjustment == 1:
-            total_loss = torch.Tensor([0]).to(x.device)
+            total_loss = torch.tensor([0.0], requires_grad=True).to(x.device)
         if not return_outputs:
             return total_loss
-
+        if not return_mems:
+            return total_loss, logits_total
         return total_loss, (logits_total, mems_total)

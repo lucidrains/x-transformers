@@ -93,8 +93,9 @@ class MultiIOTransformerWrapper(nn.Module):
                                                                 'dimension since having concat_emb_dim means that ' \
                                                                 'the model dimension is added to the embedding '
                     self.pre_attn_layers_map = nn.Identity()
-
-            self.concat_emb_dim = concat_emb_dim if input_attn_layers else False
+            else:
+                self.pre_attn_layers_map = nn.Identity()
+            self.concat_emb_dim = concat_emb_dim
 
             self.l2norm_embed = l2norm_embed
 
@@ -130,15 +131,21 @@ class MultiIOTransformerWrapper(nn.Module):
             # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
 
             self.emb_frac_gradient = emb_frac_gradient
-            if self.pre_attn_layers is not None:
+            if self.multi_input is not None:
                 self.post_emb_norm = torch.nn.ModuleList(
                     [LayerNorm(self.emb_dim[i]) if post_emb_norm else nn.Identity() for i in
                      range(len(self.emb_dim))])
                 self.emb_dropout = torch.nn.ModuleList([nn.Dropout(emb_dropout) for _ in range(len(self.emb_dim))])
-                self.project_emb = torch.nn.ModuleList([
-                    nn.Linear(self.emb_dim[i], dim) if self.emb_dim[i] != self.pre_attn_layers[i].dim else nn.Identity()
-                    for i in
-                    range(len(self.emb_dim))])
+                if self.pre_attn_layers:
+                    self.project_emb = torch.nn.ModuleList([
+                        nn.Linear(self.emb_dim[i], dim) if self.emb_dim[i] != self.pre_attn_layers[i].dim else nn.Identity()
+                        for i in
+                        range(len(self.emb_dim))])
+                else:
+                    self.project_emb = torch.nn.ModuleList([
+                        nn.Identity()
+                        for i in
+                        range(len(self.emb_dim))])
             else:
                 self.post_emb_norm = LayerNorm(self.emb_dim) if post_emb_norm else nn.Identity()
                 self.emb_dropout = nn.Dropout(emb_dropout)
@@ -358,7 +365,6 @@ class MultiIOTransformerWrapper(nn.Module):
                         mems_pre_out.append(new_mems)
 
                     intermediates_pre[i].mems = new_mems
-                    intermediates_pre[i].mems = hiddens
 
             """
             Running the main attention layers of the model
@@ -407,7 +413,6 @@ class MultiIOTransformerWrapper(nn.Module):
             if not return_intermediates:
                 mems_model = new_mems
             intermediates_model.mems = new_mems
-            intermediates_model.mems = hiddens
 
         """
         Output processing
@@ -469,7 +474,6 @@ class MultiIOTransformerWrapper(nn.Module):
                                 return out, (mems_model, new_mems)
 
                         intermediates_post[i].mems = new_mems
-                        intermediates_post[i].mems = hiddens
 
                 if return_intermediates:
                     if self.pre_attn_layers is not None:
