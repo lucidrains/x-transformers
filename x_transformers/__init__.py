@@ -5,6 +5,8 @@ from x_transformers.x_transformers import (
     PrefixDecoder,
     CrossAttender,
     Attention,
+    FeedForward,
+    RMSNorm,
     TransformerWrapper,
     ViTransformerWrapper
 )
