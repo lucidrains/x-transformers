@@ -1059,7 +1059,6 @@ class AttentionLayers(Module):
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
 
         self.dim = dim
-        self.depth = depth
         self.causal = causal
         self.layers = ModuleList([])
 
@@ -1178,6 +1177,11 @@ class AttentionLayers(Module):
         assert all([i < len(self.layer_types) for i in self.layers_execute_order])
 
         self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
+
+        # set the depth
+
+        depth = default(depth, len(self.layers_execute_order))
+        self.depth = depth
 
         # stochastic depth
 
