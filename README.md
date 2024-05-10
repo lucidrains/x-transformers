@@ -674,6 +674,55 @@ model = TransformerWrapper(
 )
 ```
 
+### Weight-tied Layers
+
+In the early days of the cambrian explosion of BERT, a paper explored weight tying all the layers, the model named <a href="https://arxiv.org/abs/1909.11942">ALBERT</a>. You can use it by setting `weight_tie_layers = True`
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Encoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Encoder(
+        dim = 512,
+        depth = 12,
+        weight_tie_layers = True   # set this to True to weight tie all the layers
+    )
+)
+```
+
+If you wish to do something more sophisticated, say 3 layers, with each layer recurrent 4 times before onto the next, that is possible as well.
+
+```python
+import torch
+from x_transformers import TransformerWrapper, Decoder
+
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        custom_layers = (
+            'a', 'f',        # 3 sets of attention and feedforward
+            'a', 'f',
+            'a', 'f'
+        ),
+        layers_execute_order = (
+            *((0, 1) * 4),   # each done 4 times before sequentially passed forward, but you can probably imagine some more interesting configurations...
+            *((2, 3) * 4),
+            *((4, 5) * 4),
+        )
+    )
+)
+
+x = torch.randint(0, 256, (1, 1024))
+
+model(x) # (1, 1024, 20000)
+
+```
+
 ### Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View
 
 <img src="./images/macaron-1.png"></img>

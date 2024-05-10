@@ -1001,7 +1001,7 @@ class AttentionLayers(Module):
     def __init__(
         self,
         dim,
-        depth,
+        depth = None,
         heads = 8,
         causal = False,
         cross_attend = False,
@@ -1053,6 +1053,8 @@ class AttentionLayers(Module):
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
         cross_attn_kwargs, kwargs = groupby_prefix_and_trim('cross_attn_', kwargs)
+
+        assert len(kwargs) == 0, f'unrecognized kwargs passed in {kwargs.keys()}'
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
 
@@ -1138,9 +1140,12 @@ class AttentionLayers(Module):
 
         # setup weight tying, which is a special case of `layer_execute_order`
 
+        assert not (exists(layers_execute_order) and exists(custom_layers) and exists(depth)), 'depth should not be passed in if using custom layers and custom layer execution order'
+
         assert not (weight_tie_layers and any([*map(exists, (custom_layers, par_ratio, sandwich_coef))]))
 
         if weight_tie_layers:
+            assert exists(depth), 'depth must be passed in with `weight_tie_layers` = True'
             assert not exists(layers_execute_order)
             layers_execute_order = tuple(range(len(default_block))) * depth
             depth = 1
@@ -1164,6 +1169,7 @@ class AttentionLayers(Module):
             assert sandwich_coef > 0 and sandwich_coef <= depth, 'sandwich coefficient should be less than the depth'
             layer_types = ('a',) * sandwich_coef + default_block * (depth - sandwich_coef) + ('f',) * sandwich_coef
         else:
+            assert exists(depth), '`depth` must be passed in for `Decoder` or `Encoder`'
             layer_types = default_block * depth
 
         self.layer_types = layer_types
