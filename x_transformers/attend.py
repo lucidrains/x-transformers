@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from functools import partial
-from typing import Optional, Tuple
+from typing import Tuple
 
 import torch
 from torch import nn, einsum, Tensor
@@ -16,10 +18,10 @@ from einops import rearrange, repeat
 
 @dataclass
 class Intermediates:
-    qk_similarities: Optional[Tensor] = None
-    pre_softmax_attn: Optional[Tensor] = None
-    post_softmax_attn: Optional[Tensor] = None
-    cached_kv: Optional[Tuple[Tensor, Tensor]] = None
+    qk_similarities:    Tensor | None = None
+    pre_softmax_attn:   Tensor | None = None
+    post_softmax_attn:  Tensor | None = None
+    cached_kv:          Tuple[Tensor, Tensor] | None = None
 
     def to_tuple(self):
         return (self.qk_similarities, self.pre_softmax_attn, self.post_softmax_attn)

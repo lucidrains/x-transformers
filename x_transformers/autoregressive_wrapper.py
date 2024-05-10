@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from math import ceil, log
-from typing import Optional, Union, Tuple, Callable
+from typing import Tuple, Callable
 
 import torch
 from torch import nn, Tensor
@@ -133,12 +135,12 @@ class AutoregressiveWrapper(Module):
         seq_len,
         eos_token = None,
         temperature = 1.,
-        prompt_lens: Optional[Tensor] = None,
+        prompt_lens: Tensor | None = None,
         filter_logits_fn: Callable = top_k,
         restrict_to_max_seq_len = True,
-        amateur_model: Optional[Union[Module, Tuple[Module]]] = None,
+        amateur_model: Module | Tuple[Module] | None = None,
         filter_kwargs: dict = dict(),
-        contrastive_decode_kwargs: Union[dict, Tuple[dict]] = dict(
+        contrastive_decode_kwargs: dict | Tuple[dict] = dict(
             beta = 0.5,
             alpha = 0.1
         ),
