@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from random import random
 from packaging import version
@@ -11,7 +13,7 @@ from torch.cuda.amp import autocast
 from functools import partial, wraps
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Callable, Optional, Union
+from typing import List, Dict, Tuple, Callable
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
@@ -25,13 +27,13 @@ DEFAULT_DIM_HEAD = 64
 
 @dataclass
 class LayerIntermediates:
-    hiddens:            Optional[List[Tensor]] = None   # all hiddens, before the final norm (in pre-norm architecture)
-    last_hidden:        Optional[Tensor] = None         # very last hidden after all attention layers, after the final norm
-    attn_intermediates: Optional[List[Intermediates]] = None
-    layer_hiddens:      Optional[List[Tensor]] = None
-    attn_z_loss:        Optional[Tensor] = None
-    mems:               Optional[Tensor] = None
-    memory_tokens:      Optional[Tensor] = None
+    hiddens:            List[Tensor] | None = None   # all hiddens, before the final norm (in pre-norm architecture)
+    last_hidden:        Tensor | None = None         # very last hidden after all attention layers, after the final norm
+    attn_intermediates: List[Intermediates] | None = None
+    layer_hiddens:      List[Tensor] | None = None
+    attn_z_loss:        Tensor | None = None
+    mems:               Tensor | None = None
+    memory_tokens:      Tensor | None = None
 
 # helpers
 
@@ -817,7 +819,7 @@ class Attention(Module):
         mem = None,
         mem_mask = None,
         return_intermediates = False,
-        cache: Optional[Intermediates] = None,
+        cache: Intermediates | None = None,
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context)
 
@@ -1024,11 +1026,11 @@ class AttentionLayers(Module):
         rotary_interpolation_factor = 1.,
         rotary_xpos_scale_base = 512,
         rotary_base_rescale_factor = 1.,
-        custom_layers = None,
+        weight_tie_layers = False,
+        custom_layers: Tuple[str] | None = None,
+        layers_execute_order: Tuple[int] | None = None,
         sandwich_coef = None,
         par_ratio = None,
-        weight_tie_layers = False,   # Albert - https://arxiv.org/abs/1909.11942
-        layers_execute_order = None, # generalizes weight tying, can do arbitrary layer execution orders
         residual_attn = False,
         cross_residual_attn = False,
         macaron = False,
@@ -1248,8 +1250,8 @@ class AttentionLayers(Module):
         self_attn_kv_mask = None,
         mems = None,
         mem_masks = None,
-        seq_start_pos: Optional[Tensor] = None,
-        cache: Optional[LayerIntermediates] = None,
+        seq_start_pos: Tensor | None = None,
+        cache: LayerIntermediates | None = None,
         cache_age = 1,
         return_hiddens = False,
         rotary_pos_emb = None
@@ -1641,7 +1643,7 @@ class TransformerWrapper(Module):
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
         seq_start_pos = None,
-        cache: Optional[LayerIntermediates] = None,
+        cache: LayerIntermediates | None = None,
         **kwargs
     ):
         b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
