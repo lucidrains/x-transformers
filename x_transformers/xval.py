@@ -176,11 +176,11 @@ class XValTransformerWrapper(nn.Module):
 
         if return_mems:
             hiddens = intermediates.hiddens
-            new_mems = list(map(lambda t: t[..., -self.max_mem_len:, :].detach(), hiddens))
+            new_mems = tuple(t[..., -self.max_mem_len:, :].detach() for t in hiddens)
             return out, new_mems
 
         if return_attn:
-            attn_maps = list(map(lambda t: t.post_softmax_attn, intermediates.attn_intermediates))
+            attn_maps = tuple(t.post_softmax_attn for t in intermediates.attn_intermediates)
             return out, attn_maps
 
         return out

@@ -142,7 +142,7 @@ def init_zero_(layer):
 # keyword argument helpers
 
 def pick_and_pop(keys, d):
-    values = list(map(lambda key: d.pop(key), keys))
+    values = tuple(d.pop(key) for key in  keys)
     return dict(zip(keys, values))
 
 def group_dict_by_key(cond, d):
@@ -151,7 +151,7 @@ def group_dict_by_key(cond, d):
         match = bool(cond(key))
         ind = int(not match)
         return_val[ind][key] = d[key]
-    return (*return_val,)
+    return tuple(return_val)
 
 def string_begins_with(prefix, str):
     return str.startswith(prefix)
@@ -161,7 +161,8 @@ def group_by_key_prefix(prefix, d):
 
 def groupby_prefix_and_trim(prefix, d):
     kwargs_with_prefix, kwargs = group_dict_by_key(partial(string_begins_with, prefix), d)
-    kwargs_without_prefix = dict(map(lambda x: (x[0][len(prefix):], x[1]), tuple(kwargs_with_prefix.items())))
+    prefix_len = len(prefix)
+    kwargs_without_prefix = {key[prefix_len:]: value for key, value in kwargs_with_prefix.items()}
     return kwargs_without_prefix, kwargs
 
 # structured dropout, more effective than traditional attention dropouts
@@ -457,7 +458,6 @@ class RotaryEmbedding(Module):
 
         return freqs, scale
 
-
 def rotate_half(x):
     x = rearrange(x, '... (j d) -> ... j d', j = 2)
     x1, x2 = x.unbind(dim = -2)
@@ -574,8 +574,8 @@ class GRUGating(Module):
 def shift(t, amount, mask = None):
     if amount == 0:
         return t
-    else:
-        amount = min(amount, t.shape[1])
+
+    amount = min(amount, t.shape[1])
 
     if exists(mask):
         t = t.masked_fill(~mask[..., None], 0.)
@@ -598,6 +598,23 @@ class ShiftTokens(Module):
         segments_to_shift = list(map(lambda args: shift(*args, mask = mask), zip(segments_to_shift, shifts)))
         x = torch.cat((*segments_to_shift, *rest), dim = -1)
         return self.fn(x, **kwargs)
+
+# post branch operator
+
+class LayerScale(Module):
+    def __init__(self, fn: Module, dim, init_value = 0.):
+        super().__init__()
+        self.fn = fn
+        self.gamma = nn.Parameter(torch.ones(dim) * init_value)
+
+    def forward(self, x, **kwargs):
+        out = self.fn(x, **kwargs)
+
+        if isinstance(out, Tensor):
+            return out * self.gamma
+
+        out, *rest = out
+        return out * self.gamma, *rest
 
 # feedforward
 
@@ -1047,6 +1064,8 @@ class AttentionLayers(Module):
         layer_dropout = 0.,
         cross_attn_tokens_dropout = 0.,
         disable_abs_pos_emb = None,
+        use_layerscale = False,
+        layerscale_init_value = 0.,
         **kwargs
     ):
         super().__init__()
@@ -1110,6 +1129,8 @@ class AttentionLayers(Module):
 
         self.cross_attend = cross_attend
 
+        # determine norm
+
         assert (int(use_scalenorm) + int(use_rmsnorm) + int(use_simple_rmsnorm)) <= 1, 'you can only use either scalenorm, rmsnorm, or simple rmsnorm'
 
         if use_scalenorm:
@@ -1123,6 +1144,8 @@ class AttentionLayers(Module):
 
         norm_fn = partial(norm_class, dim)
 
+        # determine default block layer type order
+
         if cross_attend and not only_cross:
             default_block = ('a', 'c', 'f')
         elif cross_attend and only_cross:
@@ -1132,6 +1155,13 @@ class AttentionLayers(Module):
 
         if macaron:
             default_block = ('f',) + default_block
+
+        # determine post branch wrapper
+
+        post_branch_fn = None
+
+        if use_layerscale:
+            post_branch_fn = partial(LayerScale, dim = dim, init_value = layerscale_init_value)
 
         # zero init
 
@@ -1220,6 +1250,9 @@ class AttentionLayers(Module):
                 shift_range_upper = layer_shift_tokens + 1
                 shift_range_lower = -layer_shift_tokens if not causal else 0
                 layer = ShiftTokens(range(shift_range_lower, shift_range_upper), layer)
+
+            if exists(post_branch_fn):
+                layer = post_branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)

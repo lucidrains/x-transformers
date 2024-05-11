@@ -2120,6 +2120,17 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
+@article{Wang2022DeepNetST,
+    title   = {DeepNet: Scaling Transformers to 1, 000 Layers},
+    author  = {Hongyu Wang and Shuming Ma and Li Dong and Shaohan Huang and Dongdong Zhang and Furu Wei},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2203.00555},
+    url     = {https://api.semanticscholar.org/CorpusID:247187905}
+}
+```
+
+```bibtex
 @article{Rafailov2023DirectPO,
     title   = {Direct Preference Optimization: Your Language Model is Secretly a Reward Model},
     author  = {Rafael Rafailov and Archit Sharma and Eric Mitchell and Stefano Ermon and Christopher D. Manning and Chelsea Finn},
