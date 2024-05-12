@@ -444,24 +444,27 @@ class RotaryEmbedding(Module):
 
     @autocast(enabled = False)
     def forward(self, t):
-        max_pos = t.max()+1
+        max_pos = t.max() + 1
 
         freqs = torch.einsum('i , j -> i j', t.type_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
-        freqs = torch.cat((freqs, freqs), dim = -1)
+        freqs = torch.stack((freqs, freqs), dim = -1)
+        freqs = rearrange(freqs, '... d r -> ... (d r)')
 
         if not exists(self.scale):
             return freqs, 1.
 
         power = (t - (max_pos // 2)) / self.scale_base
         scale = self.scale ** rearrange(power, 'n -> n 1')
-        scale = torch.cat((scale, scale), dim = -1)
+        scale = torch.stack((scale, scale), dim = -1)
+        scale = rearrange(scale, '... d r -> ... (d r)')
 
         return freqs, scale
 
 def rotate_half(x):
-    x = rearrange(x, '... (j d) -> ... j d', j = 2)
-    x1, x2 = x.unbind(dim = -2)
-    return torch.cat((-x2, x1), dim = -1)
+    x = rearrange(x, '... (d r) -> ... d r', r = 2)
+    x1, x2 = x.unbind(dim = -1)
+    x = torch.stack((-x2, x1), dim = -1)
+    return rearrange(x, '... d r -> ... (d r)')
 
 @autocast(enabled = False)
 def apply_rotary_pos_emb(t, freqs, scale = 1):
