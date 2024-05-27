@@ -693,7 +693,7 @@ model = TransformerWrapper(
 )
 ```
 
-If you wish to do something more sophisticated, say 3 layers, with each layer recurrent 4 times before onto the next, that is possible as well. Be aware the `layers_execute_order` is 0-indexed
+If you wish to do something more sophisticated, say 3 layers, with each layer recurrent 4 times before onto the next (similar to <a href="https://arxiv.org/abs/2405.15071">this paper</a>), that is possible as well. Be aware the `layers_execute_order` is 0-indexed
 
 ```python
 import torch
