@@ -1403,8 +1403,9 @@ model = ContinuousTransformerWrapper(
 )
 
 x = torch.randn((1, 1024, 32))
+mask = torch.ones(1, 1024).bool()
 
-model(x) # (1, 1024, 100)
+model(x, mask = mask) # (1, 1024, 100)
 ```
 
 You can also train a transformer that accepts continuous values autoregressively easily, in the same scheme as done successfully in <a href="https://arxiv.org/abs/2112.05329">this paper</a>
