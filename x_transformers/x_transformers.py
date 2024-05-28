@@ -468,7 +468,8 @@ def rotate_half(x):
 
 @autocast(enabled = False)
 def apply_rotary_pos_emb(t, freqs, scale = 1):
-    rot_dim, seq_len = freqs.shape[-1], t.shape[-2]
+    rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
+
     freqs = freqs[-seq_len:, :]
     scale = scale[-seq_len:, :] if isinstance(scale, torch.Tensor) else scale
 
@@ -478,7 +479,9 @@ def apply_rotary_pos_emb(t, freqs, scale = 1):
     # partial rotary embeddings, Wang et al. GPT-J
     t, t_unrotated = t[..., :rot_dim], t[..., rot_dim:]
     t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    return torch.cat((t, t_unrotated), dim = -1)
+    out = torch.cat((t, t_unrotated), dim = -1)
+
+    return out.type(orig_dtype)
 
 # norms
 
