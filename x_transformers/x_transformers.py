@@ -722,6 +722,7 @@ class Attention(Module):
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
+        logit_softclamp_value = None,
         onnxable = False
     ):
         super().__init__()
@@ -801,6 +802,7 @@ class Attention(Module):
             scale = qk_norm_scale if qk_norm else self.scale,
             add_zero_kv = add_zero_kv,
             flash = flash,
+            logit_softclamp_value = logit_softclamp_value,
             onnxable = onnxable
         )
 

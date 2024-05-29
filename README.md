@@ -2142,4 +2142,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{xAI2024Grok,
+    author = {xAI},
+    title  = {Grok},
+    year   = {2024},
+    publisher = {GitHub},
+    journal = {GitHub repository},
+    howpublished = {\url{https://github.com/xai-org/grok-1}},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

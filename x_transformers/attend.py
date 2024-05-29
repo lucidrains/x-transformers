@@ -37,6 +37,9 @@ def default(val, d):
 def compact(arr):
     return [*filter(exists, arr)]
 
+def softclamp(t, value):
+    return (t / value).tanh() * value
+
 def once(fn):
     called = False
     @wraps(fn)
@@ -76,6 +79,7 @@ class Attend(nn.Module):
         scale = None,
         qk_norm = False,
         flash = False,
+        logit_softclamp_value = None,
         add_zero_kv = False,
         onnxable = False,
         sdp_kwargs: dict = dict(
@@ -113,6 +117,14 @@ class Attend(nn.Module):
         # in case this helps controlling outliers, proposed by https://www.evanmiller.org/attention-is-off-by-one.html
 
         self.add_zero_kv = add_zero_kv
+
+        # soft clamp attention logit value
+
+        if exists(logit_softclamp_value):
+            assert not flash, 'flash attention not compatible with logit softclamp value yet'
+            assert logit_softclamp_value > 0.
+
+        self.logit_softclamp_value = logit_softclamp_value
 
         # flash attention
 
@@ -276,38 +288,41 @@ class Attend(nn.Module):
 
         kv_einsum_eq = 'b j d' if k.ndim == 3 else 'b h j d'
 
-        dots = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+        sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
 
         if exists(prev_attn):
-            dots = dots + prev_attn
+            sim = sim + prev_attn
 
-        qk_similarities = dots.clone()
+        qk_similarities = sim.clone()
 
         if self.talking_heads:
-            dots = self.pre_softmax_talking_heads(dots)
+            sim = self.pre_softmax_talking_heads(sim)
 
         if exists(attn_bias):
-            dots = dots + attn_bias
+            sim = sim + attn_bias
 
-        i, j, dtype = *dots.shape[-2:], dots.dtype
+        i, j, dtype = *sim.shape[-2:], sim.dtype
 
-        mask_value = -torch.finfo(dots.dtype).max
+        mask_value = -torch.finfo(sim.dtype).max
 
         if exists(self.sparse_topk) and self.sparse_topk < j:
-            top_values, _ = dots.topk(self.sparse_topk, dim = -1)
-            sparse_topk_mask = dots < top_values[..., -1:]
+            top_values, _ = sim.topk(self.sparse_topk, dim = -1)
+            sparse_topk_mask = sim < top_values[..., -1:]
             mask = (mask & sparse_topk_mask) if exists(mask) else sparse_topk_mask
 
         if exists(mask):
-            dots = dots.masked_fill(~mask, mask_value)
+            sim = sim.masked_fill(~mask, mask_value)
 
         if causal:
             causal_mask = self.create_causal_mask(i, j, device = device)
-            dots = dots.masked_fill(causal_mask, mask_value)
+            sim = sim.masked_fill(causal_mask, mask_value)
 
-        pre_softmax_attn = dots.clone()
+        pre_softmax_attn = sim.clone()
 
-        attn = self.attn_fn(dots, dim = -1)
+        if exists(self.logit_softclamp_value):
+            sim = softclamp(sim, self.logit_softclamp_value)
+
+        attn = self.attn_fn(sim, dim = -1)
         attn = attn.type(dtype)
 
         post_softmax_attn = attn.clone()
