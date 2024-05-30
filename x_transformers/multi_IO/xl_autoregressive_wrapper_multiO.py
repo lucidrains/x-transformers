@@ -9,10 +9,14 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             pad_value: Tensor,
             outputs: int,
             ignore_index=-100,
+            weighted_loss: bool = False,
     ):
         super().__init__()
         self.pad_value = pad_value
         self.ignore_index = ignore_index
+
+        if not weighted_loss:
+            self.weighted_loss = [1] * outputs
 
         self.outputs = outputs
         self.net = net
@@ -133,9 +137,12 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
             mems=None,
             return_outputs=False,
             return_mems=False,
+            weighted_loss=None,
             **kwargs
     ):
         self.pad_value = self.pad_value.to(x.device)
+        if weighted_loss is None:
+            weighted_loss = self.weighted_loss
         if return_mems:
             return_outputs=True
         ignore_index, max_seq_len = self.ignore_index, self.max_seq_len
@@ -154,9 +161,7 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
         if return_mems:
             mems_total = []
         padding_adjustment = 0
-        #print("before chunk loop: ", torch.cuda.memory_allocated()/1024**3)
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
-            #print("right before chunks used: ", torch.cuda.memory_allocated()/1024**3)
             chunk = chunk.to(device)
             mask = torch.all(chunk == self.pad_value, dim=2)
             if torch.all(mask, dim=1).all():
@@ -170,18 +175,14 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 mask=mask,
                 **kwargs
             )
-            #print("logits_ back: ", torch.cuda.memory_allocated()/1024**3)
             del chunk, mask
-            #print("chunk mask del: ", torch.cuda.memory_allocated()/1024**3)
             if device != "cpu":
                 torch.cuda.empty_cache()
 
             logits = [logit.cpu() for logit in logits_[0]]
             mems = logits_[1]
-            #del logits_
             if device != "cpu":
                 torch.cuda.empty_cache()
-            #print("logits del: ", torch.cuda.memory_allocated()/1024**3)
             if logits_total is None:
                 logits_total = [logit for logit in logits]
             else:
@@ -202,11 +203,10 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
                 )
                 if not loss_i.isnan():
                     if loss is None:
-                        loss = loss_i
+                        loss = loss_i * weighted_loss[i]
                     else:
-                        loss = loss + loss_i
+                        loss = loss + loss_i * weighted_loss[i]
             del logits, chunk_labels
-            #print("logits, chunk label  del: ", torch.cuda.memory_allocated()/1024**3)
             if device != "cpu":
                 torch.cuda.empty_cache()
 

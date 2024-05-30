@@ -7,10 +7,11 @@ class MultiOAutoregressiveWrapper(Module):
             self,
             net,
             pad_value: Tensor,
+            weighted_loss: bool = False,
             outputs: int = None,
             ignore_index=-100,
             mask_prob=0.,
-            add_attn_z_loss=False
+            add_attn_z_loss=False,
     ):
         super().__init__()
         self.pad_value = pad_value
@@ -18,6 +19,9 @@ class MultiOAutoregressiveWrapper(Module):
         self.outputs = outputs
         self.max_seq_len = net.max_seq_len
         self.net = net
+        if not weighted_loss:
+            self.weighted_loss = [1] * self.outputs
+
         if type(net) == MultiIOTransformerWrapper:
             self.outputs = len(net.logits_dim)
             net.autoregressive = True
@@ -157,7 +161,9 @@ class MultiOAutoregressiveWrapper(Module):
 
         return out
 
-    def forward(self, x, return_outputs=False, **kwargs):
+    def forward(self, x, weighted_loss = None, return_outputs=False, **kwargs):
+        if weighted_loss is None:
+            weighted_loss = self.weighted_loss
         self.pad_value = self.pad_value.to(x.device)
         seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
         inp, target = x[:, :-1], x[:, 1:]
@@ -190,9 +196,9 @@ class MultiOAutoregressiveWrapper(Module):
                 if self.net.post_attn_layers is not None:
                     loss_i = loss_i + cache[len(cache) - 1][i].attn_z_loss
             if loss is None:
-                loss = loss_i
+                loss = loss_i * weighted_loss[i]
             else:
-                loss = loss + loss_i
+                loss = loss + loss_i * weighted_loss[i]
         if add_attn_z_loss and self.net.post_attn_layers is None:
             loss = loss + cache[len(cache) - 1].attn_z_loss
         if not return_outputs:
