@@ -22,6 +22,7 @@ class Intermediates:
     pre_softmax_attn:   Tensor | None = None
     post_softmax_attn:  Tensor | None = None
     cached_kv:          Tuple[Tensor, Tensor] | None = None
+    layer_type:         str | None = None
 
     def to_tuple(self):
         return (self.qk_similarities, self.pre_softmax_attn, self.post_softmax_attn)

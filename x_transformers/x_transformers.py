@@ -1410,6 +1410,7 @@ class AttentionLayers(Module):
             x = residual_fn(out, inner_residual)
 
             if layer_type in ('a', 'c') and return_hiddens:
+                inter.layer_type = layer_type
                 intermediates.append(inter)
 
             if layer_type == 'a' and self.residual_attn:
