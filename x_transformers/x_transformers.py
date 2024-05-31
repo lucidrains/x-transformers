@@ -868,7 +868,7 @@ class Attention(Module):
 
         k, v, r = map(lambda t: maybe(rearrange)(t, 'b n (h d) -> b h n d', h = kv_h), (k, v, r))
 
-        if exists(cache) and not has_context:
+        if exists(cache):
             ck, cv = cache.cached_kv
 
             if exists(mem):
@@ -1337,6 +1337,9 @@ class AttentionLayers(Module):
 
         if exists(cache):
             assert not self.training and self.causal and not any([*map(exists, (mask, attn_mask))])
+
+            if exists(context):
+                context = context[:, :0]
 
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
