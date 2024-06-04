@@ -308,28 +308,52 @@ class CoPE(Module):
     """
     Appendix B of https://arxiv.org/abs/2405.18719
     """
-    def __init__ (self, dim, max_pos):
+    def __init__ (
+        self,
+        dim,
+        max_pos,
+        soft_onehot = True,
+        reverse = True
+    ):
         super () . __init__ ()
+        self.reverse = reverse
         self.max_pos = max_pos
         self.pos_emb = nn.Parameter(torch.zeros(max_pos, dim))
 
-    def forward(self, query, attn_logits):
+        self.soft_onehot = soft_onehot
+
+        if soft_onehot:
+            self.register_buffer('positions', torch.arange(max_pos))
+
+    def forward(self, query, attn_logits, temp = 5e-2):
         # compute positions
 
         gates = attn_logits.sigmoid()
-        pos = gates.flip(-1).cumsum(dim = -1).flip(-1)
+
+        if self.reverse:
+            pos = gates.flip(-1).cumsum(dim = -1).flip(-1)
+        else:
+            pos = gates.cumsum(dim = -1)
+
         pos = pos.clamp(max = self.max_pos - 1)
 
-        # interpolate from integer positions
-
-        pos_ceil = pos.ceil().long()
-        pos_floor = pos.floor().long()
         logits_int = einsum('b h n d, p d -> b h n p', query, self.pos_emb)
-        logits_ceil = logits_int.gather(-1, pos_ceil)
-        logits_floor = logits_int.gather(-1, pos_floor)
 
-        w = pos - pos_floor
-        return logits_ceil * w + logits_floor * (1 - w)
+        if self.soft_onehot:
+            diff_pos = (pos[..., None] - self.positions).abs()
+            soft_onehot_pos = F.softmax(-diff_pos / temp, dim = -1)
+            cope_pos_emb = einsum('b h i j p, b h i p -> b h i j', soft_onehot_pos, logits_int)
+        else:
+            # interpolate from integer positions
+            pos_ceil = pos.ceil().long()
+            pos_floor = pos.floor().long()
+            logits_ceil = logits_int.gather(-1, pos_ceil)
+            logits_floor = logits_int.gather(-1, pos_floor)
+
+            w = pos - pos_floor
+            cope_pos_emb = logits_ceil * w + logits_floor * (1 - w)
+
+        return cope_pos_emb
 
 class DynamicPositionBias(Module):
     def __init__(self, dim, *, heads, depth, log_distance = False, norm = False):
