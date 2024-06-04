@@ -314,21 +314,29 @@ class CoPE(Module):
         heads,
         max_pos,
         soft_onehot = False,
-        talking_heads = False
+        talking_heads = False,
+        soft_onehot_temp = 5e-2
     ):
         super () . __init__ ()
         self.max_pos = max_pos
         self.pos_emb = nn.Parameter(torch.zeros(max_pos, dim))
 
-        self.maybe_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if talking_heads else nn.Identity()
+        self.talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if talking_heads else None
         self.soft_onehot = soft_onehot
+        self.soft_onehot_temp = soft_onehot_temp
 
         if soft_onehot:
             self.register_buffer('positions', torch.arange(max_pos))
 
-    def forward(self, query, attn_logits, temp = 5e-2):
+    def forward(self, query, attn_logits):
 
-        attn_logits = self.maybe_talking_heads(attn_logits)
+        if exists(self.talking_heads):
+            i, j = attn_logits.shape[-2:]
+            causal_mask = attn_logits.new_ones(i, j).triu_(j - i + 1).bool()
+
+            attn_logits = self.talking_heads(attn_logits)
+
+            attn_logits = attn_logits.masked_fill(causal_mask, -torch.finfo(attn_logits.dtype).max)
 
         # compute positions
 
@@ -341,7 +349,7 @@ class CoPE(Module):
 
         if self.soft_onehot:
             diff_pos = (pos[..., None] - self.positions).abs()
-            soft_onehot_pos = F.softmax(-diff_pos / temp, dim = -1)
+            soft_onehot_pos = F.softmax(-diff_pos / self.soft_onehot_temp, dim = -1)
             cope_pos_emb = einsum('b h i j p, b h i p -> b h i j', soft_onehot_pos, logits_int)
         else:
             # interpolate from integer positions
