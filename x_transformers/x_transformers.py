@@ -311,19 +311,25 @@ class CoPE(Module):
     def __init__ (
         self,
         dim,
+        heads,
         max_pos,
         soft_onehot = False,
+        talking_heads = False
     ):
         super () . __init__ ()
         self.max_pos = max_pos
         self.pos_emb = nn.Parameter(torch.zeros(max_pos, dim))
 
+        self.maybe_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if talking_heads else nn.Identity()
         self.soft_onehot = soft_onehot
 
         if soft_onehot:
             self.register_buffer('positions', torch.arange(max_pos))
 
     def forward(self, query, attn_logits, temp = 5e-2):
+
+        attn_logits = self.maybe_talking_heads(attn_logits)
+
         # compute positions
 
         gates = attn_logits.sigmoid()
@@ -770,6 +776,7 @@ class Attention(Module):
         use_cope = False,
         cope_max_pos = 16,
         cope_soft_onehot_pos = False,
+        cope_talking_heads = False,
         logit_softclamp_value = None,
         onnxable = False
     ):
@@ -853,7 +860,13 @@ class Attention(Module):
             assert causal, 'CoPE was designed for causal attention'
             assert not flash, 'CoPE is not flash attention compatible'
 
-            cope = CoPE(dim_head, cope_max_pos, soft_onehot = cope_soft_onehot_pos)
+            cope = CoPE(
+                dim = dim_head,
+                heads = heads,
+                max_pos = cope_max_pos,
+                talking_heads = cope_talking_heads,
+                soft_onehot = cope_soft_onehot_pos
+            )
 
         # attend class - includes core attention algorithm + talking heads
 
