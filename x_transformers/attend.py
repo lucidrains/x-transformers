@@ -4,6 +4,7 @@ from functools import partial
 from typing import Tuple
 
 import torch
+from torch.nn import Module
 from torch import nn, einsum, Tensor
 import torch.nn.functional as F
 
@@ -82,6 +83,7 @@ class Attend(nn.Module):
         flash = False,
         logit_softclamp_value = None,
         add_zero_kv = False,
+        cope = None,
         onnxable = False,
         sdp_kwargs: dict = dict(
             enable_flash = True,
@@ -126,6 +128,10 @@ class Attend(nn.Module):
             assert logit_softclamp_value > 0.
 
         self.logit_softclamp_value = logit_softclamp_value
+
+        # contextual positional encoding
+
+        self.cope = cope
 
         # flash attention
 
@@ -317,6 +323,9 @@ class Attend(nn.Module):
         if causal:
             causal_mask = self.create_causal_mask(i, j, device = device)
             sim = sim.masked_fill(causal_mask, mask_value)
+
+        if exists(self.cope):
+            sim = sim + self.cope(q, sim)
 
         pre_softmax_attn = sim.clone()
 

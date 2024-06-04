@@ -2153,4 +2153,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Golovneva2024ContextualPE,
+    title   = {Contextual Position Encoding: Learning to Count What's Important},
+    author  = {Olga Golovneva and Tianlu Wang and Jason Weston and Sainbayar Sukhbaatar},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:270094992}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
