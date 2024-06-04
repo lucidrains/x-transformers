@@ -37,3 +37,18 @@ def test_kv_cache():
     next_logits_with_cache = model(prompts, context = context, cache = cache)
 
     assert torch.allclose(next_logits[:, -1], next_logits_with_cache[:, -1], atol = 1e-6)
+
+def test_cope():
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 8,
+            depth = 2,
+            heads = 4,
+            attn_use_cope = True
+        )
+    )
+
+    seq = torch.randint(0, 256, (1, 1024))
+    logits = model(seq)

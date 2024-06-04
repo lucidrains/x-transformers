@@ -304,6 +304,33 @@ class RelativePositionBias(Module):
         bias = rearrange(values, 'i j h -> h i j')
         return bias * self.scale
 
+class CoPE(Module):
+    """
+    Appendix B of https://arxiv.org/abs/2405.18719
+    """
+    def __init__ (self, dim, max_pos):
+        super () . __init__ ()
+        self.max_pos = max_pos
+        self.pos_emb = nn.Parameter(torch.zeros(max_pos, dim))
+
+    def forward(self, query, attn_logits):
+        # compute positions
+
+        gates = attn_logits.sigmoid()
+        pos = gates.flip(-1).cumsum(dim = -1).flip(-1)
+        pos = pos.clamp(max = self.max_pos - 1)
+
+        # interpolate from integer positions
+
+        pos_ceil = pos.ceil().long()
+        pos_floor = pos.floor().long()
+        logits_int = einsum('b h n d, p d -> b h n p', query, self.pos_emb)
+        logits_ceil = logits_int.gather(-1, pos_ceil)
+        logits_floor = logits_int.gather(-1, pos_floor)
+
+        w = pos - pos_floor
+        return logits_ceil * w + logits_floor * (1 - w)
+
 class DynamicPositionBias(Module):
     def __init__(self, dim, *, heads, depth, log_distance = False, norm = False):
         super().__init__()
@@ -722,6 +749,8 @@ class Attention(Module):
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
+        use_cope = False,
+        cope_max_pos = 16,
         logit_softclamp_value = None,
         onnxable = False
     ):
@@ -753,13 +782,16 @@ class Attention(Module):
         self.to_k = nn.Linear(dim_kv, k_dim, bias = False)
 
         # shared key / values, for further memory savings during inference
+
         assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
         self.to_v = nn.Linear(dim_kv, v_dim, bias = False) if not shared_kv else None
 
         # relations projection from tp-attention
+
         self.to_r = nn.Linear(dim, v_dim, bias = False) if tensor_product else None
 
         # add GLU gating for aggregated values, from alphafold2
+
         self.to_v_gate = None
         if gate_values:
             self.to_v_gate = nn.Linear(dim, out_dim)
@@ -768,6 +800,7 @@ class Attention(Module):
             nn.init.constant_(self.to_v_gate.bias, 10)
 
         # add per head gating of the output values, from 'Attend to nothing' paper
+
         self.to_v_head_gate = None
         if gate_value_heads:
             self.to_v_head_gate = nn.Linear(dim, heads)
@@ -775,11 +808,13 @@ class Attention(Module):
             nn.init.constant_(self.to_v_head_gate.bias, 10)
 
         # cosine sim attention
+
         self.qk_norm = qk_norm
         self.qk_norm_groups = qk_norm_groups
         self.qk_norm_scale = qk_norm_scale
 
         # whether to use the rmsnorm (equivalent to cosine sim attention when scale is equal to 1) - https://arxiv.org/abs/2302.05442
+
         self.qk_norm_dim_scale = qk_norm_dim_scale
 
         self.qk_norm_q_scale = self.qk_norm_k_scale = 1
@@ -789,6 +824,17 @@ class Attention(Module):
 
         assert (not qk_norm) or divisible_by(dim_head, qk_norm_groups), 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
+
+        # contextual positional encoding
+        # https://arxiv.org/html/2405.18719v2
+
+        cope = None
+
+        if use_cope:
+            assert causal, 'CoPE was designed for causal attention'
+            assert not flash, 'CoPE is not flash attention compatible'
+
+            cope = CoPE(dim_head, cope_max_pos)
 
         # attend class - includes core attention algorithm + talking heads
 
@@ -803,31 +849,38 @@ class Attention(Module):
             add_zero_kv = add_zero_kv,
             flash = flash,
             logit_softclamp_value = logit_softclamp_value,
+            cope = cope,
             onnxable = onnxable
         )
 
         # head scaling
+
         self.head_scale = head_scale
         if head_scale:
             self.head_scale_params = nn.Parameter(torch.ones(1, heads, 1, 1))
 
         # explicit topk sparse attention
+
         self.sparse_topk = sparse_topk
 
         # add memory key / values
+
         self.num_mem_kv = num_mem_kv
         if num_mem_kv > 0:
             self.mem_k = nn.Parameter(torch.randn(kv_heads, num_mem_kv, dim_head))
             self.mem_v = nn.Parameter(torch.randn(kv_heads, num_mem_kv, dim_head))
 
         # attention on attention
+
         self.attn_on_attn = on_attn
         self.to_out = nn.Sequential(nn.Linear(out_dim, dim * 2, bias = False), nn.GLU()) if on_attn else nn.Linear(out_dim, dim, bias = False)
 
         # whether to rotate positions into values, for absolute positions in addition to relative
+
         self.rotary_embed_values = rotary_embed_values
 
         # init output projection 0
+
         if zero_init_output:
             init_zero_(self.to_out)
 
