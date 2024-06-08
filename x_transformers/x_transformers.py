@@ -1129,6 +1129,7 @@ class AttentionLayers(Module):
         use_scalenorm = False,
         use_rmsnorm = False,
         use_simple_rmsnorm = False,
+        no_pre_or_postnorm = False,
         alibi_pos_bias = False,
         alibi_num_heads = None,
         rel_pos_bias = False,
@@ -1358,9 +1359,14 @@ class AttentionLayers(Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
-            pre_branch_norm = norm_fn() if pre_norm else None
-            post_branch_norm = norm_fn() if sandwich_norm else None
-            post_main_norm = norm_fn() if not pre_norm else None
+            # all normalizations of the layer
+
+            pre_branch_norm = post_branch_norm = post_main_norm = None
+
+            if not no_pre_or_postnorm:
+                pre_branch_norm = norm_fn() if pre_norm else None
+                post_branch_norm = norm_fn() if sandwich_norm else None
+                post_main_norm = norm_fn() if not pre_norm else None
 
             norms = ModuleList([
                 pre_branch_norm,
