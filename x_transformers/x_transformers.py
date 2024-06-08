@@ -80,6 +80,13 @@ class equals():
     def __call__(self, x, *args, **kwargs):
         return x == self.val
 
+class Identity(Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def __call__(self, x, *args, **kwargs):
+        return x
+
 def Sequential(*modules):
     return nn.Sequential(*filter(exists, modules))
 
@@ -1129,6 +1136,7 @@ class AttentionLayers(Module):
         use_scalenorm = False,
         use_rmsnorm = False,
         use_simple_rmsnorm = False,
+        no_pre_or_postnorm = False,
         alibi_pos_bias = False,
         alibi_num_heads = None,
         rel_pos_bias = False,
@@ -1358,9 +1366,18 @@ class AttentionLayers(Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
-            pre_branch_norm = norm_fn() if pre_norm else None
-            post_branch_norm = norm_fn() if sandwich_norm else None
-            post_main_norm = norm_fn() if not pre_norm else None
+            # for the peri-layernorm config from https://arxiv.org/abs/2405.16039
+            # must be paired with qk norm
+
+            layer_norm_fn = norm_fn
+            if no_pre_or_postnorm:
+                layer_norm_fn = Identity
+
+            # all normalizations of the layer
+
+            pre_branch_norm = layer_norm_fn() if pre_norm else None
+            post_branch_norm = layer_norm_fn() if sandwich_norm else None
+            post_main_norm = layer_norm_fn() if not pre_norm else None
 
             norms = ModuleList([
                 pre_branch_norm,
