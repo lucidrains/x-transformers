@@ -199,6 +199,21 @@ class ReluSquared(Module):
     def forward(self, x):
         return F.relu(x) ** 2
 
+#DRA activation
+class DRA(Module):
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Parameter(torch.randn(1), requires_grad=True)
+        self.b = nn.Parameter(torch.randn(1), requires_grad=True)
+        self.c = nn.Parameter(torch.randn(1), requires_grad=True)
+        self.d = nn.Parameter(torch.randn(1), requires_grad=True)
+
+    def forward(self, x):
+        term1 = x + (self.b * torch.square(torch.sin(self.a * x)) / self.a)
+        term2 = self.c * torch.cos(self.a * x)
+        term3 = self.d * torch.tanh(self.b * x)
+        return term1 + term2 + term3
+
 # embedding
 
 class TokenEmbedding(Module):
@@ -710,6 +725,7 @@ class FeedForward(Module):
         glu_mult_bias = False,
         swish = False,
         relu_squared = False,
+        dra = False,
         post_act_ln = False,
         dropout = 0.,
         no_bias = False,
@@ -721,6 +737,8 @@ class FeedForward(Module):
 
         if relu_squared:
             activation = ReluSquared()
+        elif dra:
+            activation = DRA()
         elif swish:
             activation = nn.SiLU()
         else:
