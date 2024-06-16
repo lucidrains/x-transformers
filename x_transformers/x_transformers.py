@@ -607,6 +607,20 @@ class RMSNorm(Module):
     def forward(self, x):
         return F.normalize(x, dim = -1) * self.scale * self.g
 
+class AdaptiveRMSNorm(Module):
+    def __init__(self, dim, dim_condition = None):
+        super().__init__()
+        self.scale = dim ** 0.5
+        dim_condition = default(dim_condition, dim)
+
+        self.to_gamma = nn.Linear(dim_condition, dim, bias = False)
+        nn.init.zeros_(self.to_gamma.weight)
+
+    def forward(self, x, condition):
+        normed = F.normalize(x, dim = -1)
+        gamma = self.to_gamma(condition)
+        return normed * self.scale * (gamma + 1.)
+
 class SimpleRMSNorm(Module):
     def __init__(self, dim):
         super().__init__()
@@ -1145,6 +1159,7 @@ class AttentionLayers(Module):
         use_rmsnorm = False,
         use_simple_rmsnorm = False,
         use_adaptive_layernorm = False,
+        use_adaptive_rmsnorm = False,
         dim_condition = None,
         alibi_pos_bias = False,
         alibi_num_heads = None,
@@ -1250,7 +1265,7 @@ class AttentionLayers(Module):
 
         # determine norm
 
-        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_simple_rmsnorm, use_adaptive_layernorm) <= 1, 'you can only use either scalenorm, rmsnorm, or simple rmsnorm'
+        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, or simple rmsnorm'
 
         need_condition = False
         dim_condition = default(dim_condition, dim)
@@ -1264,6 +1279,9 @@ class AttentionLayers(Module):
         elif use_adaptive_layernorm:
             need_condition = True
             norm_class = partial(AdaptiveLayerNorm, dim_condition = dim_condition)
+        elif use_adaptive_rmsnorm:
+            need_condition = True
+            norm_class = partial(AdaptiveRMSNorm, dim_condition = dim_condition)
         else:
             norm_class = LayerNorm
 

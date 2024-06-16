@@ -91,3 +91,21 @@ def test_adaptive_layernorm():
     condition = torch.randn(1, 768)
 
     model(x, condition = condition)
+
+def test_adaptive_rmsnorm():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            dim_condition = 768,
+            depth = 12,
+            heads = 8,
+            use_adaptive_rmsnorm = True
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 1024))
+    condition = torch.randn(1, 768)
+
+    model(x, condition = condition)
