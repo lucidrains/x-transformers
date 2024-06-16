@@ -1,13 +1,34 @@
 import torch
 
 from x_transformers.x_transformers import (
+    XTransformer,
     TransformerWrapper,
     Decoder,
     AutoregressiveWrapper
 )
 
-def test_kv_cache():
+def test_readme():
+    model = XTransformer(
+        dim = 512,
+        enc_num_tokens = 256,
+        enc_depth = 6,
+        enc_heads = 8,
+        enc_max_seq_len = 1024,
+        dec_num_tokens = 256,
+        dec_depth = 6,
+        dec_heads = 8,
+        dec_max_seq_len = 1024,
+        tie_token_emb = True
+    )
 
+    src = torch.randint(0, 256, (1, 1024))
+    src_mask = torch.ones_like(src).bool()
+    tgt = torch.randint(0, 256, (1, 1024))
+
+    loss = model(src, tgt, mask = src_mask)
+    loss.backward()
+
+def test_kv_cache():
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
@@ -52,3 +73,21 @@ def test_cope():
 
     seq = torch.randint(0, 256, (1, 1024))
     logits = model(seq)
+
+def test_adaptive_layernorm():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            dim_condition = 768,
+            depth = 12,
+            heads = 8,
+            use_adaptive_layernorm = True
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 1024))
+    condition = torch.randn(1, 768)
+
+    model(x, condition = condition)

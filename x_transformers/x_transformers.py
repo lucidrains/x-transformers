@@ -574,6 +574,21 @@ class LayerNorm(Module):
 if version.parse(torch.__version__) >= version.parse('2.1.0'):
     LayerNorm = partial(nn.LayerNorm, bias = False)
 
+class AdaptiveLayerNorm(Module):
+    def __init__(self, dim, dim_condition = None):
+        super().__init__()
+        dim_condition = default(dim_condition, dim)
+
+        self.ln = nn.LayerNorm(dim, elementwise_affine = False)
+        self.to_gamma = nn.Linear(dim_condition, dim, bias = False)
+
+        nn.init.zeros_(self.to_gamma.weight)
+
+    def forward(self, x, condition):
+        normed = self.ln(x)
+        gamma = self.to_gamma(condition)
+        return normed * (gamma + 1.)
+
 class ScaleNorm(Module):
     def __init__(self, dim):
         super().__init__()
@@ -1129,7 +1144,8 @@ class AttentionLayers(Module):
         use_scalenorm = False,
         use_rmsnorm = False,
         use_simple_rmsnorm = False,
-        no_pre_or_postnorm = False,
+        use_adaptive_layernorm = False,
+        dim_condition = None,
         alibi_pos_bias = False,
         alibi_num_heads = None,
         rel_pos_bias = False,
@@ -1198,9 +1214,10 @@ class AttentionLayers(Module):
         # relative positional bias
 
         flash_attn = attn_kwargs.get('flash', False)
-        assert (int(rel_pos_bias) + int(dynamic_pos_bias) + int(alibi_pos_bias)) <= 1, 'you can only choose up to one of t5, alibi, or dynamic positional bias'
+        assert at_most_one_of(rel_pos_bias, dynamic_pos_bias, alibi_pos_bias), 'you can only choose up to one of t5, alibi, or dynamic positional bias'
 
         self.rel_pos = None
+
         if rel_pos_bias:
             assert not flash_attn, 'flash attention not compatible with t5 relative positional bias'
             self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance)
@@ -1212,7 +1229,7 @@ class AttentionLayers(Module):
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
             self.rel_pos = AlibiPositionalBias(heads = alibi_num_heads, total_heads = heads)
 
-        assert (int(sandwich_norm) + int(resi_dual)) <= 1, 'either sandwich norm or resiDual is selected, but not both'
+        assert at_most_one_of(sandwich_norm, resi_dual), 'either sandwich norm or resiDual is selected, but not both'
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
 
         if resi_dual:
@@ -1233,7 +1250,10 @@ class AttentionLayers(Module):
 
         # determine norm
 
-        assert (int(use_scalenorm) + int(use_rmsnorm) + int(use_simple_rmsnorm)) <= 1, 'you can only use either scalenorm, rmsnorm, or simple rmsnorm'
+        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_simple_rmsnorm, use_adaptive_layernorm) <= 1, 'you can only use either scalenorm, rmsnorm, or simple rmsnorm'
+
+        need_condition = False
+        dim_condition = default(dim_condition, dim)
 
         if use_scalenorm:
             norm_class = ScaleNorm
@@ -1241,10 +1261,16 @@ class AttentionLayers(Module):
             norm_class = RMSNorm
         elif use_simple_rmsnorm:
             norm_class = SimpleRMSNorm
+        elif use_adaptive_layernorm:
+            need_condition = True
+            norm_class = partial(AdaptiveLayerNorm, dim_condition = dim_condition)
         else:
             norm_class = LayerNorm
 
         norm_fn = partial(norm_class, dim)
+
+        self.need_condition = need_condition
+        self.dim_condition = dim_condition
 
         # determine default block layer type order
 
@@ -1361,12 +1387,9 @@ class AttentionLayers(Module):
 
             # all normalizations of the layer
 
-            pre_branch_norm = post_branch_norm = post_main_norm = None
-
-            if not no_pre_or_postnorm:
-                pre_branch_norm = norm_fn() if pre_norm else None
-                post_branch_norm = norm_fn() if sandwich_norm else None
-                post_main_norm = norm_fn() if not pre_norm else None
+            pre_branch_norm = norm_fn() if pre_norm else None
+            post_branch_norm = norm_fn() if sandwich_norm else None
+            post_main_norm = norm_fn() if not pre_norm else None
 
             norms = ModuleList([
                 pre_branch_norm,
@@ -1394,9 +1417,20 @@ class AttentionLayers(Module):
         cache: LayerIntermediates | None = None,
         cache_age = 1,
         return_hiddens = False,
-        rotary_pos_emb = None
+        rotary_pos_emb = None,
+        condition = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
+        assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
+
+        # setup maybe layernorm kwarg
+
+        norm_kwargs = dict()
+
+        if self.need_condition:
+            assert condition.shape[-1] == self.dim_condition
+
+            norm_kwargs.update(condition = condition)
 
         # initialize accums
 
@@ -1487,6 +1521,11 @@ class AttentionLayers(Module):
 
             pre_norm, post_branch_norm, post_main_norm = norm
 
+            if self.need_condition:
+                pre_norm = maybe(partial)(pre_norm, **norm_kwargs)
+                post_branch_norm = maybe(partial)(post_branch_norm, **norm_kwargs)
+                post_main_norm = maybe(partial)(post_main_norm, **norm_kwargs)
+
             if exists(pre_norm):
                 x = pre_norm(x)
 
@@ -1523,10 +1562,15 @@ class AttentionLayers(Module):
         if return_hiddens:
             layer_hiddens.append(x)
 
+        final_norm = self.final_norm
+
+        if self.need_condition:
+            final_norm = maybe(partial)(final_norm, **norm_kwargs)
+
         if self.resi_dual:
-            x = x + self.final_norm(outer_residual)
+            x = x + final_norm(outer_residual)
         else:
-            x = self.final_norm(x)
+            x = final_norm(x)
 
         if not return_hiddens:
             return x
