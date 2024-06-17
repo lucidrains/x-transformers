@@ -584,7 +584,7 @@ class AdaptiveLayerNorm(Module):
 
         nn.init.zeros_(self.to_gamma.weight)
 
-    def forward(self, x, condition):
+    def forward(self, x, *, condition):
         normed = self.ln(x)
         gamma = self.to_gamma(condition)
         return normed * (gamma + 1.)
@@ -616,7 +616,7 @@ class AdaptiveRMSNorm(Module):
         self.to_gamma = nn.Linear(dim_condition, dim, bias = False)
         nn.init.zeros_(self.to_gamma.weight)
 
-    def forward(self, x, condition):
+    def forward(self, x, *, condition):
         normed = F.normalize(x, dim = -1)
         gamma = self.to_gamma(condition)
         return normed * self.scale * (gamma + 1.)
@@ -1161,6 +1161,8 @@ class AttentionLayers(Module):
         use_adaptive_layernorm = False,
         use_adaptive_rmsnorm = False,
         dim_condition = None,
+        adaptive_condition_mlp = False,
+        adaptive_condition_mlp_expansion = 4,
         alibi_pos_bias = False,
         alibi_num_heads = None,
         rel_pos_bias = False,
@@ -1270,6 +1272,17 @@ class AttentionLayers(Module):
         need_condition = False
         dim_condition = default(dim_condition, dim)
 
+        self.adaptive_mlp = nn.Identity()
+        dim_condition_mult = 1
+
+        if adaptive_condition_mlp:
+            dim_condition_mult = adaptive_condition_mlp_expansion
+
+            self.adaptive_mlp = nn.Sequential(
+                nn.Linear(dim_condition, dim_condition * dim_condition_mult, bias = False),
+                nn.SiLU()
+            )
+
         if use_scalenorm:
             norm_class = ScaleNorm
         elif use_rmsnorm:
@@ -1278,10 +1291,10 @@ class AttentionLayers(Module):
             norm_class = SimpleRMSNorm
         elif use_adaptive_layernorm:
             need_condition = True
-            norm_class = partial(AdaptiveLayerNorm, dim_condition = dim_condition)
+            norm_class = partial(AdaptiveLayerNorm, dim_condition = dim_condition * dim_condition_mult)
         elif use_adaptive_rmsnorm:
             need_condition = True
-            norm_class = partial(AdaptiveRMSNorm, dim_condition = dim_condition)
+            norm_class = partial(AdaptiveRMSNorm, dim_condition = dim_condition * dim_condition_mult)
         else:
             norm_class = LayerNorm
 
@@ -1446,7 +1459,16 @@ class AttentionLayers(Module):
         norm_kwargs = dict()
 
         if self.need_condition:
-            assert condition.shape[-1] == self.dim_condition
+            assert condition.ndim in {2, 3}
+
+            if condition.ndim == 2:
+                condition = rearrange(condition, 'b d -> b 1 d')
+
+            assert condition.shape[-1] == self.dim_condition, f'expected condition dimension of {self.dim_condition} but received {condition.shape[-1]}'
+
+            # maybe mlp
+
+            condition = self.adaptive_mlp(condition)
 
             norm_kwargs.update(condition = condition)
 

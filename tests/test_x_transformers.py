@@ -87,8 +87,8 @@ def test_adaptive_layernorm():
         )
     )
 
-    x = torch.randint(0, 256, (1, 1024))
-    condition = torch.randn(1, 768)
+    x = torch.randint(0, 256, (2, 1024))
+    condition = torch.randn(2, 768)
 
     model(x, condition = condition)
 
@@ -101,11 +101,12 @@ def test_adaptive_rmsnorm():
             dim_condition = 768,
             depth = 12,
             heads = 8,
-            use_adaptive_rmsnorm = True
+            use_adaptive_rmsnorm = True,
+            adaptive_condition_mlp = True
         )
     )
 
-    x = torch.randint(0, 256, (1, 1024))
-    condition = torch.randn(1, 768)
+    x = torch.randint(0, 256, (2, 1024))
+    condition = torch.randn(2, 768)
 
     model(x, condition = condition)
