@@ -1271,17 +1271,10 @@ class AttentionLayers(Module):
 
         need_condition = False
         dim_condition = default(dim_condition, dim)
-
-        self.adaptive_mlp = nn.Identity()
         dim_condition_mult = 1
 
         if adaptive_condition_mlp:
             dim_condition_mult = adaptive_condition_mlp_expansion
-
-            self.adaptive_mlp = nn.Sequential(
-                nn.Linear(dim_condition, dim_condition * dim_condition_mult, bias = False),
-                nn.SiLU()
-            )
 
         if use_scalenorm:
             norm_class = ScaleNorm
@@ -1299,6 +1292,14 @@ class AttentionLayers(Module):
             norm_class = LayerNorm
 
         norm_fn = partial(norm_class, dim)
+
+        self.adaptive_mlp = nn.Identity()
+
+        if need_condition and adaptive_condition_mlp:
+            self.adaptive_mlp = nn.Sequential(
+                nn.Linear(dim_condition, dim_condition * dim_condition_mult, bias = False),
+                nn.SiLU()
+            )
 
         self.need_condition = need_condition
         self.dim_condition = dim_condition
