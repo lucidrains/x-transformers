@@ -1515,11 +1515,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @article{DBLP:journals/corr/abs-1907-01470,
-    author    = {Sainbayar Sukhbaatar and
-               Edouard Grave and
-               Guillaume Lample and
-               Herv{\'{e}} J{\'{e}}gou and
-               Armand Joulin},
+    author    = {Sainbayar Sukhbaatar and Edouard Grave and Guillaume Lample and Herv{\'{e}} J{\'{e}}gou and Armand Joulin},
     title     = {Augmenting Self-attention with Persistent Memory},
     journal   = {CoRR},
     volume    = {abs/1907.01470},
@@ -2159,6 +2155,17 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     author  = {Olga Golovneva and Tianlu Wang and Jason Weston and Sainbayar Sukhbaatar},
     year    = {2024},
     url     = {https://api.semanticscholar.org/CorpusID:270094992}
+}
+```
+
+```bibtex
+@article{Peebles2022ScalableDM,
+    title   = {Scalable Diffusion Models with Transformers},
+    author  = {William S. Peebles and Saining Xie},
+    journal = {2023 IEEE/CVF International Conference on Computer Vision (ICCV)},
+    year    = {2022},
+    pages   = {4172-4182},
+    url     = {https://api.semanticscholar.org/CorpusID:254854389}
 }
 ```
 
