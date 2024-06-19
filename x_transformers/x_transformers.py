@@ -710,7 +710,7 @@ class LayerScale(Module):
         out, *rest = out
         return out * self.gamma, *rest
 
-class ConditionedLayerScale(Module):
+class AdaptiveLayerScale(Module):
     def __init__(self, fn: Module, dim, dim_condition = None, init_bias_value = -2.):
         super().__init__()
         self.fn = fn
@@ -1181,7 +1181,7 @@ class AttentionLayers(Module):
         use_simple_rmsnorm = False,
         use_adaptive_layernorm = False,
         use_adaptive_rmsnorm = False,
-        use_conditioned_layerscale = False, # paired with use_adaptive_layernorm for ada-ln-zero from DiT paper
+        use_adaptive_layerscale = False, # paired with use_adaptive_layernorm for ada-ln-zero from DiT paper
         dim_condition = None,
         adaptive_condition_mlp = False,
         adaptive_condition_mlp_expansion = 4,
@@ -1332,15 +1332,15 @@ class AttentionLayers(Module):
 
         # determine post branch wrapper
 
-        assert at_most_one_of(use_layerscale, use_conditioned_layerscale)
+        assert at_most_one_of(use_layerscale, use_adaptive_layerscale)
 
         post_branch_fn = None
         post_branch_fn_needs_condition = False
 
         if use_layerscale:
             post_branch_fn = partial(LayerScale, dim = dim, init_value = layerscale_init_value)
-        elif use_conditioned_layerscale:
-            post_branch_fn = partial(ConditionedLayerScale, dim = dim, dim_condition = dim_condition * dim_condition_mult)
+        elif use_adaptive_layerscale:
+            post_branch_fn = partial(AdaptiveLayerScale, dim = dim, dim_condition = dim_condition * dim_condition_mult)
             post_branch_fn_needs_condition = True
 
         self.post_branch_fn_needs_condition = post_branch_fn_needs_condition

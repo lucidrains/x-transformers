@@ -84,7 +84,7 @@ def test_adaptive_layernorm():
             depth = 12,
             heads = 8,
             use_adaptive_layernorm = True,
-            use_conditioned_layerscale = True
+            use_adaptive_layerscale = True
         )
     )
 
