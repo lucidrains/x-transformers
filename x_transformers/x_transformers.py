@@ -1234,7 +1234,7 @@ class AttentionLayers(Module):
         use_adaptive_layernorm = False,
         use_adaptive_rmsnorm = False,
         use_adaptive_layerscale = False, # paired with use_adaptive_layernorm for ada-ln-zero from DiT paper
-        norm_add_unit_offset = False,
+        norm_add_unit_offset = True,
         dim_condition = None,
         adaptive_condition_mlp = False,
         adaptive_condition_mlp_expansion = 4,
@@ -1403,7 +1403,7 @@ class AttentionLayers(Module):
 
         self.post_branch_fn_needs_condition = post_branch_fn_needs_condition
 
-        if not post_branch_fn_needs_condition and norm_add_unit_offset:
+        if exists(post_branch_fn) and not post_branch_fn_needs_condition and norm_add_unit_offset:
             post_branch_fn = partial(post_branch_fn, unit_offset = 1.)
 
         # setup mlp for conditioning
