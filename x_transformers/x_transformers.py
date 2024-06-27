@@ -93,6 +93,9 @@ def l2norm(t, groups = 1):
     t = F.normalize(t, p = 2, dim = -1)
     return rearrange(t, '... g d -> ... (g d)')
 
+def softclamp(t, value):
+    return (t / value).tanh() * value
+
 def pad_at_dim(t, pad: Tuple[int, int], dim = -1, value = 0.):
     if pad == (0, 0):
         return t
@@ -560,22 +563,29 @@ class Scale(Module):
         return (scale_fn(out[0]), *out[1:])
 
 class LayerNorm(Module):
-    def __init__(self, dim):
+    def __init__(
+        self,
+        dim,
+        unit_offset = 0.
+    ):
         """
         bias-less layernorm has been shown to be more stable. most newer models have moved towards rmsnorm, also bias-less
         """
         super().__init__()
+        self.unit_offset = unit_offset
         self.gamma = nn.Parameter(torch.ones(dim))
-        self.register_buffer("beta", torch.zeros(dim))
+        self.register_buffer('beta', torch.zeros(dim), persistent = False)
 
     def forward(self, x):
-        return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
-
-if version.parse(torch.__version__) >= version.parse('2.1.0'):
-    LayerNorm = partial(nn.LayerNorm, bias = False)
+        gamma = self.gamma + self.unit_offset
+        return F.layer_norm(x, x.shape[-1:], gamma, self.beta)
 
 class AdaptiveLayerNorm(Module):
-    def __init__(self, dim, dim_condition = None):
+    def __init__(
+        self,
+        dim,
+        dim_condition = None
+    ):
         super().__init__()
         dim_condition = default(dim_condition, dim)
 
@@ -590,25 +600,39 @@ class AdaptiveLayerNorm(Module):
         return normed * (gamma + 1.)
 
 class ScaleNorm(Module):
-    def __init__(self, dim):
+    def __init__(
+        self,
+        dim,
+        unit_offset = 0.
+    ):
         super().__init__()
+        self.unit_offset = unit_offset
         self.scale = dim ** 0.5
         self.g = nn.Parameter(torch.ones(1))
 
     def forward(self, x):
-        return F.normalize(x, dim = -1) * self.scale * self.g
+        return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
 
 class RMSNorm(Module):
-    def __init__(self, dim):
+    def __init__(
+        self,
+        dim,
+        unit_offset = 0.
+    ):
         super().__init__()
+        self.unit_offset = unit_offset
         self.scale = dim ** 0.5
         self.g = nn.Parameter(torch.ones(dim))
 
     def forward(self, x):
-        return F.normalize(x, dim = -1) * self.scale * self.g
+        return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
 
 class AdaptiveRMSNorm(Module):
-    def __init__(self, dim, dim_condition = None):
+    def __init__(
+        self,
+        dim,
+        dim_condition = None
+    ):
         super().__init__()
         self.scale = dim ** 0.5
         dim_condition = default(dim_condition, dim)
@@ -622,7 +646,11 @@ class AdaptiveRMSNorm(Module):
         return normed * self.scale * (gamma + 1.)
 
 class SimpleRMSNorm(Module):
-    def __init__(self, dim):
+    def __init__(
+        self,
+        dim,
+        **kwargs
+    ):
         super().__init__()
         self.scale = dim ** 0.5
 
@@ -1182,6 +1210,7 @@ class AttentionLayers(Module):
         use_adaptive_layernorm = False,
         use_adaptive_rmsnorm = False,
         use_adaptive_layerscale = False, # paired with use_adaptive_layernorm for ada-ln-zero from DiT paper
+        norm_add_unit_offset = False,
         dim_condition = None,
         adaptive_condition_mlp = False,
         adaptive_condition_mlp_expansion = 4,
@@ -1215,6 +1244,7 @@ class AttentionLayers(Module):
         scale_residual_constant = 1.,
         shift_tokens = 0,
         sandwich_norm = False,
+        softclamp_output_value: float | None = None,
         resi_dual = False,
         resi_dual_scale = 1.,
         zero_init_branch_output = False,
@@ -1314,6 +1344,10 @@ class AttentionLayers(Module):
             norm_class = LayerNorm
 
         norm_fn = partial(norm_class, dim)
+
+        if not norm_need_condition and norm_add_unit_offset:
+            # researcher Ohad Rubin shares in a blog post by adding an offset to gammas and betas, they can be subjected to weight decay safely
+            norm_fn = partial(norm_fn, unit_offset = 1.)
 
         self.norm_need_condition = norm_need_condition
         self.dim_condition = dim_condition
@@ -1420,6 +1454,11 @@ class AttentionLayers(Module):
         # calculate token shifting
 
         shift_tokens = cast_tuple(shift_tokens, len(layer_types))
+
+        # optional soft clamping just before the final norm
+        # used in gemma 2
+
+        self.softclamp_output_value = softclamp_output_value
 
         # whether it has post norm
 
@@ -1651,6 +1690,9 @@ class AttentionLayers(Module):
 
         if return_hiddens:
             layer_hiddens.append(x)
+
+        if exists(self.softclamp_output_value):
+            x = softclamp(x, self.softclamp_output_value)
 
         final_norm = self.final_norm
 
