@@ -573,12 +573,17 @@ class LayerNorm(Module):
         """
         super().__init__()
         self.unit_offset = unit_offset
+
+        self.ln = nn.LayerNorm(dim, elementwise_affine = False)
         self.gamma = nn.Parameter(torch.ones(dim))
+        nn.init.constant_(self.gamma, 1. - unit_offset)
+
         self.register_buffer('beta', torch.zeros(dim), persistent = False)
 
     def forward(self, x):
+        normed = self.ln(x)
         gamma = self.gamma + self.unit_offset
-        return F.layer_norm(x, x.shape[-1:], gamma, self.beta)
+        return normed * gamma
 
 class AdaptiveLayerNorm(Module):
     def __init__(
@@ -608,7 +613,9 @@ class ScaleNorm(Module):
         super().__init__()
         self.unit_offset = unit_offset
         self.scale = dim ** 0.5
-        self.g = nn.Parameter(torch.ones(1))
+
+        self.g = nn.Parameter(torch.zeros(1))
+        nn.init.constant_(self.g, 1. - unit_offset)
 
     def forward(self, x):
         return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
@@ -622,7 +629,9 @@ class RMSNorm(Module):
         super().__init__()
         self.unit_offset = unit_offset
         self.scale = dim ** 0.5
-        self.g = nn.Parameter(torch.ones(dim))
+
+        self.g = nn.Parameter(torch.zeros(dim))
+        nn.init.constant_(self.g, 1. - unit_offset)
 
     def forward(self, x):
         return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
@@ -724,10 +733,19 @@ class ShiftTokens(Module):
 # post branch operator
 
 class LayerScale(Module):
-    def __init__(self, fn: Module, dim, init_value = 0.):
+    def __init__(
+        self,
+        fn: Module,
+        dim,
+        init_value = 0.,
+        unit_offset = 0.
+    ):
         super().__init__()
+        self.unit_offset = unit_offset
+
         self.fn = fn
-        self.gamma = nn.Parameter(torch.ones(dim) * init_value)
+        self.gamma = nn.Parameter(torch.zeros(dim))
+        nn.init.constant_(self.gamma, init_value - unit_offset)
 
     def forward(self, x, **kwargs):
         out = self.fn(x, **kwargs)
@@ -739,7 +757,13 @@ class LayerScale(Module):
         return out * self.gamma, *rest
 
 class AdaptiveLayerScale(Module):
-    def __init__(self, fn: Module, dim, dim_condition = None, init_bias_value = -2.):
+    def __init__(
+        self,
+        fn: Module,
+        dim,
+        dim_condition = None,
+        init_bias_value = -2.
+    ):
         super().__init__()
         self.fn = fn
 
@@ -1378,6 +1402,9 @@ class AttentionLayers(Module):
             post_branch_fn_needs_condition = True
 
         self.post_branch_fn_needs_condition = post_branch_fn_needs_condition
+
+        if not post_branch_fn_needs_condition and norm_add_unit_offset:
+            post_branch_fn = partial(post_branch_fn, unit_offset = 1.)
 
         # setup mlp for conditioning
 
