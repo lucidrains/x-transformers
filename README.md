@@ -2170,7 +2170,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
-@misc{Guttenberg2023,
+@misc{Rubin2024,
     author  = {Ohad Rubin},
     url     = {https://medium.com/@ohadrubin/exploring-weight-decay-in-layer-normalization-challenges-and-a-reparameterization-solution-ad4d12c24950}
 }

@@ -566,7 +566,7 @@ class LayerNorm(Module):
     def __init__(
         self,
         dim,
-        unit_offset = 0.
+        unit_offset = False
     ):
         """
         bias-less layernorm has been shown to be more stable. most newer models have moved towards rmsnorm, also bias-less
@@ -576,9 +576,7 @@ class LayerNorm(Module):
 
         self.ln = nn.LayerNorm(dim, elementwise_affine = False)
         self.gamma = nn.Parameter(torch.ones(dim))
-        nn.init.constant_(self.gamma, 1. - unit_offset)
-
-        self.register_buffer('beta', torch.zeros(dim), persistent = False)
+        nn.init.constant_(self.gamma, 1. - float(unit_offset))
 
     def forward(self, x):
         normed = self.ln(x)
@@ -596,7 +594,6 @@ class AdaptiveLayerNorm(Module):
 
         self.ln = nn.LayerNorm(dim, elementwise_affine = False)
         self.to_gamma = nn.Linear(dim_condition, dim, bias = False)
-
         nn.init.zeros_(self.to_gamma.weight)
 
     def forward(self, x, *, condition):
@@ -608,14 +605,14 @@ class ScaleNorm(Module):
     def __init__(
         self,
         dim,
-        unit_offset = 0.
+        unit_offset = False
     ):
         super().__init__()
         self.unit_offset = unit_offset
         self.scale = dim ** 0.5
 
         self.g = nn.Parameter(torch.zeros(1))
-        nn.init.constant_(self.g, 1. - unit_offset)
+        nn.init.constant_(self.g, 1. - float(unit_offset))
 
     def forward(self, x):
         return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
@@ -624,14 +621,14 @@ class RMSNorm(Module):
     def __init__(
         self,
         dim,
-        unit_offset = 0.
+        unit_offset = False
     ):
         super().__init__()
         self.unit_offset = unit_offset
         self.scale = dim ** 0.5
 
         self.g = nn.Parameter(torch.zeros(dim))
-        nn.init.constant_(self.g, 1. - unit_offset)
+        nn.init.constant_(self.g, 1. - float(unit_offset))
 
     def forward(self, x):
         return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
@@ -738,14 +735,14 @@ class LayerScale(Module):
         fn: Module,
         dim,
         init_value = 0.,
-        unit_offset = 0.
+        unit_offset = False
     ):
         super().__init__()
         self.unit_offset = unit_offset
 
         self.fn = fn
         self.gamma = nn.Parameter(torch.zeros(dim))
-        nn.init.constant_(self.gamma, init_value - unit_offset)
+        nn.init.constant_(self.gamma, init_value - float(unit_offset))
 
     def forward(self, x, **kwargs):
         out = self.fn(x, **kwargs)
@@ -1370,8 +1367,8 @@ class AttentionLayers(Module):
         norm_fn = partial(norm_class, dim)
 
         if not norm_need_condition and norm_add_unit_offset:
-            # researcher Ohad Rubin shares in a blog post by adding an offset to gammas and betas, they can be subjected to weight decay safely
-            norm_fn = partial(norm_fn, unit_offset = 1.)
+            # researcher Ohad Rubin shares in a blog post by adding an offset to gammas, they can be subjected to weight decay safely
+            norm_fn = partial(norm_fn, unit_offset = True)
 
         self.norm_need_condition = norm_need_condition
         self.dim_condition = dim_condition
@@ -1404,7 +1401,7 @@ class AttentionLayers(Module):
         self.post_branch_fn_needs_condition = post_branch_fn_needs_condition
 
         if exists(post_branch_fn) and not post_branch_fn_needs_condition and norm_add_unit_offset:
-            post_branch_fn = partial(post_branch_fn, unit_offset = 1.)
+            post_branch_fn = partial(post_branch_fn, unit_offset = True)
 
         # setup mlp for conditioning
 
