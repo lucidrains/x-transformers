@@ -69,7 +69,7 @@ def onnx_create_causal_mask(i, j, device):
 
 # main class
 
-class Attend(nn.Module):
+class Attend(Module):
     def __init__(
         self,
         *,
@@ -81,7 +81,8 @@ class Attend(nn.Module):
         scale = None,
         qk_norm = False,
         flash = False,
-        logit_softclamp_value = None,
+        softclamp_logits = False,
+        logit_softclamp_value = 30.,
         add_zero_kv = False,
         cope = None,
         onnxable = False,
@@ -123,10 +124,11 @@ class Attend(nn.Module):
 
         # soft clamp attention logit value
 
-        if exists(logit_softclamp_value):
+        if softclamp_logits:
             assert not flash, 'flash attention not compatible with logit softclamp value yet'
             assert logit_softclamp_value > 0.
 
+        self.softclamp_logits = softclamp_logits
         self.logit_softclamp_value = logit_softclamp_value
 
         # contextual positional encoding
@@ -308,6 +310,9 @@ class Attend(nn.Module):
         if exists(attn_bias):
             sim = sim + attn_bias
 
+        if self.softclamp_logits:
+            sim = softclamp(sim, self.logit_softclamp_value)
+
         i, j, dtype = *sim.shape[-2:], sim.dtype
 
         mask_value = -torch.finfo(sim.dtype).max
@@ -328,9 +333,6 @@ class Attend(nn.Module):
             sim = sim + self.cope(q, sim)
 
         pre_softmax_attn = sim.clone()
-
-        if exists(self.logit_softclamp_value):
-            sim = softclamp(sim, self.logit_softclamp_value)
 
         attn = self.attn_fn(sim, dim = -1)
         attn = attn.type(dtype)

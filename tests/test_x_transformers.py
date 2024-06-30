@@ -1,5 +1,4 @@
 import torch
-
 from x_transformers.x_transformers import (
     XTransformer,
     TransformerWrapper,
@@ -111,3 +110,20 @@ def test_adaptive_rmsnorm():
     condition = torch.randn(2, 768)
 
     model(x, condition = condition)
+
+def test_attn_softclamp_logits():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            dim_condition = 768,
+            depth = 12,
+            heads = 8,
+            attn_softclamp_logits = True,
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 1024))
+
+    model(x)

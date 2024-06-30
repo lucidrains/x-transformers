@@ -884,7 +884,8 @@ class Attention(Module):
         cope_max_pos = 16,
         cope_soft_onehot_pos = False,
         cope_talking_heads = False,
-        logit_softclamp_value = None,
+        softclamp_logits = False,
+        logit_softclamp_value = 30.,
         onnxable = False
     ):
         super().__init__()
@@ -987,6 +988,7 @@ class Attention(Module):
             scale = qk_norm_scale if qk_norm else self.scale,
             add_zero_kv = add_zero_kv,
             flash = flash,
+            softclamp_logits = softclamp_logits,
             logit_softclamp_value = logit_softclamp_value,
             cope = cope,
             onnxable = onnxable
