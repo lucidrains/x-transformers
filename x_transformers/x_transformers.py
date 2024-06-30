@@ -1267,7 +1267,8 @@ class AttentionLayers(Module):
         scale_residual_constant = 1.,
         shift_tokens = 0,
         sandwich_norm = False,
-        softclamp_output_value: float | None = None,
+        softclamp_output = False,
+        softclamp_output_value = 50.,
         resi_dual = False,
         resi_dual_scale = 1.,
         zero_init_branch_output = False,
@@ -1484,6 +1485,7 @@ class AttentionLayers(Module):
         # optional soft clamping just before the final norm
         # used in gemma 2
 
+        self.softclamp_output = softclamp_output
         self.softclamp_output_value = softclamp_output_value
 
         # whether it has post norm
@@ -1717,7 +1719,7 @@ class AttentionLayers(Module):
         if return_hiddens:
             layer_hiddens.append(x)
 
-        if exists(self.softclamp_output_value):
+        if self.softclamp_output:
             x = softclamp(x, self.softclamp_output_value)
 
         final_norm = self.final_norm
