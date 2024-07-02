@@ -580,7 +580,7 @@ class LayerNorm(Module):
 
     def forward(self, x):
         normed = self.ln(x)
-        gamma = self.gamma + self.unit_offset
+        gamma = self.gamma + float(self.unit_offset)
         return normed * gamma
 
 class AdaptiveLayerNorm(Module):
@@ -615,7 +615,8 @@ class ScaleNorm(Module):
         nn.init.constant_(self.g, 1. - float(unit_offset))
 
     def forward(self, x):
-        return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
+        gamma = self.g + float(self.unit_offset)
+        return F.normalize(x, dim = -1) * self.scale * gamma
 
 class RMSNorm(Module):
     def __init__(
@@ -631,7 +632,8 @@ class RMSNorm(Module):
         nn.init.constant_(self.g, 1. - float(unit_offset))
 
     def forward(self, x):
-        return F.normalize(x, dim = -1) * self.scale * (self.g + self.unit_offset)
+        gamma = self.g + float(self.unit_offset)
+        return F.normalize(x, dim = -1) * self.scale * gamma
 
 class AdaptiveRMSNorm(Module):
     def __init__(
