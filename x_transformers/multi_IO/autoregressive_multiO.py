@@ -21,7 +21,8 @@ class MultiOAutoregressiveWrapper(Module):
         self.net = net
         if not weighted_loss:
             self.weighted_loss = [1] * self.outputs
-
+        else:
+            self.weighted_loss = weighted_loss
         if type(net) == MultiIOTransformerWrapper:
             self.outputs = len(net.logits_dim)
             net.autoregressive = True

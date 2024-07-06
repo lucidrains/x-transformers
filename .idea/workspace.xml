@@ -6,6 +6,8 @@
   <component name="ChangeListManager">
     <list default="true" id="e89f890f-bc6e-4061-90aa-84142178ba7c" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/autoregressive_multiO.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/autoregressive_multiO.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/x_transformers/multi_IO/xl_autoregressive_wrapper_multiO.py" beforeDir="false" afterPath="$PROJECT_DIR$/x_transformers/multi_IO/xl_autoregressive_wrapper_multiO.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -37,7 +39,7 @@
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/ilove/CODING/PYStuff/x-transformers-multiIO/why.py&quot;
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ilove/CODING/PYStuff/x-transformers-multiIO&quot;
   },
   &quot;keyToStringList&quot;: {
     &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [

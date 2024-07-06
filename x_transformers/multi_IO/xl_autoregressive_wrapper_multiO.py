@@ -17,7 +17,8 @@ class MultiOXLAutoregressiveWrapper(nn.Module):
 
         if not weighted_loss:
             self.weighted_loss = [1] * outputs
-
+        else:
+            self.weighted_loss = weighted_loss
         self.outputs = outputs
         self.net = net
         if type(net) == MultiIOTransformerWrapper:
