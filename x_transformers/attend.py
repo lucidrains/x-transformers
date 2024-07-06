@@ -268,6 +268,11 @@ class Attend(Module):
 
         causal = self.causal
 
+        # handle key padding mask
+
+        if exists(mask) and mask.ndim == 2:
+            mask = rearrange(mask, 'b j -> b 1 1 j')
+
         # handle kv cached decoding
 
         if n == 1 and causal:
