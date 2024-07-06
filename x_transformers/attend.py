@@ -82,7 +82,7 @@ class Attend(Module):
         qk_norm = False,
         flash = False,
         softclamp_logits = False,
-        logit_softclamp_value = 30.,
+        logit_softclamp_value = 50.,
         add_zero_kv = False,
         cope = None,
         onnxable = False,

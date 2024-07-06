@@ -1272,7 +1272,7 @@ class AttentionLayers(Module):
         shift_tokens = 0,
         sandwich_norm = False,
         softclamp_output = False,
-        softclamp_output_value = 50.,
+        softclamp_output_value = 30.,
         resi_dual = False,
         resi_dual_scale = 1.,
         zero_init_branch_output = False,
