@@ -597,6 +597,9 @@ class AdaptiveLayerNorm(Module):
         nn.init.zeros_(self.to_gamma.weight)
 
     def forward(self, x, *, condition):
+        if condition.ndim == 2:
+            condition = rearrange(condition, 'b d -> b 1 d')
+
         normed = self.ln(x)
         gamma = self.to_gamma(condition)
         return normed * (gamma + 1.)
@@ -649,6 +652,9 @@ class AdaptiveRMSNorm(Module):
         nn.init.zeros_(self.to_gamma.weight)
 
     def forward(self, x, *, condition):
+        if condition.ndim == 2:
+            condition = rearrange(condition, 'b d -> b 1 d')
+
         normed = F.normalize(x, dim = -1)
         gamma = self.to_gamma(condition)
         return normed * self.scale * (gamma + 1.)
@@ -775,6 +781,9 @@ class AdaptiveLayerScale(Module):
         nn.init.constant_(self.to_gamma.bias, init_bias_value)
 
     def forward(self, x, *, condition, **kwargs):
+        if condition.ndim == 2:
+            condition = rearrange(condition, 'b d -> b 1 d')
+
         out = self.fn(x, **kwargs)
         gamma = self.to_gamma(condition).sigmoid()
 
