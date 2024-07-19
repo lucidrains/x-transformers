@@ -898,7 +898,7 @@ class Attention(Module):
         cope_soft_onehot_pos = False,
         cope_talking_heads = False,
         softclamp_logits = False,
-        logit_softclamp_value = 30.,
+        logit_softclamp_value = 50.,
         onnxable = False
     ):
         super().__init__()
