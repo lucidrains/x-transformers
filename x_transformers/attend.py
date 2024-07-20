@@ -140,7 +140,16 @@ class Attend(Module):
         self.flash = flash
         assert not (flash and version.parse(torch.__version__) < version.parse('2.0.0')), 'in order to use flash attention, you must be using pytorch 2.0 or above'
 
-        self.sdp_kwargs = sdp_kwargs
+        backend_list = []
+        if sdp_kwargs.get("enable_flash"):
+            backend_list.append(torch.nn.attention.SDPBackend.FLASH_ATTENTION)
+        if sdp_kwargs.get("enable_mem_efficient"):
+            backend_list.append(torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION)
+        if sdp_kwargs.get("enable_math"):
+            backend_list.append(torch.nn.attention.SDPBackend.MATH)
+        if sdp_kwargs.get("enable_cudnn"):
+            backend_list.append(torch.nn.attention.SDPBackend.CUDNN_ATTENTION)
+        self.sdp_backends = backend_list
 
     def flash_attn(
         self,
@@ -232,7 +241,7 @@ class Attend(Module):
 
         # pytorch 2.0 flash attn: q, k, v, mask, dropout, causal, softmax_scale
 
-        with torch.backends.cuda.sdp_kernel(**self.sdp_kwargs):
+        with torch.nn.attention.sdpa_kernel(self.sdp_backends):
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask = mask,
