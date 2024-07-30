@@ -862,6 +862,50 @@ class FeedForward(Module):
 
 # attention. it is all we need
 
+from einops import rearrange, einsum
+from einops.layers.torch import Rearrange
+from einx import get_at
+
+class SigmoidMoELinear(Module):
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        *,
+        dim_gate,
+        heads,
+        num_experts_per_head,
+        transposed = False,
+    ):
+        super().__init__()
+        dim_heads = dim_in if not transposed else dim_out
+        assert (dim_heads % heads) == 0
+        dim_expert = dim_heads // heads
+
+        self.to_gates = nn.Sequential(
+            nn.Linear(dim_gate, heads * num_experts_per_head, bias = False),
+            Rearrange('... (h e) -> ... h e', h = heads)
+        )
+
+        self.expert_weights = nn.Parameter(torch.zeros(heads, num_experts_per_head, dim_expert, dim_heads))
+        nn.init.normal_(self.expert_weights, std = 0.02)
+
+        self.transposed = transposed
+
+    def forward(self, gate_input, inp):
+        gates = self.to_gates(gate_input).sigmoid()
+        gate_values, gate_indices = gates.topk(1, dim = -1)
+
+        experts = get_at('h [e] d o, b n h -> b n h d o', self.expert_weights, rearrange(gate_indices, '... 1 -> ...'))
+        experts = experts * gate_values[..., None]
+
+        weights = rearrange(experts, 'b n h d o -> b n (h d) o')
+
+        if self.transposed:
+            weights = rearrange(weights, '... o i -> ... i o')
+
+        return einsum(inp, weights, '... i, ... i o -> ... o')
+
 class Attention(Module):
     def __init__(
         self,
@@ -931,7 +975,7 @@ class Attention(Module):
         # shared key / values, for further memory savings during inference
 
         assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
-        self.to_v = nn.Linear(dim_kv, v_dim, bias = False) if not shared_kv else None
+        self.to_v = SigmoidMoELinear(dim_kv, v_dim, dim_gate = dim, heads = heads, num_experts_per_head = 8) if not shared_kv else None
 
         # relations projection from tp-attention
 
@@ -1027,7 +1071,7 @@ class Attention(Module):
         # attention on attention
 
         self.attn_on_attn = on_attn
-        self.to_out = nn.Sequential(nn.Linear(out_dim, dim * 2, bias = False), nn.GLU()) if on_attn else nn.Linear(out_dim, dim, bias = False)
+        self.to_out = nn.Sequential(nn.Linear(out_dim, dim * 2, bias = False), nn.GLU()) if on_attn else SigmoidMoELinear(out_dim, dim, dim_gate = dim, heads = heads, num_experts_per_head = 8, transposed = True)
 
         # whether to rotate positions into values, for absolute positions in addition to relative
 
@@ -1068,7 +1112,7 @@ class Attention(Module):
 
         q = self.to_q(q_input)
         k = self.to_k(k_input)
-        v = self.to_v(v_input) if exists(self.to_v) else k
+        v = self.to_v(x, v_input) if exists(self.to_v) else k
         r = self.to_r(r_input) if exists(self.to_r) else None
 
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
@@ -1218,7 +1262,7 @@ class Attention(Module):
 
         # combine the heads
 
-        out = self.to_out(out)
+        out = self.to_out(x, out)
 
         if exists(mask):
             mask = rearrange(mask, 'b n -> b n 1')
