@@ -194,18 +194,17 @@ class Attend(Module):
 
         # manually handle causal mask, if another mask was given
 
-        row_is_entirely_masked = None
-
         if exists(mask) and causal:
             causal_mask = self.create_causal_mask(q_len, k_len, device = device)
             mask = mask & ~causal_mask
-
-            # protect against an entire row being masked out
-
-            row_is_entirely_masked = ~mask.any(dim = -1)
-            mask[..., 0] = mask[..., 0] | row_is_entirely_masked
-
             causal = False
+
+        # protect against an entire row being masked out
+
+        row_is_entirely_masked = None
+
+        if exists(mask):
+            row_is_entirely_masked = ~mask.any(dim = -1)
 
         # handle alibi positional bias
         # convert from bool to float
@@ -242,7 +241,7 @@ class Attend(Module):
 
         # for a row that is entirely masked out, should zero out the output of that row token
 
-        if exists(row_is_entirely_masked):
+        if exists(row_is_entirely_masked) and row_is_entirely_masked.any():
             out = out.masked_fill(row_is_entirely_masked[..., None], 0.)
 
         return out, Intermediates()
@@ -334,6 +333,11 @@ class Attend(Module):
             causal_mask = self.create_causal_mask(i, j, device = device)
             sim = sim.masked_fill(causal_mask, mask_value)
 
+        row_is_entirely_masked = None
+
+        if exists(mask):
+            row_is_entirely_masked = ~mask.any(dim = -1)
+
         if exists(self.cope):
             sim = sim + self.cope(q, sim)
 
@@ -356,5 +360,8 @@ class Attend(Module):
             pre_softmax_attn = pre_softmax_attn,
             post_softmax_attn = post_softmax_attn
         )
+
+        if exists(row_is_entirely_masked) and row_is_entirely_masked.any():
+            out = out.masked_fill(row_is_entirely_masked[..., None], 0.)
 
         return out, intermediates
