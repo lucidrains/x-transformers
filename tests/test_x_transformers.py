@@ -1,10 +1,13 @@
 import torch
+
 from x_transformers.x_transformers import (
     XTransformer,
     TransformerWrapper,
     Decoder,
     AutoregressiveWrapper
 )
+
+from x_transformers.multi_input import MultiInputTransformerWrapper
 
 def test_readme():
     model = XTransformer(
@@ -129,14 +132,14 @@ def test_attn_softclamp_logits():
     model(x)
 
 def test_multiple_input_embeds():
-    model = TransformerWrapper(
-        num_tokens = 20000,
-        max_seq_len = 1024,
-        return_only_embed = True,
-        embed_num_tokens = dict(
+    model = MultiInputTransformerWrapper(
+        num_tokens = dict(
+            note = 20000,
             pitch = 32,
             tone = 16
         ),
+        max_seq_len = 1024,
+        return_only_embed = True,
         attn_layers = Decoder(
             dim = 128,
             depth = 6,
@@ -144,13 +147,12 @@ def test_multiple_input_embeds():
         )
     )
 
-    x = torch.randint(0, 20000, (2, 1024))
-
-    embed_ids = dict(
+    x = dict(
+        note = torch.randint(0, 20000, (2, 1024)),
         pitch = torch.randint(0, 32, (2, 1024)),
         tone = torch.randint(0, 16, (2, 1024))
     )
 
-    embed = model(x, embed_ids = embed_ids)
+    embed = model(x)
 
     assert embed.shape == (2, 1024, 128)

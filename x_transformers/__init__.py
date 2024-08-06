@@ -20,6 +20,8 @@ from x_transformers.continuous import (
     ContinuousAutoregressiveWrapper
 )
 
+from x_transformers.multi_input import MultiInputTransformerWrapper
+
 from x_transformers.xval import (
     XValTransformerWrapper,
     XValAutoregressiveWrapper
