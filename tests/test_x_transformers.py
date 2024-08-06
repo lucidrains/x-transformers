@@ -127,3 +127,30 @@ def test_attn_softclamp_logits():
     x = torch.randint(0, 256, (1, 1024))
 
     model(x)
+
+def test_multiple_input_embeds():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        return_only_embed = True,
+        embed_num_tokens = dict(
+            pitch = 32,
+            tone = 16
+        ),
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 256, (2, 1024))
+
+    embed_ids = dict(
+        pitch = torch.randint(0, 32, (2, 1024)),
+        tone = torch.randint(0, 16, (2, 1024))
+    )
+
+    embed = model(x, embed_ids = embed_ids) # (1, 1024, 512)
+
+    assert embed.shape == (2, 1024, 128)
