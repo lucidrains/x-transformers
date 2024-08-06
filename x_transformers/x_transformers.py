@@ -51,6 +51,9 @@ def cast_tuple(val, depth):
 def divisible_by(num, den):
     return (num % den) == 0
 
+def is_empty(x):
+    return len(x) == 0
+
 def maybe(fn):
     @wraps(fn)
     def inner(x, *args, **kwargs):
