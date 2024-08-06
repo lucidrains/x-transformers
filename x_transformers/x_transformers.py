@@ -1899,6 +1899,7 @@ class TransformerWrapper(Module):
         memory_tokens_interspersed_every = None,
         tie_embedding = False,
         logits_dim = None,
+        return_only_embed = False,
         num_output_heads = 1,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
@@ -1948,13 +1949,17 @@ class TransformerWrapper(Module):
 
         self.init_()
 
+        assert num_output_heads > 0
+
         # output head, usually to logits of num_tokens
 
         logits_dim = default(logits_dim, num_tokens)
 
         self.has_multiple_heads = False
 
-        if tie_embedding:
+        if return_only_embed:
+            self.to_logits = None
+        elif tie_embedding:
             self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
         elif num_output_heads > 1:
             self.has_multiple_heads = True
@@ -2008,7 +2013,9 @@ class TransformerWrapper(Module):
         **kwargs
     ):
         b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
+
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
+        return_embeddings = return_embeddings | (not exists(self.to_logits))
 
         # absolute positional embedding
 
@@ -2017,6 +2024,8 @@ class TransformerWrapper(Module):
         x = self.token_emb(x) + pos_emb
 
         # add additional embeddings
+
+        assert not (exists(self.embeds) ^ (len(embed_ids) > 0)), '`embed_num_tokens` must be defined on `TransformerWrapper`'
 
         if exists(self.embeds):
             assert len(embed_ids) == len(self.embeds)
