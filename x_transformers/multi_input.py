@@ -17,7 +17,7 @@ from x_transformers.x_transformers import (
     LayerNorm,
     always,
     pad_at_dim,
-    is_empty
+    is_empty,
 )
 
 # helper functions
@@ -45,10 +45,7 @@ class MultiInputTransformerWrapper(Module):
         post_emb_norm = False,
         num_memory_tokens = None,
         memory_tokens_interspersed_every = None,
-        tie_embedding = False,
-        logits_dim = None,
         return_only_embed = False,
-        num_output_heads = 1,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
@@ -87,23 +84,12 @@ class MultiInputTransformerWrapper(Module):
         self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
         self.attn_layers = attn_layers
 
-        assert num_output_heads > 0
-
         # output head, usually to logits of num_tokens
-
-        logits_dim = default(logits_dim, num_tokens)
-
-        self.has_multiple_heads = False
 
         if return_only_embed:
             self.to_logits = None
-        elif tie_embedding:
-            self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
-        elif num_output_heads > 1:
-            self.has_multiple_heads = True
-            self.to_logits = ModuleList([nn.Linear(dim, logits_dim, bias = False) for _ in range(num_output_heads)])
         else:
-            self.to_logits = nn.Linear(dim, logits_dim, bias = False)
+            self.to_logits = ModuleDict({name: nn.Linear(dim, logits_dim, bias = False) for name, logits_dim in num_tokens.items()})
 
         # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -253,10 +239,7 @@ class MultiInputTransformerWrapper(Module):
         # projecting to logits
 
         if not return_embeddings:
-            if self.has_multiple_heads:
-                logits = tuple(fn(x) for fn in self.to_logits)
-            else:
-                logits = self.to_logits(x)
+            logits = {name: fn(x) for name, fn in self.to_logits.items()}
 
         # different returns
 
