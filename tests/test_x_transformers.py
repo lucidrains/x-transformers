@@ -159,7 +159,6 @@ def test_multiple_input_embeds():
     assert embed.shape == (2, 1024, 128)
 
 def test_average_pool_embed():
-
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
@@ -180,7 +179,6 @@ def test_average_pool_embed():
     assert logits.shape == (2, 20000)
 
 def test_cls_token():
-
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
@@ -199,3 +197,24 @@ def test_cls_token():
     logits = model(x, mask = mask)
 
     assert logits.shape == (2, 20000)
+
+def test_squeeze_logit_dim_one():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        logits_dim = 1,
+        average_pool_embed = True,
+        squeeze_out_last_dim = True,
+        attn_layers = Encoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+    mask = torch.randint(0, 2, (2, 1024)).bool()
+
+    logits = model(x, mask = mask)
+
+    assert logits.shape == (2,)

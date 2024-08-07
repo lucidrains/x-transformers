@@ -45,14 +45,17 @@ def default(val, d):
         return val
     return d() if callable(d) else d
 
-def cast_tuple(val, depth):
+def first(it):
+    return it[0]
+
+def is_empty(x):
+    return len(x) == 0
+
+def cast_tuple(val, depth = 1):
     return val if isinstance(val, tuple) else (val,) * depth
 
 def divisible_by(num, den):
     return (num % den) == 0
-
-def is_empty(x):
-    return len(x) == 0
 
 def maybe(fn):
     @wraps(fn)
@@ -1922,6 +1925,7 @@ class TransformerWrapper(Module):
         attn_z_loss_weight = 1e-4,
         average_pool_embed = False,
         use_cls_token = False,
+        squeeze_out_last_dim = False
     ):
         super().__init__()
 
@@ -2005,6 +2009,10 @@ class TransformerWrapper(Module):
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
 
         self.memory_tokens_interspersed_every = memory_tokens_interspersed_every
+
+        # squeeze out last dimension if possible
+
+        self.squeeze_out_last_dim = squeeze_out_last_dim
 
         # whether can do cached kv decoding
 
@@ -2172,6 +2180,14 @@ class TransformerWrapper(Module):
                 logits = tuple(fn(x) for fn in self.to_logits)
             else:
                 logits = self.to_logits(x)
+
+        # maybe squeeze out last dimension of logits
+
+        if self.squeeze_out_last_dim:
+            logits = tuple(rearrange(t, '... 1 -> ...') for t in cast_tuple(logits))
+
+            if not self.has_multiple_heads:
+                logits = first(logits)
 
         # different returns
 
