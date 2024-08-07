@@ -1904,6 +1904,8 @@ class TransformerWrapper(Module):
         max_seq_len,
         attn_layers: AttentionLayers,
         embed_num_tokens: Dict[str, int] = dict(),
+        use_cls=False,
+        pooling = None,
         emb_dim = None,
         max_mem_len = 0,
         shift_mem_down = 0,
@@ -1930,6 +1932,15 @@ class TransformerWrapper(Module):
         self.emb_dim = emb_dim
         self.num_tokens = num_tokens
 
+        self.pooling = pooling
+        self.use_pooling = exists(pooling)
+        self.use_cls = use_cls
+        assert not (self.use_cls and self.use_pooling), 'cannot use both pooling and cls token'
+        if self.use_cls:
+            max_seq_len+=1
+            self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+
+        
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
         self.shift_mem_down = shift_mem_down
@@ -1984,7 +1995,7 @@ class TransformerWrapper(Module):
         # output head, usually to logits of num_tokens
 
         logits_dim = default(logits_dim, num_tokens)
-
+        self.logits_dim = logits_dim
         self.has_multiple_heads = False
 
         if return_only_embed:
@@ -1993,9 +2004,9 @@ class TransformerWrapper(Module):
             self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
         elif num_output_heads > 1:
             self.has_multiple_heads = True
-            self.to_logits = ModuleList([nn.Linear(dim, logits_dim, bias = False) for _ in range(num_output_heads)])
+            self.to_logits = ModuleList([nn.Linear(dim if not self.pooling else max_seq_len, logits_dim, bias = False) for _ in range(num_output_heads)])
         else:
-            self.to_logits = nn.Linear(dim, logits_dim, bias = False)
+            self.to_logits = nn.Linear(dim if not self.pooling else max_seq_len, logits_dim, bias = False)
 
         # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -2047,11 +2058,16 @@ class TransformerWrapper(Module):
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
         return_embeddings = return_embeddings | (not exists(self.to_logits))
 
+        x = self.token_emb(x)
+        if self.use_cls:
+            cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
+            x = torch.cat((cls_tokens, x), dim=1)
         # absolute positional embedding
+        
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
-        x = self.token_emb(x) + pos_emb
+        x += pos_emb
 
         # add additional embeddings
 
@@ -2165,14 +2181,26 @@ class TransformerWrapper(Module):
         if exists(self.cls_token):
             x, _ = unpack(x, cls_packed_shape, 'b * d')
 
-        # projecting to logits
+        # cls token or pooling for classification
+        if self.use_cls:
+            x = x[:, 0]
+        
+        if self.use_pooling:
+            x = self.pooling(x).squeeze()
 
+        # projecting to logits
         if not return_embeddings:
             if self.has_multiple_heads:
                 logits = tuple(fn(x) for fn in self.to_logits)
             else:
                 logits = self.to_logits(x)
 
+        if self.logits_dim == 1 and (self.use_pooling or self.use_cls):
+            # Binary classification
+            if self.has_multiple_heads:
+                logits = [logit.squeeze() for logit in logits]
+            else:
+                logits = logits.squeeze()
         # different returns
 
         if return_logits_and_embeddings:
