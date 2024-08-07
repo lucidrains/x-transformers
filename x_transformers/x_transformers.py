@@ -1920,7 +1920,8 @@ class TransformerWrapper(Module):
         l2norm_embed = False,
         emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
         attn_z_loss_weight = 1e-4,
-        average_pool_embed = False
+        average_pool_embed = False,
+        use_cls_token = False,
     ):
         super().__init__()
 
@@ -1965,6 +1966,16 @@ class TransformerWrapper(Module):
         self.init_()
 
         assert num_output_heads > 0
+
+        assert at_most_one_of(average_pool_embed, use_cls_token)
+
+        # classic cls token from the bert days
+
+        self.cls_token = None
+
+        if use_cls_token:
+            self.cls_token = nn.Parameter(torch.zeros(dim))
+            nn.init.normal_(self.cls_token, std = 0.02)
 
         # whether to average pool the embed (`global average pool`)
 
@@ -2092,7 +2103,19 @@ class TransformerWrapper(Module):
 
         x = self.project_emb(x)
 
+        # maybe cls token
+
+        if exists(self.cls_token):
+            cls_tokens = repeat(self.cls_token, 'd -> b d', b = b)
+            x, cls_packed_shape = pack([cls_tokens, x], 'b * d')
+
+            if exists(mask):
+                mask = F.pad(mask, (1, 0), value = True)
+
+        # maybe memory / register tokens
+
         if has_memory_tokens:
+            mem_seq = x.shape[-2]
             mem_every = self.memory_tokens_interspersed_every
 
             if exists(mem_every):
@@ -2132,12 +2155,15 @@ class TransformerWrapper(Module):
             if exists(mem_every):
                 x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
 
-            x = x[:, :n]
+            x = x[:, :mem_seq]
 
         # global average pool
 
         if self.average_pool_embed:
             x = masked_mean(x, mask = orig_mask, dim = 1)
+
+        if exists(self.cls_token):
+            x, _ = unpack(x, cls_packed_shape, 'b * d')
 
         # projecting to logits
 
