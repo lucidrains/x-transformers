@@ -3,6 +3,7 @@ import torch
 from x_transformers.x_transformers import (
     XTransformer,
     TransformerWrapper,
+    Encoder,
     Decoder,
     AutoregressiveWrapper
 )
@@ -156,3 +157,24 @@ def test_multiple_input_embeds():
     embed = model(x)
 
     assert embed.shape == (2, 1024, 128)
+
+def test_average_pool_embed():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        num_memory_tokens = 2,
+        average_pool_embed = True,
+        attn_layers = Encoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+    mask = torch.randint(0, 2, (2, 1024)).bool()
+
+    logits = model(x, mask = mask)
+
+    assert logits.shape == (2, 20000)

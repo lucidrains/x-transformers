@@ -9,6 +9,7 @@ from x_transformers.x_transformers import (
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
     LayerNorm,
+    masked_mean,
     always,
     pad_at_dim
 )
@@ -39,7 +40,8 @@ class ContinuousTransformerWrapper(nn.Module):
         post_emb_norm = False,
         emb_dropout = 0.,
         use_abs_pos_emb = True,
-        scaled_sinu_pos_emb = False
+        scaled_sinu_pos_emb = False,
+        average_pool_embed = False
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -72,6 +74,10 @@ class ContinuousTransformerWrapper(nn.Module):
 
         self.attn_layers = attn_layers
 
+        # average pool
+
+        self.average_pool_embed = average_pool_embed
+
         # project in and out
 
         self.project_in = nn.Linear(dim_in, dim, bias = False) if exists(dim_in) else nn.Identity()
@@ -92,7 +98,7 @@ class ContinuousTransformerWrapper(nn.Module):
         prepend_mask = None,
         **kwargs
     ):
-        batch, seq, device = *x.shape[:2], x.device
+        batch, seq, orig_mask, device = *x.shape[:2], mask, x.device
 
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
@@ -135,6 +141,11 @@ class ContinuousTransformerWrapper(nn.Module):
         if self.has_memory_tokens:
             m, x = unpack(x, mem_ps, 'b * d')
             intermediates.memory_tokens = m
+
+        if self.average_pool_embed:
+            x = masked_mean(x, mask = orig_mask)
+
+        # maybe linear project out
 
         out = self.project_out(x) if not return_embeddings else x
 
