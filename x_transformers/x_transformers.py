@@ -99,6 +99,17 @@ def l2norm(t, groups = 1):
 def softclamp(t, value):
     return (t / value).tanh() * value
 
+def masked_mean(t, mask = None, dim = 1):
+    if not exists(mask):
+        return t.mean(dim = dim)
+
+    dims_append = (1,) * (t.ndim - mask.ndim)
+    mask = mask.reshape(*mask.shape, *dims_append)
+
+    num = (t * mask).sum(dim = dim)
+    den = mask.sum(dim = dim).clamp(min = 1.)
+    return num / den
+
 def pad_at_dim(t, pad: Tuple[int, int], dim = -1, value = 0.):
     if pad == (0, 0):
         return t
@@ -1909,6 +1920,7 @@ class TransformerWrapper(Module):
         l2norm_embed = False,
         emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
         attn_z_loss_weight = 1e-4,
+        average_pool_embed = False
     ):
         super().__init__()
 
@@ -1953,6 +1965,10 @@ class TransformerWrapper(Module):
         self.init_()
 
         assert num_output_heads > 0
+
+        # whether to average pool the embed (`global average pool`)
+
+        self.average_pool_embed = average_pool_embed
 
         # output head, usually to logits of num_tokens
 
@@ -2015,7 +2031,7 @@ class TransformerWrapper(Module):
         cache: LayerIntermediates | None = None,
         **kwargs
     ):
-        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
+        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
 
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
         return_embeddings = return_embeddings | (not exists(self.to_logits))
@@ -2117,6 +2133,11 @@ class TransformerWrapper(Module):
                 x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
 
             x = x[:, :n]
+
+        # global average pool
+
+        if self.average_pool_embed:
+            x = masked_mean(x, mask = orig_mask, dim = 1)
 
         # projecting to logits
 
