@@ -2184,7 +2184,7 @@ class TransformerWrapper(Module):
         # maybe squeeze out last dimension of logits
 
         if self.squeeze_out_last_dim:
-            logits = tuple(rearrange(t, '... 1 -> ...') for t in cast_tuple(logits))
+            logits = tuple((rearrange(t, '... 1 -> ...') if t.shape[-1] == 1 else t) for t in cast_tuple(logits))
 
             if not self.has_multiple_heads:
                 logits = first(logits)
