@@ -1920,7 +1920,6 @@ class TransformerWrapper(Module):
         self.use_cls = use_cls
         assert not (self.use_cls and self.use_pooling), 'cannot use both pooling and cls token'
         if self.use_cls:
-            max_seq_len+=1
             self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
         
@@ -2021,17 +2020,14 @@ class TransformerWrapper(Module):
         b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
 
-        x = self.token_emb(x)
+        # absolute positional embedding
+        external_pos_emb = exists(pos) and pos.dtype != torch.long
+        pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
+        x = self.token_emb(x) + pos_emb
+
         if self.use_cls:
             cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
             x = torch.cat((cls_tokens, x), dim=1)
-        # absolute positional embedding
-        
-
-        external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
-        x += pos_emb
-
         # add additional embeddings
 
         if exists(self.embeds):
@@ -2135,13 +2131,6 @@ class TransformerWrapper(Module):
                 logits = tuple(fn(x) for fn in self.to_logits)
             else:
                 logits = self.to_logits(x)
-
-        if self.logits_dim == 1 and (self.use_pooling or self.use_cls):
-            # Binary classification
-            if self.has_multiple_heads:
-                logits = [logit.squeeze() for logit in logits]
-            else:
-                logits = logits.squeeze()
         # different returns
 
         if return_logits_and_embeddings:
