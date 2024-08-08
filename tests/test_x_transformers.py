@@ -1,4 +1,5 @@
 import torch
+from torch import nn    
 from x_transformers.x_transformers import (
     XTransformer,
     TransformerWrapper,
@@ -6,6 +7,8 @@ from x_transformers.x_transformers import (
     Encoder,
     AutoregressiveWrapper
 )
+
+
 
 def test_readme():
     model = XTransformer(
@@ -130,15 +133,12 @@ def test_attn_softclamp_logits():
     model(x)
 
 def test_classification():
-    import torch
-    from torch import nn
-
     # CLS token test
     transformer = TransformerWrapper(
         num_tokens=6,
         max_seq_len=10,
         logits_dim=2, # num_classes 
-        use_cls=True,
+        use_cls_token=True,
         attn_layers = Encoder(
             dim = 6,
             depth = 1,
@@ -162,7 +162,8 @@ def test_classification():
         num_tokens=6,
         max_seq_len=10,
         logits_dim=1, # num_classes 
-        use_cls=True,
+        use_cls_token=True,
+        squeeze_out_last_dim = True,
         attn_layers = Encoder(
             dim = 6,
             depth = 1,
@@ -184,7 +185,7 @@ def test_classification():
         num_tokens=6,
         max_seq_len=10,
         logits_dim=2, # num_classes 
-        pooling=nn.AdaptiveAvgPool1d((1,)),
+        average_pool_embed = True,
         attn_layers = Encoder(
             dim = 6,
             depth = 1,
@@ -209,7 +210,8 @@ def test_classification():
         num_tokens=6,
         max_seq_len=10,
         logits_dim=1, # num_classes 
-        pooling=nn.AdaptiveAvgPool1d((1,)),
+        average_pool_embed = True,
+        squeeze_out_last_dim = True,
         attn_layers = Encoder(
             dim = 6,
             depth = 1,
@@ -233,7 +235,7 @@ def test_classification():
         num_tokens=6,
         max_seq_len=10,
         logits_dim=2, # num_classes 
-        pooling=nn.AdaptiveAvgPool1d((1,)),
+        average_pool_embed = True,
         attn_layers = Encoder(
             dim = 6,
             depth = 1,
