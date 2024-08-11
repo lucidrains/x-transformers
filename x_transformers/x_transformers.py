@@ -45,7 +45,13 @@ def default(val, d):
         return val
     return d() if callable(d) else d
 
-def cast_tuple(val, depth):
+def first(it):
+    return it[0]
+
+def is_empty(x):
+    return len(x) == 0
+
+def cast_tuple(val, depth = 1):
     return val if isinstance(val, tuple) else (val,) * depth
 
 def divisible_by(num, den):
@@ -95,6 +101,17 @@ def l2norm(t, groups = 1):
 
 def softclamp(t, value):
     return (t / value).tanh() * value
+
+def masked_mean(t, mask = None, dim = 1):
+    if not exists(mask):
+        return t.mean(dim = dim)
+
+    dims_append = (1,) * (t.ndim - mask.ndim)
+    mask = mask.reshape(*mask.shape, *dims_append)
+
+    num = (t * mask).sum(dim = dim)
+    den = mask.sum(dim = dim).clamp(min = 1.)
+    return num / den
 
 def pad_at_dim(t, pad: Tuple[int, int], dim = -1, value = 0.):
     if pad == (0, 0):
@@ -1890,9 +1907,6 @@ class TransformerWrapper(Module):
         max_seq_len,
         attn_layers: AttentionLayers,
         embed_num_tokens: Dict[str, int] = dict(),
-        use_cls_token = False,
-        squeeze_out_last_dim = False,
-        average_pool_embed = False,
         emb_dim = None,
         max_mem_len = 0,
         shift_mem_down = 0,
@@ -1902,12 +1916,16 @@ class TransformerWrapper(Module):
         memory_tokens_interspersed_every = None,
         tie_embedding = False,
         logits_dim = None,
+        return_only_embed = False,
         num_output_heads = 1,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         l2norm_embed = False,
         emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
         attn_z_loss_weight = 1e-4,
+        average_pool_embed = False,
+        use_cls_token = False,
+        squeeze_out_last_dim = False
     ):
         super().__init__()
 
@@ -1916,14 +1934,6 @@ class TransformerWrapper(Module):
         self.emb_dim = emb_dim
         self.num_tokens = num_tokens
 
-        self.average_pool_embed = average_pool_embed # average pool the embeddings
-        self.use_cls_token = use_cls_token
-        assert not (self.use_cls_token and self.average_pool_embed), 'cannot use both average pooling and cls token'
-        self.squeeze_out_last_dim = squeeze_out_last_dim
-        if self.use_cls_token:
-            self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
-
-        
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
         self.shift_mem_down = shift_mem_down
@@ -1959,19 +1969,37 @@ class TransformerWrapper(Module):
 
         self.init_()
 
+        assert num_output_heads > 0
+
+        assert at_most_one_of(average_pool_embed, use_cls_token)
+
+        # classic cls token from the bert days
+
+        self.cls_token = None
+
+        if use_cls_token:
+            self.cls_token = nn.Parameter(torch.zeros(dim))
+            nn.init.normal_(self.cls_token, std = 0.02)
+
+        # whether to average pool the embed (`global average pool`)
+
+        self.average_pool_embed = average_pool_embed
+
         # output head, usually to logits of num_tokens
 
         logits_dim = default(logits_dim, num_tokens)
-        self.logits_dim = logits_dim
+
         self.has_multiple_heads = False
 
-        if tie_embedding:
+        if return_only_embed:
+            self.to_logits = None
+        elif tie_embedding:
             self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
         elif num_output_heads > 1:
             self.has_multiple_heads = True
-            self.to_logits = ModuleList([nn.Linear(dim if not self.average_pool_embed else max_seq_len, logits_dim, bias = False) for _ in range(num_output_heads)])
+            self.to_logits = ModuleList([nn.Linear(dim, logits_dim, bias = False) for _ in range(num_output_heads)])
         else:
-            self.to_logits = nn.Linear(dim if not self.average_pool_embed else max_seq_len, logits_dim, bias = False)
+            self.to_logits = nn.Linear(dim, logits_dim, bias = False)
 
         # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -1981,6 +2009,10 @@ class TransformerWrapper(Module):
             self.memory_tokens = nn.Parameter(torch.randn(num_memory_tokens, dim))
 
         self.memory_tokens_interspersed_every = memory_tokens_interspersed_every
+
+        # squeeze out last dimension if possible
+
+        self.squeeze_out_last_dim = squeeze_out_last_dim
 
         # whether can do cached kv decoding
 
@@ -2018,23 +2050,20 @@ class TransformerWrapper(Module):
         cache: LayerIntermediates | None = None,
         **kwargs
     ):
-        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient
-        return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
+        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
 
-        if exists(mask):
-            mask = mask.bool()
+        return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
+        return_embeddings = return_embeddings | (not exists(self.to_logits))
 
         # absolute positional embedding
+
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
         x = self.token_emb(x) + pos_emb
 
-        if self.use_cls_token:
-            cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
-            x = torch.cat((cls_tokens, x), dim=1)
-            if exists(mask):
-                mask = torch.cat((torch.ones((b, 1), device = device, dtype = torch.bool), mask), dim = -1)
         # add additional embeddings
+
+        assert not (exists(self.embeds) ^ (len(embed_ids) > 0)), '`embed_num_tokens` must be defined on `TransformerWrapper`'
 
         if exists(self.embeds):
             assert len(embed_ids) == len(self.embeds)
@@ -2082,7 +2111,19 @@ class TransformerWrapper(Module):
 
         x = self.project_emb(x)
 
+        # maybe cls token
+
+        if exists(self.cls_token):
+            cls_tokens = repeat(self.cls_token, 'd -> b d', b = b)
+            x, cls_packed_shape = pack([cls_tokens, x], 'b * d')
+
+            if exists(mask):
+                mask = F.pad(mask, (1, 0), value = True)
+
+        # maybe memory / register tokens
+
         if has_memory_tokens:
+            mem_seq = x.shape[-2]
             mem_every = self.memory_tokens_interspersed_every
 
             if exists(mem_every):
@@ -2122,27 +2163,32 @@ class TransformerWrapper(Module):
             if exists(mem_every):
                 x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
 
-            x = x[:, :n]
+            x = x[:, :mem_seq]
 
-        # cls token or pooling for classification
-        if self.use_cls_token:
-            x = x[:, 0]
-        
-        if self.average_pool_embed :
-            x = nn.AdaptiveAvgPool1d((1,))(x).squeeze()
+        # global average pool
+
+        if self.average_pool_embed:
+            x = masked_mean(x, mask = orig_mask, dim = 1)
+
+        if exists(self.cls_token):
+            x, _ = unpack(x, cls_packed_shape, 'b * d')
 
         # projecting to logits
+
         if not return_embeddings:
             if self.has_multiple_heads:
                 logits = tuple(fn(x) for fn in self.to_logits)
             else:
                 logits = self.to_logits(x)
-        
+
+        # maybe squeeze out last dimension of logits
+
         if self.squeeze_out_last_dim:
-            if self.has_multiple_heads:
-                logits = tuple(fn.squeeze(-1) for fn in logits)
-            else:
-                logits = logits.squeeze(-1)
+            logits = tuple((rearrange(t, '... 1 -> ...') if t.shape[-1] == 1 else t) for t in cast_tuple(logits))
+
+            if not self.has_multiple_heads:
+                logits = first(logits)
+
         # different returns
 
         if return_logits_and_embeddings:

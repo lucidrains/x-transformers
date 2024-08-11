@@ -1,14 +1,14 @@
 import torch
-from torch import nn    
+
 from x_transformers.x_transformers import (
     XTransformer,
     TransformerWrapper,
-    Decoder,
     Encoder,
+    Decoder,
     AutoregressiveWrapper
 )
 
-
+from x_transformers.multi_input import MultiInputTransformerWrapper
 
 def test_readme():
     model = XTransformer(
@@ -132,120 +132,89 @@ def test_attn_softclamp_logits():
 
     model(x)
 
-def test_classification():
-    # CLS token test
-    transformer = TransformerWrapper(
-        num_tokens=6,
-        max_seq_len=10,
-        logits_dim=2, # num_classes 
-        use_cls_token=True,
-        attn_layers = Encoder(
-            dim = 6,
-            depth = 1,
-            heads = 2,
+def test_multiple_input_embeds():
+    model = MultiInputTransformerWrapper(
+        num_tokens = dict(
+            note = 20000,
+            pitch = 32,
+            tone = 16
+        ),
+        max_seq_len = 1024,
+        return_only_embed = True,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
         )
     )
 
-    x = torch.randint(0, 5, (2, 10))
-    y = torch.tensor([0, 1])
-
-    print(x.shape)
-    logits = transformer(x)
-    print(logits.shape)
-    loss = nn.CrossEntropyLoss()(logits, y)
-
-    print(loss)
-
-    # BCE cls token
-
-    transformer = TransformerWrapper(
-        num_tokens=6,
-        max_seq_len=10,
-        logits_dim=1, # num_classes 
-        use_cls_token=True,
-        squeeze_out_last_dim = True,
-        attn_layers = Encoder(
-            dim = 6,
-            depth = 1,
-            heads = 2,
-        )
+    x = dict(
+        note = torch.randint(0, 20000, (2, 1024)),
+        pitch = torch.randint(0, 32, (2, 1024)),
+        tone = torch.randint(0, 16, (2, 1024))
     )
 
-    x = torch.randint(0, 5, (2, 10)).float()
-    y = torch.tensor([0, 1]).float()
+    embed = model(x)
 
-    print(x.shape)
-    logits = transformer(x).squeeze()
-    loss = nn.BCEWithLogitsLoss()(logits, y)
+    assert embed.shape == (2, 1024, 128)
 
-    print(loss)
-
-    # pooling test
-    transformer = TransformerWrapper(
-        num_tokens=6,
-        max_seq_len=10,
-        logits_dim=2, # num_classes 
+def test_average_pool_embed():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        num_memory_tokens = 2,
         average_pool_embed = True,
         attn_layers = Encoder(
-            dim = 6,
-            depth = 1,
-            heads = 2,
+            dim = 128,
+            depth = 6,
+            heads = 8
         )
     )
 
-    x = torch.randint(0, 5, (2, 10))
-    y = torch.tensor([0, 1])
+    x = torch.randint(0, 20000, (2, 1024))
+    mask = torch.randint(0, 2, (2, 1024)).bool()
 
-    print(x.shape)
-    logits = transformer(x)
-    print(logits.shape)
-    loss = nn.CrossEntropyLoss()(logits, y)
+    logits = model(x, mask = mask)
 
-    print(loss)
+    assert logits.shape == (2, 20000)
 
-    # pooling BCE test
+def test_cls_token():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        num_memory_tokens = 2,
+        use_cls_token = True,
+        attn_layers = Encoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
 
-    # pooling test
-    transformer = TransformerWrapper(
-        num_tokens=6,
-        max_seq_len=10,
-        logits_dim=1, # num_classes 
+    x = torch.randint(0, 20000, (2, 1024))
+    mask = torch.randint(0, 2, (2, 1024)).bool()
+
+    logits = model(x, mask = mask)
+
+    assert logits.shape == (2, 20000)
+
+def test_squeeze_logit_dim_one():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        logits_dim = 1,
         average_pool_embed = True,
         squeeze_out_last_dim = True,
         attn_layers = Encoder(
-            dim = 6,
-            depth = 1,
-            heads = 2,
+            dim = 128,
+            depth = 6,
+            heads = 8
         )
     )
 
-    x = torch.randint(0, 5, (2, 10)).float()
-    y = torch.tensor([0, 1]).float()
+    x = torch.randint(0, 20000, (2, 1024))
+    mask = torch.randint(0, 2, (2, 1024)).bool()
 
-    print(x.shape)
-    logits = transformer(x).squeeze()
-    print(logits.shape)
-    loss = nn.BCEWithLogitsLoss()(logits, y)
+    logits = model(x, mask = mask)
 
-    print(loss)
-
-    # normal test 
-
-    transformer = TransformerWrapper(
-        num_tokens=6,
-        max_seq_len=10,
-        logits_dim=2, # num_classes 
-        average_pool_embed = True,
-        attn_layers = Encoder(
-            dim = 6,
-            depth = 1,
-            heads = 2,
-        )
-    )
-
-    x = torch.randint(0, 5, (1, 10))
-    y = torch.tensor([0])
-
-    print(x.shape)
-    logits = transformer(x)
-    print(logits.shape)
+    assert logits.shape == (2,)
