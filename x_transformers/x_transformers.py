@@ -13,7 +13,7 @@ from torch.cuda.amp import autocast
 from functools import partial, wraps
 from collections import namedtuple
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Callable, Optional
+from typing import List, Dict, Tuple, Callable
 
 from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
@@ -1926,7 +1926,7 @@ class TransformerWrapper(Module):
         average_pool_embed = False,
         use_cls_token = False,
         squeeze_out_last_dim = False,
-        token_emb: Optional[TokenEmbedding] = None,
+        token_emb: TokenEmbedding | None = None,
     ):
         super().__init__()
 
@@ -1940,10 +1940,11 @@ class TransformerWrapper(Module):
         self.shift_mem_down = shift_mem_down
 
         self.l2norm_embed = l2norm_embed
-        if token_emb:
-            self.token_emb = token_emb
-        else:
-            self.token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
+
+        if not exists(token_emb):
+            token_emb = TokenEmbedding(emb_dim, num_tokens, l2norm_embed = l2norm_embed)
+
+        self.token_emb = token_emb
 
         no_abs_pos_emb = max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb)
 
