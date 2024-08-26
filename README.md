@@ -2187,4 +2187,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Nguyen2024MinPS,
+    title   = {Min P Sampling: Balancing Creativity and Coherence at High Temperature},
+    author  = {Minh Nguyen and Andrew Baker and Andreas Kirsch and Clement Neo},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2407.01082},
+    url     = {https://api.semanticscholar.org/CorpusID:270870613}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
