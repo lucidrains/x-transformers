@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum, Tensor
 from torch.nn import Module, ModuleList, ModuleDict
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 from functools import partial, wraps
 from collections import namedtuple
@@ -521,7 +521,7 @@ class RotaryEmbedding(Module):
         t = torch.arange(seq_len, device = device)
         return self.forward(t)
 
-    @autocast(enabled = False)
+    @autocast('cuda', enabled = False)
     def forward(self, t):
         max_pos = t.max() + 1
 
@@ -545,7 +545,7 @@ def rotate_half(x):
     x = torch.stack((-x2, x1), dim = -1)
     return rearrange(x, '... d r -> ... (d r)')
 
-@autocast(enabled = False)
+@autocast('cuda', enabled = False)
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
 
