@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from x_transformers.x_transformers import (
@@ -218,3 +219,22 @@ def test_squeeze_logit_dim_one():
     logits = model(x, mask = mask)
 
     assert logits.shape == (2,)
+
+@pytest.mark.parametrize('depth', (4, 5))
+def test_unet_skip(depth):
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Encoder(
+            dim = 128,
+            depth = depth,
+            heads = 8,
+            unet_skips = True
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+    mask = torch.randint(0, 2, (2, 1024)).bool()
+
+    model(x, mask = mask)

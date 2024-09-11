@@ -810,6 +810,19 @@ class AdaptiveLayerScale(Module):
         out, *rest = out
         return out * gamma, *rest
 
+# skip connection combining
+
+class ConcatCombine(Module):
+    def __init__(self, dim, prev_layer_ind):
+        super().__init__()
+        self.prev_layer_ind = prev_layer_ind
+        self.combine = nn.Linear(dim * 2, dim, bias = False)
+
+    def forward(self, x, prev_layers: list[Tensor]):
+        skip = prev_layers[self.prev_layer_ind]
+        concatted_skip = torch.cat((skip, x), dim = -1)
+        return self.combine(concatted_skip)
+
 # feedforward
 
 class GLU(Module):
@@ -1307,6 +1320,7 @@ class AttentionLayers(Module):
         disable_abs_pos_emb = None,
         use_layerscale = False,
         layerscale_init_value = 0.,
+        unet_skips = False,
         **kwargs
     ):
         super().__init__()
@@ -1468,6 +1482,8 @@ class AttentionLayers(Module):
 
         # calculate layer block order
 
+        len_default_block = 1
+
         if exists(custom_layers):
             layer_types = custom_layers
         elif exists(par_ratio):
@@ -1487,6 +1503,7 @@ class AttentionLayers(Module):
         else:
             assert exists(depth), '`depth` must be passed in for `Decoder` or `Encoder`'
             layer_types = default_block * depth
+            len_default_block = len(default_block)
 
         self.layer_types = layer_types
         self.layers_execute_order = default(layers_execute_order, tuple(range(len(layer_types))))
@@ -1522,10 +1539,30 @@ class AttentionLayers(Module):
 
         self.final_norm = norm_fn() if pre_norm or resi_dual else nn.Identity()
 
+        # whether unet or not
+
+        self.unet_skips = unet_skips
+        num_skips = self.depth // len_default_block
+
+        assert not (unet_skips and num_skips == 0), 'must have depth of at least 2 for unet skip connections'
+
+        skip_indices = [i * len_default_block for i in range(num_skips)]
+
+        self.skip_combines = ModuleList([])
+
         # iterate and construct layers
 
         for ind, (layer_type, layer_shift_tokens) in enumerate(zip(self.layer_types, shift_tokens)):
+
+            # `ind` is the index of each module - attention, feedforward, cross attention
+            # but `block_ind` refers to the typical enumeration of a transformer block (attn + ff + [optional] cross attn)
+
+            block_begin = divisible_by(ind, len_default_block)
+            block_ind = ind // len_default_block
+
             is_last_layer = ind == (len(self.layer_types) - 1)
+
+            # attention, cross attention, feedforward
 
             if layer_type == 'a':
                 layer = Attention(dim, heads = heads, causal = causal, **attn_kwargs)
@@ -1548,6 +1585,14 @@ class AttentionLayers(Module):
             residual_fn = GRUGating if gate_residual else Residual
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
+            # handle unet skip connection
+
+            skip_combine = None
+            is_latter_half = block_begin and block_ind >= (self.depth / 2)
+
+            if self.unet_skips and is_latter_half:
+                skip_combine = ConcatCombine(dim, skip_indices.pop())
+
             # all normalizations of the layer
 
             pre_branch_norm = norm_fn() if pre_norm else None
@@ -1559,6 +1604,8 @@ class AttentionLayers(Module):
                 post_branch_norm,
                 post_main_norm
             ])
+
+            self.skip_combines.append(skip_combine)
 
             self.layers.append(ModuleList([
                 norms,
@@ -1670,6 +1717,7 @@ class AttentionLayers(Module):
 
         layer_variables = (
             self.layer_types,
+            self.skip_combines,
             self.layers,
             self.layer_dropouts
         )
@@ -1680,10 +1728,23 @@ class AttentionLayers(Module):
 
         layer_variables = tuple(tuple(layer_variable[i] for i in layers_execute_order) for layer_variable in layer_variables)
 
+        # store all hiddens for skips
+
+        skip_hiddens = []
+
         # go through the attention and feedforward layers
 
-        for ind, (layer_type, (norm, block, residual_fn), layer_dropout) in enumerate(zip(*layer_variables)):
+        for ind, (layer_type, skip_combine, (norm, block, residual_fn), layer_dropout) in enumerate(zip(*layer_variables)):
             is_last = ind == (len(self.layers) - 1)
+
+            # handle skip connections
+
+            skip_hiddens.append(x)
+
+            if exists(skip_combine):
+                x = skip_combine(x, skip_hiddens)
+
+            # layer dropout
 
             if self.training and layer_dropout > 0. and random() < layer_dropout:
                 continue
