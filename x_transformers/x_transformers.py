@@ -2321,6 +2321,7 @@ class XTransformer(Module):
 
         self.encoder = TransformerWrapper(
             **enc_transformer_kwargs,
+            return_only_embed = True,
             attn_layers = Encoder(dim = dim, **enc_kwargs)
         )
 
