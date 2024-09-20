@@ -920,6 +920,7 @@ class Attention(Module):
         kv_heads = None,
         shared_kv = False,
         value_dim_head = None,
+        dim_out = None,
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
@@ -1057,7 +1058,11 @@ class Attention(Module):
         # attention on attention
 
         self.attn_on_attn = on_attn
-        self.to_out = nn.Sequential(nn.Linear(out_dim, dim * 2, bias = False), nn.GLU()) if on_attn else nn.Linear(out_dim, dim, bias = False)
+
+        # output dimension by default same as input, but can be overridden
+
+        dim_out = default(dim_out, dim)
+        self.to_out = nn.Sequential(nn.Linear(out_dim, dim_out * 2, bias = False), nn.GLU()) if on_attn else nn.Linear(out_dim, dim_out, bias = False)
 
         # whether to rotate positions into values, for absolute positions in addition to relative
 
