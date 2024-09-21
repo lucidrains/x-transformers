@@ -2209,4 +2209,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Jumper2021HighlyAP,
+    title   = {Highly accurate protein structure prediction with AlphaFold},
+    author  = {John M. Jumper and Richard Evans and Alexander Pritzel and Tim Green and Michael Figurnov and Olaf Ronneberger and Kathryn Tunyasuvunakool and Russ Bates and Augustin Ž{\'i}dek and Anna Potapenko and Alex Bridgland and Clemens Meyer and Simon A A Kohl and Andy Ballard and Andrew Cowie and Bernardino Romera-Paredes and Stanislav Nikolov and Rishub Jain and Jonas Adler and Trevor Back and Stig Petersen and David Reiman and Ellen Clancy and Michal Zielinski and Martin Steinegger and Michalina Pacholska and Tamas Berghammer and Sebastian Bodenstein and David Silver and Oriol Vinyals and Andrew W. Senior and Koray Kavukcuoglu and Pushmeet Kohli and Demis Hassabis},
+    journal = {Nature},
+    year    = {2021},
+    volume  = {596},
+    pages   = {583 - 589},
+    url     = {https://api.semanticscholar.org/CorpusID:235959867}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

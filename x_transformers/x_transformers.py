@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from random import random
+from random import random, randrange
 from packaging import version
 
 import torch
@@ -12,6 +12,7 @@ from torch.amp import autocast
 
 from functools import partial, wraps
 from collections import namedtuple
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Callable
 
@@ -1987,7 +1988,9 @@ class TransformerWrapper(Module):
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         l2norm_embed = False,
-        emb_frac_gradient = 1., # GLM-130B and Cogview successfully used this, set at 0.1
+        recycling = False,            # from Jumper et al. - Alphafold2
+        train_max_recycle_steps = 4,  # saw a benefit for language modeling up to 3 recycling steps, so let's default this to 4
+        emb_frac_gradient = 1.,       # GLM-130B and Cogview successfully used this, set at 0.1
         attn_z_loss_weight = 1e-4,
         average_pool_embed = False,
         use_cls_token = False,
@@ -2044,6 +2047,13 @@ class TransformerWrapper(Module):
 
         assert at_most_one_of(average_pool_embed, use_cls_token)
 
+        # maybe recycling
+
+        self.recycling = recycling
+        self.recycled_proj = nn.Linear(dim, dim, bias = False) if recycling else None
+
+        self.train_max_recycle_steps = train_max_recycle_steps
+
         # classic cls token from the bert days
 
         self.cls_token = None
@@ -2087,7 +2097,7 @@ class TransformerWrapper(Module):
 
         # whether can do cached kv decoding
 
-        self.can_cache_kv = self.num_memory_tokens == 0
+        self.can_cache_kv = self.num_memory_tokens == 0 and not recycling
         self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def init_(self):
@@ -2110,6 +2120,7 @@ class TransformerWrapper(Module):
         return_attn = False,
         mems = None,
         mem_masks = None,
+        recycle_steps = None,
         pos = None,
         prepend_embeds = None,
         prepend_mask = None,
@@ -2215,11 +2226,37 @@ class TransformerWrapper(Module):
             if exists(mem_every):
                 x = rearrange(x, '(b n) m d -> b (n m) d', b = b)
 
+        # handle maybe shifting of memories
+
         if self.shift_mem_down and exists(mems):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
             mems = [*mems_r, *mems_l]
 
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+        # attention layers
+
+        if not self.recycling:
+            # regular
+
+            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+
+        else:
+            # recycling
+
+            recycle_steps = default(recycle_steps, (randrange(self.train_max_recycle_steps) + 1) if self.training else None)
+            assert exists(recycle_steps) and recycle_steps > 0, '`recycle_steps` must be provided on forward if recycling is turned on and not training'
+
+            for i in range(recycle_steps):
+                first_step = i == 0
+                last_step = i == (recycle_steps - 1)
+
+                context = nullcontext if last_step else torch.no_grad
+
+                with context():
+                    maybe_recycled = self.recycled_proj(attended.detach()) if not first_step else 0.
+
+                    attended, intermediates = self.attn_layers(x + maybe_recycled, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+
+        x = attended
 
         # handle memories post-attention
 

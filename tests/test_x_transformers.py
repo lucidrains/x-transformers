@@ -238,3 +238,24 @@ def test_unet_skip(depth):
     mask = torch.randint(0, 2, (2, 1024)).bool()
 
     model(x, mask = mask)
+
+def test_recycling():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        recycling = True,
+        train_max_recycle_steps = 5,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    logits = model(x)
+
+    model.eval()
+
+    eval_logits = model(x, recycle_steps = 3)
