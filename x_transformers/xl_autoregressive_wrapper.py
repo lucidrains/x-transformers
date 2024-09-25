@@ -40,7 +40,7 @@ class XLAutoregressiveWrapper(nn.Module):
         eos_token = None,
         temperature = 1.,
         filter_logits_fn = top_k,
-        filter_thres = 0.9,
+        filter_kwargs: dict = dict(),
         mems = None,
         **kwargs
     ):
@@ -88,7 +88,7 @@ class XLAutoregressiveWrapper(nn.Module):
             mems = cache.mems
 
             logits = logits[:, -1]
-            filtered_logits = filter_logits_fn(logits, thres = filter_thres)
+            filtered_logits = filter_logits_fn(logits, **filter_kwargs)
             probs = F.softmax(filtered_logits / temperature, dim=-1)
 
             sample = torch.multinomial(probs, 1)
@@ -131,7 +131,9 @@ class XLAutoregressiveWrapper(nn.Module):
 
         split_x = x.split(max_seq_len, dim = -1)
         split_labels = labels.split(max_seq_len, dim = -1)
-        loss_weights = tuple(map(lambda t: t.shape[-1] / seq_len, split_x))
+        loss_weights = tuple((t.shape[-1] / seq_len) for t in split_x)
+
+        loss_fn = F.cross_entropy if not self.net.is_log_prob else F.nll_loss
 
         # go through each chunk and derive weighted losses
 
@@ -146,7 +148,7 @@ class XLAutoregressiveWrapper(nn.Module):
                 **kwargs
             )
 
-            loss = F.cross_entropy(
+            loss = loss_fn(
                 rearrange(logits, 'b n c -> b c n'),
                 chunk_labels,
                 ignore_index = ignore_index
