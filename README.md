@@ -2223,12 +2223,22 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```
 @article{Yang2017BreakingTS,
-  title     = {Breaking the Softmax Bottleneck: A High-Rank RNN Language Model},
-  author    = {Zhilin Yang and Zihang Dai and Ruslan Salakhutdinov and William W. Cohen},
-  journal   = {ArXiv},
-  year      = {2017},
-  volume    = {abs/1711.03953},
-  url       = {https://api.semanticscholar.org/CorpusID:26238954}
+    title     = {Breaking the Softmax Bottleneck: A High-Rank RNN Language Model},
+    author    = {Zhilin Yang and Zihang Dai and Ruslan Salakhutdinov and William W. Cohen},
+    journal   = {ArXiv},
+    year      = {2017},
+    volume    = {abs/1711.03953},
+    url       = {https://api.semanticscholar.org/CorpusID:26238954}
+}
+```
+
+```bibtex
+@inproceedings{Kanai2018SigsoftmaxRO,
+    title   = {Sigsoftmax: Reanalysis of the Softmax Bottleneck},
+    author  = {Sekitoshi Kanai and Yasuhiro Fujiwara and Yuki Yamanaka and Shuichi Adachi},
+    booktitle = {Neural Information Processing Systems},
+    year    = {2018},
+    url     = {https://api.semanticscholar.org/CorpusID:44064935}
 }
 ```
 

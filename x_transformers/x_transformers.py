@@ -917,6 +917,7 @@ class Attention(Module):
         swiglu_values = False,
         gate_values = False,
         zero_init_output = False,
+        sigsoftmax = False,
         max_attend_past = None,
         qk_norm = False,
         qk_norm_groups = 1,
@@ -1039,6 +1040,7 @@ class Attention(Module):
             add_zero_kv = add_zero_kv,
             flash = flash,
             softclamp_logits = softclamp_logits,
+            sigsoftmax = sigsoftmax,
             logit_softclamp_value = logit_softclamp_value,
             cope = cope,
             onnxable = onnxable
@@ -2003,6 +2005,7 @@ class TransformerWrapper(Module):
         token_emb: TokenEmbedding | None = None,
         mixture_of_softmax = False,
         mixture_of_softmax_k = 4,
+        sigsoftmax_logits = False
     ):
         super().__init__()
 
@@ -2089,6 +2092,10 @@ class TransformerWrapper(Module):
             )
 
             self.combine_mixture = LinearNoBias(dim, mixture_of_softmax_k)
+
+        # sig softmax
+
+        self.sigsoftmax_logits = sigsoftmax_logits
 
         # output head, usually to logits of num_tokens
 
@@ -2321,6 +2328,11 @@ class TransformerWrapper(Module):
                 logits = tuple(fn(x) for fn in self.to_logits)
             else:
                 logits = self.to_logits(x)
+
+        # maybe sig softmax
+
+        if self.sigsoftmax_logits:
+            logits = logits + logits.sigmoid().log()
 
         # handle maybe combine mixture
 

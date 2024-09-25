@@ -84,6 +84,7 @@ class Attend(Module):
         softclamp_logits = False,
         logit_softclamp_value = 50.,
         add_zero_kv = False,
+        sigsoftmax = False,
         cope = None,
         onnxable = False,
         sdp_kwargs: dict = dict(
@@ -116,6 +117,11 @@ class Attend(Module):
 
         assert not (flash and sparse_topk), 'sparse topk not compatible with flash attention'
         self.sparse_topk = sparse_topk
+
+        # sig softmax
+
+        assert not (flash and sigsoftmax), 'sigsoftmax not available for flash attention'
+        self.sigsoftmax = sigsoftmax
 
         # add a key / value token composed of zeros
         # in case this helps controlling outliers, proposed by https://www.evanmiller.org/attention-is-off-by-one.html
@@ -298,14 +304,14 @@ class Attend(Module):
         # handle grouped multi-query attention
 
         if kv_heads == 1:
-            k, v = map(lambda t: rearrange(t, 'b 1 n d -> b n d'), (k, v))
+            k, v = tuple(rearrange(t, 'b 1 n d -> b n d') for t in (k, v))
         elif kv_heads < heads:
-            k, v = map(lambda t: repeat(t, 'b kvh n d -> b (r kvh) n d', r = heads // kv_heads), (k, v))
+            k, v = tuple(repeat(t, 'b kvh n d -> b (r kvh) n d', r = heads // kv_heads) for t in (k, v))
 
         # handle zero kv, as means for allowing network to attend to nothing
 
         if self.add_zero_kv:
-            k, v = map(lambda t: F.pad(t, (0, 0, 1, 0), value = 0.), (k, v))
+            k, v = tuple(F.pad(t, (0, 0, 1, 0), value = 0.) for t in (k, v))
 
             if exists(mask):
                 mask = F.pad(mask, (1, 0), value = True)
@@ -359,12 +365,15 @@ class Attend(Module):
         if exists(self.cope):
             sim = sim + self.cope(q, sim)
 
-        pre_softmax_attn = sim.clone()
+        pre_softmax_attn = sim
+
+        if self.sigsoftmax:
+            sim = sim + sim.sigmoid().log()
 
         attn = self.attn_fn(sim, dim = -1)
         attn = attn.type(dtype)
 
-        post_softmax_attn = attn.clone()
+        post_softmax_attn = attn
 
         attn = self.attn_dropout(attn)
 

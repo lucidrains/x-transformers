@@ -279,3 +279,25 @@ def test_mos():
     model.eval()
 
     eval_logits = model(x)
+
+def test_sigsoftmax():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        mixture_of_softmax = True,
+        sigsoftmax_logits = True,
+        attn_layers = Decoder(
+            attn_sigsoftmax = True,
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    logits = model(x)
+
+    model.eval()
+
+    eval_logits = model(x)
