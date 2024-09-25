@@ -259,3 +259,23 @@ def test_recycling():
     model.eval()
 
     eval_logits = model(x, recycle_steps = 3)
+
+def test_mos():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        mixture_of_softmax = True,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    logits = model(x)
+
+    model.eval()
+
+    eval_logits = model(x, recycle_steps = 3)
