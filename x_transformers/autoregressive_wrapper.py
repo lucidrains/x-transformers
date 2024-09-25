@@ -317,7 +317,9 @@ class AutoregressiveWrapper(Module):
             **kwargs
         )
 
-        loss = F.cross_entropy(
+        loss_fn = F.cross_entropy if not self.net.is_log_prob else F.nll_loss
+
+        loss = loss_fn(
             rearrange(logits, 'b n c -> b c n'),
             target,
             ignore_index = ignore_index

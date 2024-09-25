@@ -2221,4 +2221,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```
+@article{Yang2017BreakingTS,
+  title     = {Breaking the Softmax Bottleneck: A High-Rank RNN Language Model},
+  author    = {Zhilin Yang and Zihang Dai and Ruslan Salakhutdinov and William W. Cohen},
+  journal   = {ArXiv},
+  year      = {2017},
+  volume    = {abs/1711.03953},
+  url       = {https://api.semanticscholar.org/CorpusID:26238954}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
