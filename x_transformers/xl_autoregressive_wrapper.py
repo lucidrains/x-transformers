@@ -133,7 +133,7 @@ class XLAutoregressiveWrapper(nn.Module):
         split_labels = labels.split(max_seq_len, dim = -1)
         loss_weights = tuple((t.shape[-1] / seq_len) for t in split_x)
 
-        loss_fn = F.cross_entropy if not self.net.is_log_prob else F.nll_loss
+        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
 
         # go through each chunk and derive weighted losses
 

@@ -2078,7 +2078,7 @@ class TransformerWrapper(Module):
 
         # output type
 
-        self.is_log_prob = mixture_of_softmax
+        self.output_is_log_prob = mixture_of_softmax
 
         self.to_mixture = None
         self.combine_mixture = None
