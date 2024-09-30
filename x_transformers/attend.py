@@ -13,7 +13,7 @@ from functools import wraps
 from packaging import version
 from dataclasses import dataclass
 
-from einops import rearrange, repeat
+from einops import rearrange, repeat, pack, unpack
 
 # constants
 
@@ -39,8 +39,15 @@ def default(val, d):
 def compact(arr):
     return [*filter(exists, arr)]
 
-def softclamp(t, value):
+@torch.jit.script
+def softclamp(t: Tensor, value: float):
     return (t / value).tanh() * value
+
+def pack_one(t, pattern):
+    return pack([t], pattern)
+
+def unpack_one(t, ps, pattern):
+    return unpack(t, ps, pattern)[0]
 
 def once(fn):
     called = False
@@ -54,6 +61,18 @@ def once(fn):
     return inner
 
 print_once = once(print)
+
+# alternative distance functions
+
+def qk_l2_dist_squared(q, k):
+    if k.ndim == 3:
+        k = repeat(k, 'b j d -> b h j d', h = q.shape[1])
+
+    q, packed_shape = pack_one(q, '* i d')
+    k, _ = pack_one(k, '* j d')
+
+    l2_dist_squared = torch.cdist(q, k) ** 2
+    return unpack_one(l2_dist_squared, packed_shape, '* i j')
 
 # functions for creating causal mask
 # need a special one for onnx cpu (no support for .triu)
@@ -80,6 +99,7 @@ class Attend(Module):
         sparse_topk = None,
         scale = None,
         qk_norm = False,
+        l2_distance = False,
         flash = False,
         softclamp_logits = False,
         logit_softclamp_value = 50.,
@@ -122,6 +142,11 @@ class Attend(Module):
 
         assert not (flash and sigsoftmax), 'sigsoftmax not available for flash attention'
         self.sigsoftmax = sigsoftmax
+
+        # l2 distance attention
+
+        assert not (flash and l2_distance), 'l2 distance attention does not work with flash attention just yet'
+        self.l2_distance = l2_distance
 
         # add a key / value token composed of zeros
         # in case this helps controlling outliers, proposed by https://www.evanmiller.org/attention-is-off-by-one.html
@@ -325,7 +350,12 @@ class Attend(Module):
 
         kv_einsum_eq = 'b j d' if k.ndim == 3 else 'b h j d'
 
-        sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+        if not self.l2_distance:
+            sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k)
+        else:
+            sim = -qk_l2_dist_squared(q, k)
+
+        sim = sim * scale
 
         if exists(prev_attn):
             sim = sim + prev_attn
