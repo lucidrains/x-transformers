@@ -2239,6 +2239,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     booktitle = {Neural Information Processing Systems},
     year    = {2018},
     url     = {https://api.semanticscholar.org/CorpusID:44064935}
+```
+
+```bibtex
+@article{Kim2020TheLC,
+    title   = {The Lipschitz Constant of Self-Attention},
+    author  = {Hyunjik Kim and George Papamakarios and Andriy Mnih},
+    journal = {ArXiv},
+    year    = {2020},
+    volume  = {abs/2006.04710},
+    url     = {https://api.semanticscholar.org/CorpusID:219530837}
 }
 ```
 
