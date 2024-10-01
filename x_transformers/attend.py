@@ -145,7 +145,6 @@ class Attend(Module):
 
         # l2 distance attention
 
-        assert not (flash and l2_distance), 'l2 distance attention does not work with flash attention just yet'
         self.l2_distance = l2_distance
 
         # add a key / value token composed of zeros
@@ -207,6 +206,17 @@ class Attend(Module):
 
         if v.ndim == 3:
             v = repeat(v, 'b ... -> b h ...', h = q.shape[1])
+
+        # handle maybe l2 distance
+
+        if self.l2_distance:
+            k_norm_sq = k.norm(dim = -1, keepdim = True) ** 2
+            k = F.pad(k, (0, 1), value = 1.)
+            k = torch.cat((k, -k_norm_sq), dim = -1)
+
+            q_norm_sq = q.norm(dim = -1, keepdim = True) ** 2
+            q = torch.cat((2 * q, -q_norm_sq), dim = -1)
+            q = F.pad(q, (0, 1), value = 1.)
 
         # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
 
