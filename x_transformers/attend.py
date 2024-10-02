@@ -211,12 +211,12 @@ class Attend(Module):
 
         if self.l2_distance:
             k_norm_sq = k.norm(dim = -1, keepdim = True) ** 2
-            k = F.pad(k, (0, 1), value = 1.)
-            k = torch.cat((k, -k_norm_sq), dim = -1)
+            k = F.pad(k, (0, 1), value = -1.)
+            k = torch.cat((k, k_norm_sq), dim = -1)
 
             q_norm_sq = q.norm(dim = -1, keepdim = True) ** 2
-            q = torch.cat((2 * q, -q_norm_sq), dim = -1)
-            q = F.pad(q, (0, 1), value = 1.)
+            q = torch.cat((2 * q, q_norm_sq), dim = -1)
+            q = F.pad(q, (0, 1), value = -1.)
 
         # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
 
