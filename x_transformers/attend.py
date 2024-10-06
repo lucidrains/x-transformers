@@ -36,6 +36,9 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
+def at_most_one_of(*bools):
+    return sum([*map(int, bools)]) <= 1
+
 def compact(arr):
     return [*filter(exists, arr)]
 
@@ -100,6 +103,7 @@ class Attend(Module):
         scale = None,
         qk_norm = False,
         l2_distance = False,
+        sigmoid = False,
         flash = False,
         softclamp_logits = False,
         logit_softclamp_value = 50.,
@@ -116,10 +120,25 @@ class Attend(Module):
         super().__init__()
         self.scale = scale
 
+        # causal related
+
         self.causal = causal
         self.create_causal_mask = onnx_create_causal_mask if onnxable else create_causal_mask
 
-        self.attn_fn = partial(F.softmax, dtype = torch.float32) if not qk_norm else F.softmax
+        # attention type
+
+        assert not (flash and sigmoid), 'sigmoid attention not available for flash'
+        assert at_most_one_of(sigmoid, l2_distance)
+
+        self.sigmoid = sigmoid
+
+        if not sigmoid:
+            softmax_fn = partial(F.softmax, dim = -1)
+            self.attn_fn = partial(softmax_fn, dtype = torch.float32) if not qk_norm else softmax_fn
+        else:
+            self.attn_fn = F.sigmoid
+
+        # dropouts
 
         self.dropout = dropout
         self.attn_dropout = nn.Dropout(dropout)
@@ -410,7 +429,7 @@ class Attend(Module):
         if self.sigsoftmax:
             sim = sim + sim.sigmoid().log()
 
-        attn = self.attn_fn(sim, dim = -1)
+        attn = self.attn_fn(sim)
         attn = attn.type(dtype)
 
         post_softmax_attn = attn

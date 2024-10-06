@@ -2252,4 +2252,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Ramapuram2024TheoryAA,
+    title   = {Theory, Analysis, and Best Practices for Sigmoid Self-Attention},
+    author  = {Jason Ramapuram and Federico Danieli and Eeshan Gunesh Dhekane and Floris Weers and Dan Busbridge and Pierre Ablin and Tatiana Likhomanenko and Jagrit Digani and Zijin Gu and Amitis Shidani and Russ Webb},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:272463580}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
