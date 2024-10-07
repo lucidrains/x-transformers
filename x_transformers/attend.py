@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Tuple
+from typing import Tuple, Callable
 
 import torch
 from torch.nn import Module
@@ -104,6 +104,7 @@ class Attend(Module):
         qk_norm = False,
         l2_distance = False,
         sigmoid = False,
+        custom_attn_fn: Callable | None = None,
         flash = False,
         softclamp_logits = False,
         logit_softclamp_value = 50.,
@@ -132,7 +133,9 @@ class Attend(Module):
 
         self.sigmoid = sigmoid
 
-        if not sigmoid:
+        if exists(custom_attn_fn):
+            self.attn_fn = custom_attn_fn
+        elif not sigmoid:
             softmax_fn = partial(F.softmax, dim = -1)
             self.attn_fn = partial(softmax_fn, dtype = torch.float32) if not qk_norm else softmax_fn
         else:
@@ -404,17 +407,17 @@ class Attend(Module):
 
         mask_value = -torch.finfo(sim.dtype).max
 
-        if exists(self.sparse_topk) and self.sparse_topk < j:
-            top_values, _ = sim.topk(self.sparse_topk, dim = -1)
-            sparse_topk_mask = sim < top_values[..., -1:]
-            mask = (mask & sparse_topk_mask) if exists(mask) else sparse_topk_mask
-
         if exists(mask):
             sim = sim.masked_fill(~mask, mask_value)
 
         if causal:
             causal_mask = self.create_causal_mask(i, j, device = device)
             sim = sim.masked_fill(causal_mask, mask_value)
+
+        if exists(self.sparse_topk):
+            top_values, _ = sim.topk(self.sparse_topk, dim = -1)
+            sparse_topk_mask = (sim >= top_values[..., -1:]) & (sim > mask_value)
+            sim = sim.masked_fill(~sparse_topk_mask, mask_value)
 
         row_is_entirely_masked = None
 
