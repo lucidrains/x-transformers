@@ -2261,4 +2261,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Leviathan2024SelectiveAI,
+    title   = {Selective Attention Improves Transformer},
+    author  = {Yaniv Leviathan and Matan Kalman and Yossi Matias},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273098114}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
