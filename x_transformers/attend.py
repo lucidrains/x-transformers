@@ -185,6 +185,9 @@ class Attend(Module):
             self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
             self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
 
+            nn.init.dirac_(self.pre_softmax_talking_heads.weight)
+            nn.init.dirac_(self.post_softmax_talking_heads.weight)
+
         # selective attention
 
         assert not (flash and selective), 'selective attention cannot work on flash attention'
