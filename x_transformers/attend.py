@@ -65,6 +65,35 @@ def once(fn):
 
 print_once = once(print)
 
+# selective attention
+# https://arxiv.org/abs/2410.02703 - section 3.3
+# it is a parameter-less technique to allow each token to prevent itself from being attended to by future tokens
+# if sim_head_gate not supplied, will use the first head of the attention logits (sim in this framework)
+
+def selective_attn(
+    sim,
+    sim_head_gate = None,
+    no_mask_sos = True
+):
+    i, j, device = *sim.shape[-2:], sim.device
+    sim_head_gate = default(sim_head_gate, sim[:, 0])
+
+    gate = F.relu(sim_head_gate) # only positive
+
+    if no_mask_sos:
+        gate[..., -i] = 0.
+
+    eye = torch.eye(j, device = device)
+
+    if j > i:
+        eye = F.pad(eye, (j - i, 0), value = 1.)
+
+    gate = (1. - eye) * gate
+    gate = F.pad(gate, (0, 0, 1, -1), value = 0.) # only allow for masking the future
+    gate = gate.cumsum(dim = -2)
+
+    return sim - rearrange(gate, 'b i j -> b 1 i j')
+
 # alternative distance functions
 
 def qk_l2_dist_squared(q, k):
@@ -109,6 +138,7 @@ class Attend(Module):
         softclamp_logits = False,
         logit_softclamp_value = 50.,
         add_zero_kv = False,
+        selective = False,
         sigsoftmax = False,
         cope = None,
         onnxable = False,
@@ -154,6 +184,11 @@ class Attend(Module):
         if talking_heads:
             self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
             self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
+
+        # selective attention
+
+        assert not (selective and not causal), 'selective attention is designed for autoregressive'
+        self.selective = selective
 
         # sparse topk
 
@@ -426,6 +461,9 @@ class Attend(Module):
 
         if exists(self.cope):
             sim = sim + self.cope(q, sim)
+
+        if self.selective:
+            sim = selective_attn(sim)
 
         pre_softmax_attn = sim
 
