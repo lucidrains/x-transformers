@@ -549,7 +549,8 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_talking_heads = True  # turn on information exchange between attention heads
+        attn_pre_talking_heads = True,  # linear combination across pre-softmax attn logits across heads
+        attn_post_talking_heads = True  # linear combination across post-softmax attn across heads
     )
 )
 ```

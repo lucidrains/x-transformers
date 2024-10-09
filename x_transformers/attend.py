@@ -128,7 +128,8 @@ class Attend(Module):
         dropout = 0.,
         causal = False,
         heads = None,
-        talking_heads = False,
+        pre_talking_heads = True,
+        post_talking_heads = True,
         sparse_topk = None,
         scale = None,
         qk_norm = False,
@@ -179,14 +180,15 @@ class Attend(Module):
 
         # talking heads
 
-        assert not (flash and talking_heads), 'talking heads not compatible with flash attention'
+        assert not (flash and (pre_talking_heads or post_talking_heads)), 'talking heads not compatible with flash attention'
 
-        self.talking_heads = talking_heads
-        if talking_heads:
-            self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
-            self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False)
+        self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if pre_talking_heads else None
+        self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if post_talking_heads else None
 
+        if exists(self.pre_softmax_talking_heads):
             nn.init.dirac_(self.pre_softmax_talking_heads.weight)
+
+        if exists(self.post_softmax_talking_heads):
             nn.init.dirac_(self.post_softmax_talking_heads.weight)
 
         # selective attention
@@ -434,8 +436,8 @@ class Attend(Module):
 
         qk_similarities = sim.clone()
 
-        if self.talking_heads:
-            sim = self.pre_softmax_talking_heads(sim)
+        if exists(self.pre_softmax_talking_heads):
+            sim = sim + self.pre_softmax_talking_heads(sim)
 
         if exists(attn_bias):
             sim = sim + attn_bias
@@ -482,7 +484,7 @@ class Attend(Module):
 
         attn = self.attn_dropout(attn)
 
-        if self.talking_heads:
+        if exists(self.post_softmax_talking_heads):
             attn = self.post_softmax_talking_heads(attn)
 
         out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn, v)
