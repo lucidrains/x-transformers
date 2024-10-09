@@ -128,8 +128,9 @@ class Attend(Module):
         dropout = 0.,
         causal = False,
         heads = None,
-        pre_talking_heads = True,
-        post_talking_heads = True,
+        pre_talking_heads = False,
+        post_talking_heads = False,
+        pre_scale_post_talking_heads = False,
         sparse_topk = None,
         scale = None,
         qk_norm = False,
@@ -180,16 +181,21 @@ class Attend(Module):
 
         # talking heads
 
-        assert not (flash and (pre_talking_heads or post_talking_heads)), 'talking heads not compatible with flash attention'
+        assert not (flash and (pre_talking_heads or post_talking_heads or pre_scale_post_talking_heads)), 'talking heads not compatible with flash attention'
 
         self.pre_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if pre_talking_heads else None
         self.post_softmax_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if post_talking_heads else None
+        self.pre_scale_post_talking_heads = nn.Conv2d(heads, heads, 1, bias = False) if pre_scale_post_talking_heads else None
 
         if exists(self.pre_softmax_talking_heads):
             nn.init.dirac_(self.pre_softmax_talking_heads.weight)
 
         if exists(self.post_softmax_talking_heads):
             nn.init.dirac_(self.post_softmax_talking_heads.weight)
+
+        if exists(self.pre_scale_post_talking_heads):
+            # an improvisation where heads are combined pre-softmax attention, then used to scale post-softmax attention
+            nn.init.dirac_(self.pre_scale_post_talking_heads.weight)
 
         # selective attention
 
@@ -436,6 +442,9 @@ class Attend(Module):
 
         qk_similarities = sim.clone()
 
+        if exists(self.pre_scale_post_talking_heads):
+            pre_to_post_scale = self.pre_scale_post_talking_heads(sim)
+
         if exists(self.pre_softmax_talking_heads):
             sim = sim + self.pre_softmax_talking_heads(sim)
 
@@ -486,6 +495,9 @@ class Attend(Module):
 
         if exists(self.post_softmax_talking_heads):
             attn = self.post_softmax_talking_heads(attn)
+
+        if exists(self.pre_scale_post_talking_heads):
+            attn = attn * pre_to_post_scale
 
         out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn, v)
 
