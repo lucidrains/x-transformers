@@ -67,7 +67,7 @@ print_once = once(print)
 
 # selective attention
 # https://arxiv.org/abs/2410.02703 - section 3.3
-# it is a parameter-less technique to allow each token to prevent itself from being attended to by future tokens
+# it is a technique to allow each token to prevent itself from being attended to by future tokens
 # if sim_head_gate not supplied, will use the first head of the attention logits (sim in this framework)
 
 def selective_attn(
@@ -81,9 +81,10 @@ def selective_attn(
     gate = F.relu(sim_head_gate) # only positive
 
     if no_mask_sos:
+        gate = gate.clone()
         gate[..., -i] = 0.
 
-    eye = torch.eye(j, device = device)
+    eye = torch.eye(i, device = device)
 
     if j > i:
         eye = F.pad(eye, (j - i, 0), value = 1.)

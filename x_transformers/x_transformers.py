@@ -1084,6 +1084,10 @@ class Attention(Module):
 
         self.rotary_embed_values = rotary_embed_values
 
+        # whether parent can kv cache
+
+        self.can_cache_kv = not selective
+
         # init output projection 0
 
         if zero_init_output:
@@ -1634,6 +1638,10 @@ class AttentionLayers(Module):
                 residual
             ]))
 
+        # determine whether can cache kv
+
+        self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention) ])
+
     def forward(
         self,
         x,
@@ -2135,7 +2143,7 @@ class TransformerWrapper(Module):
 
         # whether can do cached kv decoding
 
-        self.can_cache_kv = self.num_memory_tokens == 0 and not recycling
+        self.can_cache_kv = self.num_memory_tokens == 0 and not recycling and self.attn_layers.can_cache_kv
         self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def init_(self):
