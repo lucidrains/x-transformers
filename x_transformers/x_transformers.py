@@ -919,6 +919,7 @@ class Attention(Module):
         swiglu_values = False,
         gate_values = False,
         zero_init_output = False,
+        hard = False,
         sigsoftmax = False,
         max_attend_past = None,
         qk_norm = False,
@@ -1043,6 +1044,7 @@ class Attention(Module):
             pre_scale_post_talking_heads = pre_scale_post_talking_heads,
             dropout = dropout,
             sparse_topk = sparse_topk,
+            hard = hard,
             qk_norm = qk_norm,
             scale = qk_norm_scale if qk_norm else self.scale,
             l2_distance = l2_distance,
@@ -1612,6 +1614,7 @@ class AttentionLayers(Module):
                 layer = post_branch_fn(layer)
 
             residual_fn = GRUGating if gate_residual else Residual
+
             residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
             # handle unet skip connection

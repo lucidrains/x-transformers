@@ -107,6 +107,15 @@ def qk_l2_dist_squared(q, k):
     l2_dist_squared = torch.cdist(q, k) ** 2
     return unpack_one(l2_dist_squared, packed_shape, '* i j')
 
+# one-hot straight through softmax
+
+def one_hot_straight_through(t, temperature = 1.):
+    one_hot_indices = t.argmax(dim = -1, keepdim = True)
+    one_hot = torch.zeros_like(t).scatter(-1, one_hot_indices, 1.)
+
+    t = (t / temperature).softmax(dim = -1)
+    return one_hot + t - t.detach()
+
 # functions for creating causal mask
 # need a special one for onnx cpu (no support for .triu)
 
@@ -142,6 +151,7 @@ class Attend(Module):
         logit_softclamp_value = 50.,
         add_zero_kv = False,
         selective = False,
+        hard = False,
         sigsoftmax = False,
         cope = None,
         onnxable = False,
@@ -162,17 +172,18 @@ class Attend(Module):
         # attention type
 
         assert not (flash and sigmoid), 'sigmoid attention not available for flash'
-        assert at_most_one_of(sigmoid, l2_distance)
-
-        self.sigmoid = sigmoid
+        assert not (flash and hard), 'hard attention not available for flash'
+        assert at_most_one_of(sigmoid, hard, l2_distance)
 
         if exists(custom_attn_fn):
             self.attn_fn = custom_attn_fn
-        elif not sigmoid:
+        elif sigmoid:
+            self.attn_fn = F.sigmoid
+        elif hard:
+            self.attn_fn = one_hot_straight_through
+        else:
             softmax_fn = partial(F.softmax, dim = -1)
             self.attn_fn = partial(softmax_fn, dtype = torch.float32) if not qk_norm else softmax_fn
-        else:
-            self.attn_fn = F.sigmoid
 
         # dropouts
 
@@ -487,6 +498,7 @@ class Attend(Module):
             sim = sim + sim.sigmoid().log()
 
         attn = self.attn_fn(sim)
+
         attn = attn.type(dtype)
 
         post_softmax_attn = attn
