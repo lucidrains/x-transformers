@@ -525,7 +525,23 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_sparse_topk = 8 # keep only the top 8 values before attention (softmax)
+        attn_sparse_topk = 8,                   # keep only the top 8 values before attention (softmax)
+        sparse_topk_straight_through = True     # straight through the original gradients
+    )
+)
+```
+
+An extreme case of `topk` value of `1`, you can use the following
+
+```python
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_hard = True  # will only propagate the single value of the argmax of qk logit. offered in the case it addresses https://arxiv.org/abs/2410.01104
     )
 )
 ```
