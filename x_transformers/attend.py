@@ -109,12 +109,30 @@ def qk_l2_dist_squared(q, k):
 
 # one-hot straight through softmax
 
-def one_hot_straight_through(t, temperature = 1.):
-    one_hot_indices = t.argmax(dim = -1, keepdim = True)
-    one_hot = torch.zeros_like(t).scatter(-1, one_hot_indices, 1.)
+def one_hot_straight_through(logits, temperature = 1.):
+    one_hot_indices = logits.argmax(dim = -1, keepdim = True)
+    one_hot = torch.zeros_like(logits).scatter(-1, one_hot_indices, 1.)
 
-    t = (t / temperature).softmax(dim = -1)
-    return one_hot + t - t.detach()
+    soft_attn = (logits / temperature).softmax(dim = -1)
+    return one_hot + soft_attn - soft_attn.detach()
+
+# sparse topk attention - only keep topk attn logits for softmax
+# optional straight through with masked out logits by setting `attn_sparse_topk_straight_through = True`
+
+def sparse_topk_attn(logits, sparse_topk, temperature = 1., straight_through = False):
+    orig_logits = logits
+
+    mask_value = -torch.finfo(logits.dtype).max
+    top_values, _ = logits.topk(sparse_topk, dim = -1)
+    sparse_topk_mask = (logits >= top_values[..., -1:]) & (logits > mask_value)
+    logits = logits.masked_fill(~sparse_topk_mask, mask_value)
+    topk_attn = logits.softmax(dim = -1)
+
+    if not straight_through:
+        return topk_attn
+
+    soft_attn = (orig_logits / temperature).softmax(dim = -1)
+    return topk_attn + soft_attn - soft_attn.detach()
 
 # functions for creating causal mask
 # need a special one for onnx cpu (no support for .triu)
@@ -141,6 +159,7 @@ class Attend(Module):
         post_talking_heads = False,
         pre_scale_post_talking_heads = False,
         sparse_topk = None,
+        sparse_topk_straight_through = False,
         scale = None,
         qk_norm = False,
         l2_distance = False,
@@ -152,7 +171,6 @@ class Attend(Module):
         add_zero_kv = False,
         selective = False,
         hard = False,
-        sigsoftmax = False,
         cope = None,
         onnxable = False,
         sdp_kwargs: dict = dict(
@@ -171,9 +189,13 @@ class Attend(Module):
 
         # attention type
 
+        is_sparse_topk_attn = exists(sparse_topk)
+
         assert not (flash and sigmoid), 'sigmoid attention not available for flash'
         assert not (flash and hard), 'hard attention not available for flash'
-        assert at_most_one_of(sigmoid, hard, l2_distance)
+        assert not (flash and is_sparse_topk_attn), 'topk attention not available for flash'
+
+        assert at_most_one_of(sigmoid, hard, l2_distance, is_sparse_topk_attn)
 
         if exists(custom_attn_fn):
             self.attn_fn = custom_attn_fn
@@ -181,6 +203,8 @@ class Attend(Module):
             self.attn_fn = F.sigmoid
         elif hard:
             self.attn_fn = one_hot_straight_through
+        elif is_sparse_topk_attn:
+            self.attn_fn = partial(sparse_topk_attn, sparse_topk = sparse_topk, straight_through = sparse_topk_straight_through)
         else:
             softmax_fn = partial(F.softmax, dim = -1)
             self.attn_fn = partial(softmax_fn, dtype = torch.float32) if not qk_norm else softmax_fn
@@ -213,16 +237,6 @@ class Attend(Module):
         assert not (flash and selective), 'selective attention cannot work on flash attention'
         assert not (selective and not causal), 'selective attention is designed for autoregressive'
         self.selective = selective
-
-        # sparse topk
-
-        assert not (flash and sparse_topk), 'sparse topk not compatible with flash attention'
-        self.sparse_topk = sparse_topk
-
-        # sig softmax
-
-        assert not (flash and sigsoftmax), 'sigsoftmax not available for flash attention'
-        self.sigsoftmax = sigsoftmax
 
         # l2 distance attention
 
@@ -476,11 +490,6 @@ class Attend(Module):
             causal_mask = self.create_causal_mask(i, j, device = device)
             sim = sim.masked_fill(causal_mask, mask_value)
 
-        if exists(self.sparse_topk):
-            top_values, _ = sim.topk(self.sparse_topk, dim = -1)
-            sparse_topk_mask = (sim >= top_values[..., -1:]) & (sim > mask_value)
-            sim = sim.masked_fill(~sparse_topk_mask, mask_value)
-
         row_is_entirely_masked = None
 
         if exists(mask):
@@ -493,9 +502,6 @@ class Attend(Module):
             sim = selective_attn(sim)
 
         pre_softmax_attn = sim
-
-        if self.sigsoftmax:
-            sim = sim + sim.sigmoid().log()
 
         attn = self.attn_fn(sim)
 
