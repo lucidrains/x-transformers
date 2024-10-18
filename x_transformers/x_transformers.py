@@ -1107,6 +1107,7 @@ class Attention(Module):
         context_mask = None,
         attn_mask = None,
         rel_pos = None,
+        attn_bias = None,
         rotary_pos_emb = None,
         prev_attn = None,
         mem = None,
@@ -1237,8 +1238,8 @@ class Attention(Module):
 
         # prepare relative positional bias, if needed
 
-        attn_bias = None
         if exists(rel_pos):
+            assert not exists(attn_bias)
             attn_bias = rel_pos(i, j)
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
