@@ -525,8 +525,8 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_sparse_topk = 8,                   # keep only the top 8 values before attention (softmax)
-        sparse_topk_straight_through = True     # straight through the original gradients
+        attn_sparse_topk = 8,                       # keep only the top 8 values before attention (softmax)
+        attn_sparse_topk_straight_through = True    # straight through the original gradients
     )
 )
 ```
