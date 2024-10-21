@@ -442,10 +442,10 @@ class DynamicPositionBias(Module):
         return bias
 
 class AlibiPositionalBias(Module):
-    def __init__(self, heads, total_heads, **kwargs):
+    def __init__(self, heads, total_heads = None, **kwargs):
         super().__init__()
         self.heads = heads
-        self.total_heads = total_heads
+        self.total_heads = default(total_heads, heads)
 
         slopes = Tensor(self._get_slopes(heads))
         slopes = rearrange(slopes, 'h -> h 1 1')
@@ -1665,6 +1665,7 @@ class AttentionLayers(Module):
         cache_age = 1,
         return_hiddens = False,
         rotary_pos_emb = None,
+        attn_bias = None,
         condition = None,
         layers_execute_order: tuple[int, ...] | None = None
     ):
@@ -1818,7 +1819,7 @@ class AttentionLayers(Module):
             block = partial(block, **block_forward_kwargs)
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), return_intermediates = True)
             elif layer_type == 'f':
