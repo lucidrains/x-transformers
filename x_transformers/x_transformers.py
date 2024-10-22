@@ -1353,6 +1353,7 @@ class AttentionLayers(Module):
         use_layerscale = False,
         layerscale_init_value = 0.,
         unet_skips = False,
+        reinject_input = True, # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
         **kwargs
     ):
         super().__init__()
@@ -1582,6 +1583,11 @@ class AttentionLayers(Module):
 
         self.skip_combines = ModuleList([])
 
+        # whether there is reinjection of input at every layer
+
+        self.reinject_input = reinject_input
+        self.reinject_input_proj = nn.Linear(dim, dim, bias = False) if reinject_input else None
+
         # iterate and construct layers
 
         for ind, (layer_type, layer_shift_tokens) in enumerate(zip(self.layer_types, shift_tokens)):
@@ -1766,6 +1772,11 @@ class AttentionLayers(Module):
 
         layer_variables = tuple(tuple(layer_variable[i] for i in layers_execute_order) for layer_variable in layer_variables)
 
+        # derived input for reinjection if needed
+
+        if self.reinject_input:
+            inp_inject = self.reinject_input_proj(x)
+
         # store all hiddens for skips
 
         skip_hiddens = []
@@ -1809,6 +1820,9 @@ class AttentionLayers(Module):
                 pre_norm = maybe(partial)(pre_norm, **norm_kwargs)
                 post_branch_norm = maybe(partial)(post_branch_norm, **norm_kwargs)
                 post_main_norm = maybe(partial)(post_main_norm, **norm_kwargs)
+
+            if self.reinject_input:
+                x = x + inp_inject
 
             if exists(pre_norm):
                 x = pre_norm(x)

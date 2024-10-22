@@ -298,3 +298,21 @@ def test_l2_distance(attn_one_kv_head):
     x = torch.randint(0, 256, (1, 1024))
 
     model(x)
+
+def test_reinject_input():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        recycling = True,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8,
+            reinject_input = True
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 12))
+
+    model(x) # (1, 1024, 20000)

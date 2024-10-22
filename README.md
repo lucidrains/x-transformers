@@ -2287,4 +2287,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Bai2019DeepEM,
+    title   = {Deep Equilibrium Models},
+    author  = {Shaojie Bai and J. Zico Kolter and Vladlen Koltun},
+    journal = {ArXiv},
+    year    = {2019},
+    volume  = {abs/1909.01377},
+    url     = {https://api.semanticscholar.org/CorpusID:202539738}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
