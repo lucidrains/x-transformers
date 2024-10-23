@@ -18,7 +18,8 @@ from x_transformers.x_transformers import (
     AttentionLayers,
     TokenEmbedding,
     ScaledSinusoidalEmbedding,
-    AbsolutePositionalEmbedding
+    AbsolutePositionalEmbedding,
+    always
 )
 
 from x_transformers.autoregressive_wrapper import (
