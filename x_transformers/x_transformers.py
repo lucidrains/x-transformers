@@ -1353,7 +1353,7 @@ class AttentionLayers(Module):
         use_layerscale = False,
         layerscale_init_value = 0.,
         unet_skips = False,
-        reinject_input = True, # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
+        reinject_input = False, # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
         **kwargs
     ):
         super().__init__()
@@ -1673,6 +1673,7 @@ class AttentionLayers(Module):
         rotary_pos_emb = None,
         attn_bias = None,
         condition = None,
+        in_attn_cond = None, # https://arxiv.org/abs/2105.04090
         layers_execute_order: tuple[int, ...] | None = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
@@ -1775,7 +1776,12 @@ class AttentionLayers(Module):
         # derived input for reinjection if needed
 
         if self.reinject_input:
+            assert not exists(in_attn_cond)
             inp_inject = self.reinject_input_proj(x)
+
+        elif exists(in_attn_cond):
+            # handle in-attention conditioning, which serves the same purpose of having the network learn the residual
+            inp_inject = in_attn_cond if in_attn_cond.ndim == 3 else rearrange(in_attn_cond, 'b d -> b 1 d')
 
         # store all hiddens for skips
 

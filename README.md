@@ -2298,4 +2298,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Wu2021MuseMorphoseFA,
+    title   = {MuseMorphose: Full-Song and Fine-Grained Piano Music Style Transfer With One Transformer VAE},
+    author  = {Shih-Lun Wu and Yi-Hsuan Yang},
+    journal = {IEEE/ACM Transactions on Audio, Speech, and Language Processing},
+    year    = {2021},
+    volume  = {31},
+    pages   = {1953-1967},
+    url     = {https://api.semanticscholar.org/CorpusID:234338162}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
