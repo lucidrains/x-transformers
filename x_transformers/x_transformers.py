@@ -1803,7 +1803,10 @@ class AttentionLayers(Module):
 
         skip_hiddens = []
 
+        # for value residuals
+
         first_self_attn_inter = None
+        first_cross_attn_inter = None
 
         # go through the attention and feedforward layers
 
@@ -1856,19 +1859,34 @@ class AttentionLayers(Module):
 
             block = partial(block, **block_forward_kwargs)
 
-            maybe_value_residual = None
-            if self.add_value_residual and exists(first_self_attn_inter):
-                maybe_value_residual = first_self_attn_inter.values
+            # handle maybe value residuals
+
+            maybe_self_attn_value_residual = None
+            maybe_cross_attn_value_residual = None
+
+            if self.add_value_residual:
+                if exists(first_self_attn_inter):
+                    maybe_self_attn_value_residual = first_self_attn_inter.values
+
+                if exists(first_cross_attn_inter):
+                    maybe_cross_attn_value_residual = first_cross_attn_inter.values
+
+            # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
             elif layer_type == 'c':
-                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), return_intermediates = True)
+                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, return_intermediates = True)
             elif layer_type == 'f':
                 out = block(x)
 
+            # store first self or cross attention intermediate for value residual
+
             if not exists(first_self_attn_inter) and layer_type == 'a':
                 first_self_attn_inter = inter
+
+            if not exists(first_cross_attn_inter) and layer_type == 'c':
+                first_cross_attn_inter = inter
 
             if self.resi_dual:
                 outer_residual = outer_residual + out * self.resi_dual_scale
