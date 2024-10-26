@@ -313,6 +313,23 @@ def test_reinject_input():
         )
     )
 
-    x = torch.randint(0, 256, (1, 12))
+    x = torch.randint(0, 256, (1, 1024))
 
     model(x) # (1, 1024, 20000)
+
+def test_value_residual():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            add_value_residual = True,
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    model(x)

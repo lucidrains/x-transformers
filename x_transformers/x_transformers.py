@@ -1114,6 +1114,7 @@ class Attention(Module):
         mem_mask = None,
         return_intermediates = False,
         cache: Intermediates | None = None,
+        value_residual = None
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context)
 
@@ -1243,6 +1244,12 @@ class Attention(Module):
             attn_bias = rel_pos(i, j)
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
+        # previous values passed in
+        # https://arxiv.org/abs/2410.17897v1
+
+        if exists(value_residual):
+            v = v + value_residual
+
         # attention is all we need
 
         out, intermediates = self.attend(
@@ -1251,6 +1258,10 @@ class Attention(Module):
             attn_bias = attn_bias,
             prev_attn = prev_attn
         )
+
+        # store the values for resformer from Zhou et al. https://arxiv.org/abs/2410.17897v1
+
+        intermediates.values = v
 
         # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
 
@@ -1354,6 +1365,7 @@ class AttentionLayers(Module):
         layerscale_init_value = 0.,
         unet_skips = False,
         reinject_input = False, # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
+        add_value_residual = False, # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1 | TODO: also add NeuTRENO from Nguyen et al. https://arxiv.org/abs/2312.00751
         **kwargs
     ):
         super().__init__()
@@ -1588,6 +1600,10 @@ class AttentionLayers(Module):
         self.reinject_input = reinject_input
         self.reinject_input_proj = nn.Linear(dim, dim, bias = False) if reinject_input else None
 
+        # add the value from the first self attention block to all latter projected self attention values as a residual
+
+        self.add_value_residual = add_value_residual
+
         # iterate and construct layers
 
         for ind, (layer_type, layer_shift_tokens) in enumerate(zip(self.layer_types, shift_tokens)):
@@ -1787,6 +1803,8 @@ class AttentionLayers(Module):
 
         skip_hiddens = []
 
+        first_self_attn_inter = None
+
         # go through the attention and feedforward layers
 
         for ind, (layer_type, skip_combine, (norm, block, residual_fn), layer_dropout) in enumerate(zip(*layer_variables)):
@@ -1838,12 +1856,19 @@ class AttentionLayers(Module):
 
             block = partial(block, **block_forward_kwargs)
 
+            maybe_value_residual = None
+            if self.add_value_residual and exists(first_self_attn_inter):
+                maybe_value_residual = first_self_attn_inter.values
+
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_value_residual, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), return_intermediates = True)
             elif layer_type == 'f':
                 out = block(x)
+
+            if not exists(first_self_attn_inter) and layer_type == 'a':
+                first_self_attn_inter = inter
 
             if self.resi_dual:
                 outer_residual = outer_residual + out * self.resi_dual_scale

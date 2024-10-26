@@ -22,6 +22,7 @@ class Intermediates:
     qk_similarities:    Tensor | None = None
     pre_softmax_attn:   Tensor | None = None
     post_softmax_attn:  Tensor | None = None
+    values:             Tensor | None = None
     cached_kv:          Tuple[Tensor, Tensor] | None = None
     layer_type:         str | None = None
 
