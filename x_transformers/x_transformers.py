@@ -944,6 +944,8 @@ class Attention(Module):
         cope_talking_heads = False,
         softclamp_logits = False,
         logit_softclamp_value = 50.,
+        neutreno_value_residual = False, # Nguyen et al. https://arxiv.org/abs/2312.00751
+        neutreno_alpha = 0.4,
         onnxable = False
     ):
         super().__init__()
@@ -981,6 +983,11 @@ class Attention(Module):
         # relations projection from tp-attention
 
         self.to_r = LinearNoBias(dim, v_dim) if tensor_product else None
+
+        # the value residual used by Nguyen et al. in https://arxiv.org/abs/2312.00751 for countering oversmoothing
+
+        self.neutreno_value_residual = neutreno_value_residual
+        self.neutreno_alpha = neutreno_alpha
 
         # add GLU gating for aggregated values, from alphafold2
 
@@ -1244,11 +1251,15 @@ class Attention(Module):
             attn_bias = rel_pos(i, j)
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
-        # previous values passed in
-        # https://arxiv.org/abs/2410.17897v1
+        # if previous values passed in for residual, either invoke resformer or neutreno
 
         if exists(value_residual):
-            v = v + value_residual
+            if self.neutreno_value_residual:
+                diff_values = (value_residual - v) * self.neutreno_alpha
+                diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
+            else:
+                # https://arxiv.org/abs/2410.17897v1
+                v = v + value_residual
 
         # attention is all we need
 
@@ -1259,9 +1270,12 @@ class Attention(Module):
             prev_attn = prev_attn
         )
 
-        # store the values for resformer from Zhou et al. https://arxiv.org/abs/2410.17897v1
+        # store the values for resformer or Neutreno
 
         intermediates.values = v
+
+        if exists(value_residual) and self.neutreno_value_residual:
+            out = out + diff_values
 
         # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
 
@@ -1365,7 +1379,7 @@ class AttentionLayers(Module):
         layerscale_init_value = 0.,
         unet_skips = False,
         reinject_input = False, # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
-        add_value_residual = False, # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1 | TODO: also add NeuTRENO from Nguyen et al. https://arxiv.org/abs/2312.00751
+        add_value_residual = False, # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1
         **kwargs
     ):
         super().__init__()
@@ -1378,6 +1392,7 @@ class AttentionLayers(Module):
         assert len(kwargs) == 0, f'unrecognized kwargs passed in {kwargs.keys()}'
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
+        add_value_residual |= attn_kwargs.get('neutreno_value_residual', False)
 
         self.dim = dim
         self.causal = causal

@@ -2319,4 +2319,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Nguyen2023MitigatingOI,
+    title   = {Mitigating Over-smoothing in Transformers via Regularized Nonlocal Functionals},
+    author  = {Tam Nguyen and Tan M. Nguyen and Richard G. Baraniuk},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2312.00751},
+    url     = {https://api.semanticscholar.org/CorpusID:264300597}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
