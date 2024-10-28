@@ -2331,7 +2331,7 @@ class TransformerWrapper(Module):
         # maybe cls token
 
         if exists(self.cls_token):
-            cls_tokens = self.cls_token.repeat(b, 1, 1)
+            cls_tokens = repeat(self.cls_token, '... -> b ...', b = b)
             x, cls_packed_shape = pack([cls_tokens, x], 'b * d')
 
             if exists(mask):

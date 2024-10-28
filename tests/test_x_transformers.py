@@ -198,6 +198,7 @@ def test_cls_token(num_cls_tokens):
     mask = torch.randint(0, 2, (2, 1024)).bool()
 
     logits = model(x, mask = mask)
+
     if num_cls_tokens == 1:
         expected_shape = (2, 20000)
     else:
