@@ -179,12 +179,14 @@ def test_average_pool_embed():
 
     assert logits.shape == (2, 20000)
 
-def test_cls_token():
+@pytest.mark.parametrize('num_cls_tokens', (1, 2))
+def test_cls_token(num_cls_tokens):
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
         num_memory_tokens = 2,
         use_cls_token = True,
+        num_cls_tokens=num_cls_tokens,
         attn_layers = Encoder(
             dim = 128,
             depth = 6,
@@ -196,8 +198,12 @@ def test_cls_token():
     mask = torch.randint(0, 2, (2, 1024)).bool()
 
     logits = model(x, mask = mask)
+    if num_cls_tokens == 1:
+        expected_shape = (2, 20000)
+    else:
+        expected_shape = (2, num_cls_tokens, 20000)
 
-    assert logits.shape == (2, 20000)
+    assert logits.shape == expected_shape
 
 def test_squeeze_logit_dim_one():
     model = TransformerWrapper(
