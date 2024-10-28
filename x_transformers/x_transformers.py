@@ -2104,6 +2104,7 @@ class TransformerWrapper(Module):
         attn_z_loss_weight = 1e-4,
         average_pool_embed = False,
         use_cls_token = False,
+        num_cls_tokens = 1,
         squeeze_out_last_dim = False,
         token_emb: TokenEmbedding | None = None,
         mixture_of_softmax = False,
@@ -2116,6 +2117,7 @@ class TransformerWrapper(Module):
         emb_dim = default(emb_dim, dim)
         self.emb_dim = emb_dim
         self.num_tokens = num_tokens
+        self.num_cls_tokens = num_cls_tokens
 
         self.max_seq_len = max_seq_len
         self.max_mem_len = max_mem_len
@@ -2172,7 +2174,7 @@ class TransformerWrapper(Module):
         self.cls_token = None
 
         if use_cls_token:
-            self.cls_token = nn.Parameter(torch.zeros(dim))
+            self.cls_token = nn.Parameter(torch.zeros(num_cls_tokens, dim))
             nn.init.normal_(self.cls_token, std = 0.02)
 
         # whether to average pool the embed (`global average pool`)
@@ -2329,11 +2331,11 @@ class TransformerWrapper(Module):
         # maybe cls token
 
         if exists(self.cls_token):
-            cls_tokens = repeat(self.cls_token, 'd -> b d', b = b)
+            cls_tokens = self.cls_token.repeat(b, 1, 1)
             x, cls_packed_shape = pack([cls_tokens, x], 'b * d')
 
             if exists(mask):
-                mask = F.pad(mask, (1, 0), value = True)
+                mask = F.pad(mask, (self.num_cls_tokens, 0), value = True)
 
         # maybe memory / register tokens
 
@@ -2415,6 +2417,7 @@ class TransformerWrapper(Module):
 
         if exists(self.cls_token):
             x, _ = unpack(x, cls_packed_shape, 'b * d')
+            x = x.squeeze(1)  # Remove sequence dimension if num_cls_tokens=1 to keep previous behavior
 
         # handle expansion to mixture if needed (for mixture of softmax)
 
