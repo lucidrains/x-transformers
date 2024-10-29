@@ -16,8 +16,9 @@ from collections import namedtuple
 from contextlib import nullcontext
 from dataclasses import dataclass
 
-from einops import rearrange, repeat, reduce, pack, unpack
+import einx
 from einops.layers.torch import Rearrange
+from einops import rearrange, repeat, reduce, pack, unpack
 
 from x_transformers.attend import Attend, Intermediates
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
@@ -423,7 +424,7 @@ class DynamicPositionBias(Module):
         # get the (n x n) matrix of distances
         seq_arange = torch.arange(n, device = device)
         context_arange = torch.arange(n, device = device)
-        indices = rearrange(seq_arange, 'i -> i 1') - rearrange(context_arange, 'j -> 1 j')
+        indices = einx.subtract('i, j -> i j', seq_arange, context_arange)
         indices += (n - 1)
 
         # input to continuous positions MLP
@@ -453,9 +454,9 @@ class AlibiPositionalBias(Module):
         self.register_buffer('bias', None, persistent = False)
     
     def get_bias(self, i, j, device):
-        i_arange = torch.arange(j - i, j, device = device)
-        j_arange = torch.arange(j, device = device)
-        bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 j') - rearrange(i_arange, 'i -> 1 i 1'))
+        seq_arange = torch.arange(j - i, j, device = device)
+        context_arange = torch.arange(j, device = device)
+        bias = -torch.abs(einx.subtract('j, i -> 1 i j', context_arange, seq_arange))
         return bias
 
     @staticmethod
@@ -1236,7 +1237,7 @@ class Attention(Module):
         if exists(self.max_attend_past):
             range_q = torch.arange(j - i, j, device = device)
             range_k = torch.arange(j, device = device)
-            dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
+            dist = einx.subtract('i, j -> 1 1 i j', range_q, range_k)
             max_attend_past_mask = dist > self.max_attend_past
             max_attend_past_mask = pad_at_dim(max_attend_past_mask, (num_mem_kv, 0), value = False, dim = -1) # handle memory key / values
             masks.append(max_attend_past_mask)
@@ -1291,7 +1292,7 @@ class Attention(Module):
 
         if exists(self.to_v_head_gate):
             head_gate = self.to_v_head_gate(x)
-            out = out * rearrange(head_gate, 'b n h -> b h n 1').sigmoid()
+            out = einx.multiply('b n h, b h n d ->b h n d', head_gate.sigmoid(), out)
 
         # merge heads
 
@@ -1308,8 +1309,7 @@ class Attention(Module):
         out = self.to_out(out)
 
         if exists(mask):
-            mask = rearrange(mask, 'b n -> b n 1')
-            out = out.masked_fill(~mask, 0.)
+            out = einx.where('b n, b n d, -> b n d', mask, out, 0.)
 
         if not return_intermediates:
             return out
