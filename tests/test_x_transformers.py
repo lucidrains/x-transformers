@@ -340,3 +340,20 @@ def test_value_residual():
     x = torch.randint(0, 20000, (2, 1024))
 
     model(x)
+
+def test_forgetting_transformer():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_data_dependent_alibi = False
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    embed = model(x)

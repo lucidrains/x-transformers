@@ -101,6 +101,12 @@ def log(t, eps = 1e-20):
 def max_neg_value(tensor):
     return -torch.finfo(tensor.dtype).max
 
+def reverse_cumsum(t, dim = -1):
+    t = t.flip(dims = (dim,))
+    t = t.cumsum(dim = dim)
+    t = t.flip(dims = (dim,))
+    return t
+
 def l2norm(t, groups = 1):
     t = rearrange(t, '... (g d) -> ... g d', g = groups)
     t = F.normalize(t, p = 2, dim = -1)
@@ -352,8 +358,10 @@ class CoPE(Module):
         self.soft_onehot = soft_onehot
         self.soft_onehot_temp = soft_onehot_temp
 
-        if soft_onehot:
-            self.register_buffer('positions', torch.arange(max_pos))
+        if not soft_onehot:
+            return
+
+        self.register_buffer('positions', torch.arange(max_pos))
 
     def forward(self, query, attn_logits):
 
@@ -375,7 +383,7 @@ class CoPE(Module):
         logits_int = einsum('b h n d, p d -> b h n p', query, self.pos_emb)
 
         if self.soft_onehot:
-            diff_pos = (pos[..., None] - self.positions).abs()
+            diff_pos = einx.subtract('i, j -> i j', pos, self.positions).abs()
             soft_onehot_pos = F.softmax(-diff_pos / self.soft_onehot_temp, dim = -1)
             cope_pos_emb = einsum('b h i j p, b h i p -> b h i j', soft_onehot_pos, logits_int)
         else:
@@ -490,6 +498,44 @@ class AlibiPositionalBias(Module):
         self.register_buffer('bias', bias, persistent = False)
 
         return self.bias
+
+class DataDependentAlibi(Module):
+    """ https://openreview.net/forum?id=q2Lnyegkr8 """
+
+    def __init__(
+        self,
+        dim,
+        heads
+    ):
+        super().__init__()
+
+        linear = nn.Linear(dim, heads)
+
+        self.to_forget_gates = nn.Sequential(
+            linear,
+            Rearrange('b n h -> b h n'),
+            nn.Sigmoid()
+        )
+
+        nn.init.constant_(linear.bias, 5.)
+
+    def forward(self, x):
+        seq = x.shape[-2]
+
+        forget_gates = self.to_forget_gates(x).log()
+        forget_gates = repeat(forget_gates, 'b h j -> b h i j', i = seq)
+
+        # causal mask out, including diagonal (so token to itself attention is never masked out)
+
+        causal_mask = torch.ones((seq, seq), dtype = torch.bool, device = x.device).triu()
+
+        forget_gates = forget_gates.masked_fill(causal_mask, 0.)
+
+        # reverse cumulative sum in log space (equivalent to cumprod)
+
+        forget_gates = reverse_cumsum(forget_gates)
+
+        return forget_gates
 
 class RotaryEmbedding(Module):
     def __init__(
@@ -939,6 +985,7 @@ class Attention(Module):
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
+        data_dependent_alibi = False,
         use_cope = False,
         cope_max_pos = 16,
         cope_soft_onehot_pos = False,
@@ -1040,6 +1087,19 @@ class Attention(Module):
                 max_pos = cope_max_pos,
                 talking_heads = cope_talking_heads,
                 soft_onehot = cope_soft_onehot_pos
+            )
+
+        # data dependent alibi
+        # https://openreview.net/forum?id=q2Lnyegkr8
+
+        self.data_dependent_alibi = None
+
+        if data_dependent_alibi:
+            assert causal, 'data dependent alibi only works for autoregressive for now until further research'
+
+            self.data_dependent_alibi = DataDependentAlibi(
+                dim,
+                heads = heads
             )
 
         # attend class - includes core attention algorithm + talking heads
@@ -1252,6 +1312,11 @@ class Attention(Module):
             attn_bias = rel_pos(i, j)
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
+        # prepare data dependent alibi from forgetting transformers paper, if needed
+
+        if exists(self.data_dependent_alibi):
+            attn_bias = self.data_dependent_alibi(x)
+
         # if previous values passed in for residual, either invoke resformer or neutreno
 
         if exists(value_residual):
@@ -1389,10 +1454,13 @@ class AttentionLayers(Module):
         attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
         cross_attn_kwargs, kwargs = groupby_prefix_and_trim('cross_attn_', kwargs)
 
+        dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
+        data_dependent_alibi = attn_kwargs.get('data_dependent_alibi', False)
+        neutreno_value_residual = attn_kwargs.get('neutreno_value_residual', False)
+
         assert len(kwargs) == 0, f'unrecognized kwargs passed in {kwargs.keys()}'
 
-        dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
-        add_value_residual |= attn_kwargs.get('neutreno_value_residual', False)
+        add_value_residual |= neutreno_value_residual
 
         self.dim = dim
         self.causal = causal
@@ -1405,7 +1473,7 @@ class AttentionLayers(Module):
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor, base_rescale_factor = rotary_base_rescale_factor) if rotary_pos_emb else None
 
-        assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
+        assert at_most_one_of(alibi_pos_bias, rel_pos_bias, data_dependent_alibi), 'you can only choose one of Alibi positional bias, data dependent Alibi (forgetting transformers), or T5 relative positional bias'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
 
         # relative positional bias
