@@ -325,7 +325,7 @@ class RelativePositionBias(Module):
         device = self.device
         q_pos = torch.arange(j - i, j, dtype = torch.long, device = device)
         k_pos = torch.arange(j, dtype = torch.long, device = device)
-        rel_pos = k_pos[None, :] - q_pos[:, None]
+        rel_pos = einx.subtract('j, i -> i j', k_pos, q_pos)
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
         bias = rearrange(values, 'i j h -> h i j')
