@@ -6,7 +6,11 @@ from x_transformers.x_transformers import (
     TransformerWrapper,
     Encoder,
     Decoder,
-    AutoregressiveWrapper
+    AutoregressiveWrapper,
+)
+
+from x_transformers.neo_mlp import (
+    NeoMLP
 )
 
 from x_transformers.multi_input import MultiInputTransformerWrapper
@@ -357,3 +361,18 @@ def test_forgetting_transformer():
     x = torch.randint(0, 20000, (2, 1024))
 
     embed = model(x)
+
+def test_neo_mlp():
+
+    mlp = NeoMLP(
+        dim_in = 5,
+        dim_out = 7,
+        dim_hidden = 16,
+        depth = 5,
+        dim_model = 64,
+    )
+
+    x = torch.randn(3, 5)
+
+    out = mlp(x)
+    assert out.shape == (3, 7)

@@ -2341,4 +2341,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{anonymous2024from,
+    title   = {From {MLP} to Neo{MLP}: Leveraging Self-Attention for Neural Fields},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Thirteenth International Conference on Learning Representations},
+    year    = {2024},
+    url     = {https://openreview.net/forum?id=A8Vuf2e8y6},
+    note    = {under review}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
