@@ -32,3 +32,7 @@ from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper
 from x_transformers.dpo import (
     DPO
 )
+
+from x_transformers.neo_mlp import (
+    NeoMLP
+)
