@@ -519,6 +519,51 @@ class DataDependentAlibi(Module):
         forget_gates = einx.subtract('b h i, b h j -> b h i j', forget_gates, forget_gates)
         return forget_gates
 
+class ComplexDataDependentAlibi(Module):
+    """ https://openreview.net/forum?id=q2Lnyegkr8 but complex, using log of real component for biasing """
+
+    def __init__(
+        self,
+        dim,
+        heads
+    ):
+        super().__init__()
+
+        linear = nn.Linear(dim, heads * 2)
+
+        self.to_forget_gates = nn.Sequential(
+            linear,
+            Rearrange('b n (h c) -> b h n c', c = 2),
+        )
+
+        nn.init.constant_(linear.bias, 5.)
+
+    def forward(self, x):
+        seq = x.shape[-2]
+
+        # project to complex
+
+        forget_gates = self.to_forget_gates(x)
+        forget_gates = torch.view_as_complex(forget_gates)
+
+        # sigmoid the magnitude
+
+        magnitude, phase = forget_gates.abs(), forget_gates.angle()
+        forget_gates = torch.polar(magnitude.sigmoid(), phase)
+
+        forget_gates = repeat(forget_gates, 'b h j -> b h i j', i = seq)
+        causal_mask = torch.ones((seq, seq), device = x.device, dtype = torch.bool).triu()
+
+        forget_gates = forget_gates.masked_fill(causal_mask, 1.)
+
+        # reverse cum prod
+
+        forget_gates = forget_gates.flip(dims = (-1,))
+        forget_gates = forget_gates.cumprod(dim = -1)
+        forget_gates = forget_gates.flip(dims = (-1,))
+
+        return forget_gates.real.log()
+
 class PerRowDataDependentAlibi(Module):
     """ same as data dependent alibi from forgetting transformer, but the forgetting gates are also derived by a queries and keys with a small head dimension """
 
@@ -1008,6 +1053,7 @@ class Attention(Module):
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
         data_dependent_alibi = False,
+        data_dependent_alibi_complex = False,
         data_dependent_alibi_per_row = False,
         data_dependent_alibi_per_row_dim_head = 8,
         use_cope = False,
@@ -1121,7 +1167,15 @@ class Attention(Module):
         if data_dependent_alibi:
             assert causal, 'data dependent alibi only works for autoregressive for now until further research'
 
-            dda_klass = DataDependentAlibi if not data_dependent_alibi_per_row else PerRowDataDependentAlibi
+            if not data_dependent_alibi_per_row and data_dependent_alibi_complex:
+                dda_klass = ComplexDataDependentAlibi
+            elif not data_dependent_alibi_per_row and not data_dependent_alibi_complex:
+                dda_klass = DataDependentAlibi
+            elif data_dependent_alibi_per_row and not data_dependent_alibi_complex:
+                dda_klass = PerRowDataDependentAlibi
+            elif data_dependent_alibi_per_row and data_dependent_alibi_complex:
+                raise NotImplementedError
+
             dda_kwargs = dict(dim = dim, heads = heads)
 
             if data_dependent_alibi_per_row:
