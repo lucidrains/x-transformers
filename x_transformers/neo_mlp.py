@@ -94,6 +94,11 @@ class NeoMLP(Module):
         x,
         return_embeds = False
     ):
+        no_batch = x.ndim == 1
+
+        if no_batch:
+            x = rearrange(x, '... -> 1 ...')
+
         batch = x.shape[0]
 
         fouriered_input = self.random_fourier(x)
@@ -120,6 +125,9 @@ class NeoMLP(Module):
 
         output = einsum(output_embed, self.to_output_weights, 'b n d, n d -> b n')
         output = output + self.to_output_bias
+
+        if no_batch:
+            output = rearrange(output, '1 ... -> ...')
 
         if not return_embeds:
             return output
