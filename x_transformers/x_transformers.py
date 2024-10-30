@@ -499,7 +499,9 @@ class DataDependentAlibi(Module):
     def __init__(
         self,
         dim,
-        heads
+        heads,
+        bias_init = 5.,
+        post_log_scale = 1.
     ):
         super().__init__()
 
@@ -511,10 +513,11 @@ class DataDependentAlibi(Module):
             nn.LogSigmoid()
         )
 
-        nn.init.constant_(linear.bias, 5.)
+        nn.init.constant_(linear.bias, bias_init)
+        self.post_log_scale = post_log_scale
 
     def forward(self, x):
-        forget_gates = self.to_forget_gates(x)
+        forget_gates = self.to_forget_gates(x) * self.post_log_scale
         forget_gates = forget_gates.cumsum(dim = -1)
         forget_gates = einx.subtract('b h i, b h j -> b h i j', forget_gates, forget_gates)
         return forget_gates
@@ -526,7 +529,8 @@ class PerRowDataDependentAlibi(Module):
         self,
         dim,
         heads,
-        dim_head = 8
+        dim_head = 8,
+        post_log_scale = 1.
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -538,11 +542,13 @@ class PerRowDataDependentAlibi(Module):
             Rearrange('b n (qk h d) -> qk b h n d', qk = 2, d = dim_head)
         )
 
+        self.post_log_scale = post_log_scale
+
     def forward(self, x):
         q, k = self.to_forget_gates(x)
         forget_gates = einsum('... i d, ... j d -> ... i j', q, k) * self.scale
 
-        forget_gates = F.logsigmoid(forget_gates)
+        forget_gates = F.logsigmoid(forget_gates) * self.post_log_scale
 
         # mask out upper triangle + diagonal
 
@@ -1010,6 +1016,7 @@ class Attention(Module):
         data_dependent_alibi = False,
         data_dependent_alibi_per_row = False,
         data_dependent_alibi_per_row_dim_head = 8,
+        data_dependent_alibi_kwargs: dict = dict(),
         use_cope = False,
         cope_max_pos = 16,
         cope_soft_onehot_pos = False,
@@ -1127,7 +1134,7 @@ class Attention(Module):
             if data_dependent_alibi_per_row:
                 dda_kwargs.update(dim_head = data_dependent_alibi_per_row_dim_head)
 
-            self.data_dependent_alibi = dda_klass(**dda_kwargs)
+            self.data_dependent_alibi = dda_klass(**dda_kwargs, **data_dependent_alibi_kwargs)
 
         # attend class - includes core attention algorithm + talking heads
 
