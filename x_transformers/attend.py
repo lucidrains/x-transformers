@@ -480,6 +480,7 @@ class Attend(Module):
             sim = sim + self.pre_softmax_talking_heads(sim)
 
         if exists(attn_bias):
+            print(attn_bias.shape)
             sim = sim + attn_bias
 
         if self.softclamp_logits:
