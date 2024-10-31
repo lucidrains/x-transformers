@@ -1252,6 +1252,20 @@ class Attention(Module):
 
         k, v, r = tuple(maybe(rearrange)(t, 'b n (h d) -> b h n d', h = kv_h) for t in (k, v, r))
 
+        # if previous values passed in for residual, either invoke resformer or neutreno
+
+        orig_values = v
+
+        if exists(value_residual):
+            if self.neutreno_value_residual:
+                diff_values = (value_residual - v) * self.neutreno_alpha
+                diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
+            else:
+                # https://arxiv.org/abs/2410.17897v1
+                v = 0.5 * (v + value_residual)
+
+        # take care of caching
+
         if exists(cache):
             ck, cv = cache.cached_kv
 
@@ -1363,16 +1377,6 @@ class Attention(Module):
         if exists(self.data_dependent_alibi):
             attn_bias = self.data_dependent_alibi(x)
 
-        # if previous values passed in for residual, either invoke resformer or neutreno
-
-        if exists(value_residual):
-            if self.neutreno_value_residual:
-                diff_values = (value_residual - v) * self.neutreno_alpha
-                diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
-            else:
-                # https://arxiv.org/abs/2410.17897v1
-                v = 0.5 * (v + value_residual)
-
         # attention is all we need
 
         out, intermediates = self.attend(
@@ -1384,7 +1388,7 @@ class Attention(Module):
 
         # store the values for resformer or Neutreno
 
-        intermediates.values = v
+        intermediates.values = orig_values
 
         if exists(value_residual) and self.neutreno_value_residual:
             out = out + diff_values
