@@ -1371,7 +1371,7 @@ class Attention(Module):
                 diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
             else:
                 # https://arxiv.org/abs/2410.17897v1
-                v = v + value_residual
+                v = 0.5 * (v + value_residual)
 
         # attention is all we need
 
