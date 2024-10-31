@@ -512,12 +512,15 @@ class DataDependentAlibi(Module):
         self,
         dim,
         heads,
+        causal = True,
         bias_init = 5.,
-        post_log_scale = 1.
+        post_log_scale = 1.,
     ):
         super().__init__()
 
-        linear = nn.Linear(dim, heads)
+        self.causal = causal
+
+        linear = nn.Linear(dim, heads * (1 if causal else 2))
 
         self.to_forget_gates = nn.Sequential(
             linear,
@@ -529,9 +532,21 @@ class DataDependentAlibi(Module):
         self.post_log_scale = post_log_scale
 
     def forward(self, x):
+        bidirectional = not self.causal
+
         forget_gates = self.to_forget_gates(x) * self.post_log_scale
+
         forget_gates = forget_gates.cumsum(dim = -1)
+
+        if bidirectional:
+            forget_gates, forget_gates_reversed = forget_gates.chunk(2, dim = 1)
+
         forget_gates = einx.subtract('b h i, b h j -> b h i j', forget_gates, forget_gates)
+
+        if bidirectional:
+            forget_gates_reversed = einx.subtract('b h j, b h i -> b h i j', forget_gates_reversed, forget_gates_reversed)
+            forget_gates = forget_gates.tril() + forget_gates_reversed.triu()
+
         return forget_gates
 
 class PerRowDataDependentAlibi(Module):
@@ -541,10 +556,13 @@ class PerRowDataDependentAlibi(Module):
         self,
         dim,
         heads,
+        causal = True,
         dim_head = 8,
         post_log_scale = 1.
     ):
         super().__init__()
+        assert causal, 'bidirectional not supported yet'
+
         self.scale = dim_head ** -0.5
 
         linear = nn.Linear(dim, heads * dim_head * 2, bias = False)
@@ -1138,10 +1156,9 @@ class Attention(Module):
         self.data_dependent_alibi = None
 
         if data_dependent_alibi:
-            assert causal, 'data dependent alibi only works for autoregressive for now until further research'
 
             dda_klass = DataDependentAlibi if not data_dependent_alibi_per_row else PerRowDataDependentAlibi
-            dda_kwargs = dict(dim = dim, heads = heads)
+            dda_kwargs = dict(dim = dim, heads = heads, causal = causal)
 
             if data_dependent_alibi_per_row:
                 dda_kwargs.update(dim_head = data_dependent_alibi_per_row_dim_head)
