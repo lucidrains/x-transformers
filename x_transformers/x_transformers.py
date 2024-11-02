@@ -237,6 +237,13 @@ class TokenEmbedding(Module):
         token_emb = self.emb(x.long())
         return l2norm(token_emb) if self.l2norm_embed else token_emb
 
+    def init_(self):
+        if self.l2norm_embed:
+            nn.init.normal_(self.emb.weight, std=1e-5)
+            return
+        nn.init.kaiming_normal_(self.emb.weight)
+
+
 # positional embeddings
 
 class AbsolutePositionalEmbedding(Module):
@@ -2236,13 +2243,11 @@ class TransformerWrapper(Module):
         self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def init_(self):
+        if hasattr(self.token_emb, 'init_'):
+            self.token_emb.init_()
         if self.l2norm_embed:
-            nn.init.normal_(self.token_emb.emb.weight, std = 1e-5)
             if not isinstance(self.pos_emb, always):
                 nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
-            return
-
-        nn.init.kaiming_normal_(self.token_emb.emb.weight)
 
     def forward(
         self,
