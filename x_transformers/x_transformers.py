@@ -233,7 +233,7 @@ class TokenEmbedding(Module):
         self.l2norm_embed = l2norm_embed
         self.emb = nn.Embedding(num_tokens, dim)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         token_emb = self.emb(x.long())
         return l2norm(token_emb) if self.l2norm_embed else token_emb
 
