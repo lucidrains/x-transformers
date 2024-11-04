@@ -1055,7 +1055,12 @@ class Attention(Module):
         logit_softclamp_value = 50.,
         neutreno_value_residual = False, # Nguyen et al. https://arxiv.org/abs/2312.00751
         neutreno_alpha = 0.4,
-        onnxable = False
+        onnxable = False,
+        attend_sdp_kwargs: dict = dict(
+            enable_flash = True,
+            enable_math = True,
+            enable_mem_efficient = True
+        )
     ):
         super().__init__()
         dim_kv = default(dim_context, dim)
@@ -1188,7 +1193,8 @@ class Attention(Module):
             softclamp_logits = softclamp_logits,
             logit_softclamp_value = logit_softclamp_value,
             cope = cope,
-            onnxable = onnxable
+            onnxable = onnxable,
+            sdp_kwargs = attend_sdp_kwargs
         )
 
         # head scaling
