@@ -376,3 +376,21 @@ def test_neo_mlp():
 
     out = mlp(x)
     assert out.shape == (3, 7)
+
+def test_custom_alibi():
+    model = TransformerWrapper(
+        num_tokens = 20_000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 2,
+            heads = 8,
+            alibi_pos_bias = True
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 4))
+
+    pos = torch.tensor([[0, 1, 2, 4], [1, 3, 5, 7]])
+
+    logits = model(x, pos = pos)

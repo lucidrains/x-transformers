@@ -1246,6 +1246,7 @@ class Attention(Module):
         rel_pos = None,
         attn_bias = None,
         rotary_pos_emb = None,
+        pos = None, # for custom alibi positions
         prev_attn = None,
         mem = None,
         mem_mask = None,
@@ -1392,7 +1393,14 @@ class Attention(Module):
 
         if exists(rel_pos):
             assert not exists(attn_bias)
-            attn_bias = rel_pos(i, j)
+
+            if exists(pos):
+                assert isinstance(rel_pos, AlibiPositionalBias), 'only alibi allowed for custom positions at the moment'
+                # allow for custom positions to be passed in
+                attn_bias = rel_pos.forward_custom_pos(pos)
+            else:
+                attn_bias = rel_pos(i, j)
+
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
         # prepare data dependent alibi from forgetting transformers paper, if needed
@@ -1843,6 +1851,7 @@ class AttentionLayers(Module):
         cache_age = 1,
         return_hiddens = False,
         rotary_pos_emb = None,
+        pos = None,
         attn_bias = None,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
@@ -1906,7 +1915,9 @@ class AttentionLayers(Module):
             maybe_mem = mems[0] # todo - handle edge case where different layers get different memory lengths. don't think this will ever come up but who knows
             mem_len = maybe_mem.shape[1] if exists(maybe_mem) else 0
 
-            pos = torch.arange(x.shape[1] + mem_len, device = x.device) - mem_len
+            if not exists(pos):
+                pos = torch.arange(x.shape[1] + mem_len, device = x.device) - mem_len
+
             rotary_pos_emb = self.rotary_pos_emb(pos)
 
         # assume cached key / values
@@ -2030,7 +2041,7 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, return_intermediates = True)
             elif layer_type == 'f':
