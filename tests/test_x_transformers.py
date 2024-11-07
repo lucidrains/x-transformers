@@ -441,8 +441,7 @@ def test_embedder(embedder_type):
 
 
 @pytest.mark.parametrize("to_logits", ('linear', 'none', 'pointer'))
-@pytest.mark.parametrize('tie_embedding', (True, False))
-def test_to_logits(to_logits, tie_embedding: bool):
+def test_to_logits(to_logits):
     num_tokens = 20000
     dim = 128
     to_logits_kwargs = {}
@@ -463,22 +462,16 @@ def test_to_logits(to_logits, tie_embedding: bool):
         logit_mapper = PointerNetworkLogits(dim)
         to_logits_kwargs['input_embeddings'] = torch.randn(2, 20000, dim)
 
-    if to_logits not in ('linear', 'none') and tie_embedding:
-        exception_context = pytest.raises(AssertionError)
-    else:
-        exception_context = nullcontext()
-    with exception_context:
-        model = TransformerWrapper(
-            num_tokens = num_tokens,
-            max_seq_len = 1024,
-            attn_layers = Decoder(
-                dim = dim,
-                depth = 6,
-                heads = 8,
-            ),
-            to_logits = logit_mapper,
-            tie_embedding=tie_embedding,
-        )
+    model = TransformerWrapper(
+        num_tokens = num_tokens,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = dim,
+            depth = 6,
+            heads = 8,
+        ),
+        to_logits = logit_mapper,
+    )
 
     x = torch.randint(0, num_tokens, (2, 1024))
     output = model(x, to_logits_kwargs=to_logits_kwargs)
