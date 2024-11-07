@@ -6,7 +6,7 @@ from x_transformers.x_transformers import (
     TransformerWrapper,
     Encoder,
     Decoder,
-    AutoregressiveWrapper,
+    LinearNoBias,
 )
 
 from x_transformers.neo_mlp import (
@@ -394,3 +394,83 @@ def test_custom_alibi():
     pos = torch.tensor([[0, 1, 2, 4], [1, 3, 5, 7]])
 
     logits = model(x, pos = pos)
+
+
+@pytest.mark.parametrize('embedder_type', ('embedding', 'none', 'custom'))
+def test_embedder(embedder_type):
+    num_tokens = 20000
+    dim = 128
+    token_emb_kwargs = {}
+    if embedder_type == 'embedding':
+        embedder = torch.nn.Embedding(num_tokens, dim)
+    elif embedder_type == 'none':
+        embedder = None
+    else:
+        class CustomEmbedder(torch.nn.Module):
+            """
+            Made up embedder that sums two embeddings. Just to check if we can pass additional input to the embedder's
+            forward pass without breaking the model.
+            """
+            def __init__(self, num_tokens, dim):
+                super().__init__()
+                self.embed_x = torch.nn.Embedding(num_tokens, dim)
+                self.embed_y = torch.nn.Embedding(num_tokens, dim)
+            def forward(self, x, y):
+                return self.embed_x(x) + self.embed_y(y)
+            def init_(self):
+                pass
+        embedder = CustomEmbedder(num_tokens, dim)
+        token_emb_kwargs['y'] = torch.randint(0, num_tokens, (2, 1024))
+    model = TransformerWrapper(
+        num_tokens = num_tokens,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = dim,
+            depth = 6,
+            heads = 8,
+        ),
+        token_emb = embedder,
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    output = model(x, token_emb_kwargs=token_emb_kwargs)
+    assert output.shape == (2, 1024, 20000)
+
+
+@pytest.mark.parametrize("to_logits", ('linear', 'none', 'pointer'))
+def test_to_logits(to_logits):
+    num_tokens = 20000
+    dim = 128
+    to_logits_kwargs = {}
+    if to_logits == 'linear':
+        logit_mapper = LinearNoBias(dim, num_tokens)
+    elif to_logits == 'none':
+        logit_mapper = None
+    else:
+        class PointerNetworkLogits(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.proj_to_pointers = torch.nn.Linear(dim, dim)
+            def forward(self, model_embeddings, input_embeddings):
+                pointers = self.proj_to_pointers(model_embeddings)
+                logits = torch.matmul(pointers, input_embeddings.permute(0, 2, 1))
+                return logits
+
+        logit_mapper = PointerNetworkLogits(dim)
+        to_logits_kwargs['input_embeddings'] = torch.randn(2, 20000, dim)
+
+    model = TransformerWrapper(
+        num_tokens = num_tokens,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = dim,
+            depth = 6,
+            heads = 8,
+        ),
+        to_logits = logit_mapper,
+    )
+
+    x = torch.randint(0, num_tokens, (2, 1024))
+    output = model(x, to_logits_kwargs=to_logits_kwargs)
+    assert output.shape == (2, 1024, 20000)

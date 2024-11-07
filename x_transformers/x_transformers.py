@@ -238,6 +238,13 @@ class TokenEmbedding(Module):
         token_emb = self.emb(x.long())
         return l2norm(token_emb) if self.l2norm_embed else token_emb
 
+    def init_(self):
+        if self.l2norm_embed:
+            nn.init.normal_(self.emb.weight, std=1e-5)
+            return
+        nn.init.kaiming_normal_(self.emb.weight)
+
+
 # positional embeddings
 
 class AbsolutePositionalEmbedding(Module):
@@ -2261,7 +2268,8 @@ class TransformerWrapper(Module):
         token_emb: TokenEmbedding | None = None,
         mixture_of_softmax = False,
         mixture_of_softmax_k = 4,
-        sigsoftmax_logits = False
+        sigsoftmax_logits = False,
+        to_logits: Module | None = None,
     ):
         super().__init__()
 
@@ -2363,11 +2371,12 @@ class TransformerWrapper(Module):
         if return_only_embed:
             self.to_logits = None
         elif tie_embedding:
+            assert isinstance(self.token_emb, TokenEmbedding), 'can only tie embedding if using `TokenEmbedding`'
             self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
         elif num_output_heads > 1:
             self.to_logits = ModuleList([LinearNoBias(dim, logits_dim) for _ in range(num_output_heads)])
         else:
-            self.to_logits = LinearNoBias(dim, logits_dim)
+            self.to_logits = LinearNoBias(dim, logits_dim) if to_logits is None else to_logits
 
         # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -2388,13 +2397,11 @@ class TransformerWrapper(Module):
         self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def init_(self):
+        if hasattr(self.token_emb, 'init_'):
+            self.token_emb.init_()
         if self.l2norm_embed:
-            nn.init.normal_(self.token_emb.emb.weight, std = 1e-5)
             if not isinstance(self.pos_emb, always):
                 nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
-            return
-
-        nn.init.kaiming_normal_(self.token_emb.emb.weight)
 
     def forward(
         self,
@@ -2417,7 +2424,9 @@ class TransformerWrapper(Module):
         attn_z_loss_weight = 1e-4,
         seq_start_pos = None,
         cache: LayerIntermediates | None = None,
-        **kwargs
+        token_emb_kwargs = dict(),
+        to_logits_kwargs = dict(),
+        **kwargs,
     ):
         b, n, device, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
 
@@ -2428,7 +2437,7 @@ class TransformerWrapper(Module):
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
-        x = self.token_emb(x) + pos_emb
+        x = self.token_emb(x, **token_emb_kwargs) + pos_emb
 
         # add additional embeddings
 
@@ -2583,9 +2592,9 @@ class TransformerWrapper(Module):
 
         if not return_embeddings:
             if self.has_multiple_heads:
-                logits = tuple(fn(x) for fn in self.to_logits)
+                logits = tuple(fn(x, **to_logits_kwargs) for fn in self.to_logits)
             else:
-                logits = self.to_logits(x)
+                logits = self.to_logits(x, **to_logits_kwargs)
 
         # maybe sig softmax
 
