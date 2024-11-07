@@ -1,5 +1,8 @@
 import pytest
+
 import torch
+from torch import nn
+from torch.nn import Module
 
 from x_transformers.x_transformers import (
     XTransformer,
@@ -401,26 +404,31 @@ def test_embedder(embedder_type):
     num_tokens = 20000
     dim = 128
     token_emb_kwargs = {}
+
     if embedder_type == 'embedding':
-        embedder = torch.nn.Embedding(num_tokens, dim)
+        embedder = nn.Embedding(num_tokens, dim)
     elif embedder_type == 'none':
         embedder = None
     else:
-        class CustomEmbedder(torch.nn.Module):
+        class CustomEmbedder(Module):
             """
             Made up embedder that sums two embeddings. Just to check if we can pass additional input to the embedder's
             forward pass without breaking the model.
             """
             def __init__(self, num_tokens, dim):
                 super().__init__()
-                self.embed_x = torch.nn.Embedding(num_tokens, dim)
-                self.embed_y = torch.nn.Embedding(num_tokens, dim)
+                self.embed_x = nn.Embedding(num_tokens, dim)
+                self.embed_y = nn.Embedding(num_tokens, dim)
+
             def forward(self, x, y):
                 return self.embed_x(x) + self.embed_y(y)
+
             def init_(self):
                 pass
+
         embedder = CustomEmbedder(num_tokens, dim)
         token_emb_kwargs['y'] = torch.randint(0, num_tokens, (2, 1024))
+
     model = TransformerWrapper(
         num_tokens = num_tokens,
         max_seq_len = 1024,
@@ -442,16 +450,19 @@ def test_embedder(embedder_type):
 def test_to_logits(to_logits):
     num_tokens = 20000
     dim = 128
+
     to_logits_kwargs = {}
+
     if to_logits == 'linear':
         logit_mapper = LinearNoBias(dim, num_tokens)
     elif to_logits == 'none':
         logit_mapper = None
     else:
-        class PointerNetworkLogits(torch.nn.Module):
+        class PointerNetworkLogits(Module):
             def __init__(self, dim):
                 super().__init__()
-                self.proj_to_pointers = torch.nn.Linear(dim, dim)
+                self.proj_to_pointers = nn.Linear(dim, dim)
+
             def forward(self, model_embeddings, input_embeddings):
                 pointers = self.proj_to_pointers(model_embeddings)
                 logits = torch.matmul(pointers, input_embeddings.permute(0, 2, 1))
@@ -472,5 +483,7 @@ def test_to_logits(to_logits):
     )
 
     x = torch.randint(0, num_tokens, (2, 1024))
+
     output = model(x, to_logits_kwargs=to_logits_kwargs)
+
     assert output.shape == (2, 1024, 20000)

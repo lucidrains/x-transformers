@@ -2371,12 +2371,12 @@ class TransformerWrapper(Module):
         if return_only_embed:
             self.to_logits = None
         elif tie_embedding:
-            assert isinstance(self.token_emb, TokenEmbedding), 'can only tie embedding if using `TokenEmbedding`'
+            assert isinstance(token_emb, TokenEmbedding), 'can only tie embedding if using `TokenEmbedding`'
             self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
         elif num_output_heads > 1:
             self.to_logits = ModuleList([LinearNoBias(dim, logits_dim) for _ in range(num_output_heads)])
         else:
-            self.to_logits = LinearNoBias(dim, logits_dim) if to_logits is None else to_logits
+            self.to_logits = LinearNoBias(dim, logits_dim) if not exists(to_logits) else to_logits
 
         # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -2399,6 +2399,7 @@ class TransformerWrapper(Module):
     def init_(self):
         if hasattr(self.token_emb, 'init_'):
             self.token_emb.init_()
+
         if self.l2norm_embed:
             if not isinstance(self.pos_emb, always):
                 nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
