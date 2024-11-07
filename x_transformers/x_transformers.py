@@ -16,8 +16,9 @@ from collections import namedtuple
 from contextlib import nullcontext
 from dataclasses import dataclass
 
-from einops import rearrange, repeat, reduce, pack, unpack
+import einx
 from einops.layers.torch import Rearrange
+from einops import rearrange, repeat, reduce, pack, unpack
 
 from x_transformers.attend import Attend, Intermediates
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
@@ -331,7 +332,7 @@ class RelativePositionBias(Module):
         device = self.device
         q_pos = torch.arange(j - i, j, dtype = torch.long, device = device)
         k_pos = torch.arange(j, dtype = torch.long, device = device)
-        rel_pos = k_pos[None, :] - q_pos[:, None]
+        rel_pos = einx.subtract('j, i -> i j', k_pos, q_pos)
         rp_bucket = self._relative_position_bucket(rel_pos, causal = self.causal, num_buckets = self.num_buckets, max_distance = self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
         bias = rearrange(values, 'i j h -> h i j')
@@ -358,8 +359,10 @@ class CoPE(Module):
         self.soft_onehot = soft_onehot
         self.soft_onehot_temp = soft_onehot_temp
 
-        if soft_onehot:
-            self.register_buffer('positions', torch.arange(max_pos))
+        if not soft_onehot:
+            return
+
+        self.register_buffer('positions', torch.arange(max_pos))
 
     def forward(self, query, attn_logits):
 
@@ -381,7 +384,7 @@ class CoPE(Module):
         logits_int = einsum('b h n d, p d -> b h n p', query, self.pos_emb)
 
         if self.soft_onehot:
-            diff_pos = (pos[..., None] - self.positions).abs()
+            diff_pos = einx.subtract('i, j -> i j', pos, self.positions).abs()
             soft_onehot_pos = F.softmax(-diff_pos / self.soft_onehot_temp, dim = -1)
             cope_pos_emb = einsum('b h i j p, b h i p -> b h i j', soft_onehot_pos, logits_int)
         else:
@@ -430,7 +433,7 @@ class DynamicPositionBias(Module):
         # get the (n x n) matrix of distances
         seq_arange = torch.arange(n, device = device)
         context_arange = torch.arange(n, device = device)
-        indices = rearrange(seq_arange, 'i -> i 1') - rearrange(context_arange, 'j -> 1 j')
+        indices = einx.subtract('i, j -> i j', seq_arange, context_arange)
         indices += (n - 1)
 
         # input to continuous positions MLP
@@ -459,11 +462,9 @@ class AlibiPositionalBias(Module):
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
     
-    def get_bias(self, i, j, device):
-        i_arange = torch.arange(j - i, j, device = device)
-        j_arange = torch.arange(j, device = device)
-        bias = -torch.abs(rearrange(j_arange, 'j -> 1 1 j') - rearrange(i_arange, 'i -> 1 i 1'))
-        return bias
+    @property
+    def device(self):
+        return next(self.buffers()).device
 
     @staticmethod
     def _get_slopes(heads):
@@ -478,9 +479,21 @@ class AlibiPositionalBias(Module):
         closest_power_of_2 = 2 ** math.floor(math.log2(heads))
         return get_slopes_power_of_2(closest_power_of_2) + get_slopes_power_of_2(2 * closest_power_of_2)[0::2][:heads-closest_power_of_2]
 
-    @property
-    def device(self):
-        return next(self.buffers()).device
+    def forward_custom_pos(
+        self,
+        pos_i: Tensor,
+        pos_j: Tensor | None = None
+    ):
+        h, device = self.total_heads, self.device
+
+        pos_j = default(pos_j, pos_i)
+        bias = -einx.subtract('... j, ... i -> ... 1 i j', pos_j, pos_i).abs()
+
+        bias = bias * self.slopes
+        num_heads_unalibied = h - bias.shape[-3]
+        bias = pad_at_dim(bias, (0, num_heads_unalibied), dim = -3)
+
+        return bias
 
     def forward(self, i, j):
         h, device = self.total_heads, self.device
@@ -488,14 +501,106 @@ class AlibiPositionalBias(Module):
         if exists(self.bias) and self.bias.shape[-1] >= j and self.bias.shape[-2] >= i:
             return self.bias[..., -i:, -j:]
 
-        bias = self.get_bias(i, j, device)
+        seq_arange = torch.arange(j - i, j, device = device)
+        context_arange = torch.arange(j, device = device)
+        bias = -einx.subtract('j, i -> 1 i j', context_arange, seq_arange).abs()
+
         bias = bias * self.slopes
+        num_heads_unalibied = h - bias.shape[-3]
+        bias = pad_at_dim(bias, (0, num_heads_unalibied), dim = -3)
 
-        num_heads_unalibied = h - bias.shape[0]
-        bias = pad_at_dim(bias, (0, num_heads_unalibied), dim = 0)
         self.register_buffer('bias', bias, persistent = False)
-
         return self.bias
+
+class DataDependentAlibi(Module):
+    """ https://openreview.net/forum?id=q2Lnyegkr8 """
+
+    def __init__(
+        self,
+        dim,
+        heads,
+        causal = True,
+        bias_init = 5.,
+        post_log_scale = 1.,
+    ):
+        super().__init__()
+
+        self.causal = causal
+
+        linear = nn.Linear(dim, heads * (1 if causal else 2))
+
+        self.to_forget_gates = nn.Sequential(
+            linear,
+            Rearrange('b n h -> b h n'),
+            nn.LogSigmoid()
+        )
+
+        nn.init.constant_(linear.bias, bias_init)
+        self.post_log_scale = post_log_scale
+
+    def forward(self, x):
+        bidirectional = not self.causal
+
+        forget_gates = self.to_forget_gates(x) * self.post_log_scale
+
+        forget_gates = forget_gates.cumsum(dim = -1)
+
+        if bidirectional:
+            forget_gates, forget_gates_reversed = forget_gates.chunk(2, dim = 1)
+
+        forget_gates = einx.subtract('b h i, b h j -> b h i j', forget_gates, forget_gates)
+
+        if bidirectional:
+            forget_gates_reversed = einx.subtract('b h j, b h i -> b h i j', forget_gates_reversed, forget_gates_reversed)
+            forget_gates = forget_gates.tril() + forget_gates_reversed.triu()
+
+        return forget_gates
+
+class PerRowDataDependentAlibi(Module):
+    """ same as data dependent alibi from forgetting transformer, but the forgetting gates are also derived by a queries and keys with a small head dimension """
+
+    def __init__(
+        self,
+        dim,
+        heads,
+        causal = True,
+        dim_head = 8,
+        post_log_scale = 1.
+    ):
+        super().__init__()
+        assert causal, 'bidirectional not supported yet'
+
+        self.scale = dim_head ** -0.5
+
+        linear = nn.Linear(dim, heads * dim_head * 2, bias = False)
+
+        self.to_forget_gates = nn.Sequential(
+            linear,
+            Rearrange('b n (qk h d) -> qk b h n d', qk = 2, d = dim_head)
+        )
+
+        self.post_log_scale = post_log_scale
+
+    def forward(self, x):
+        q, k = self.to_forget_gates(x)
+        forget_gates = einsum('... i d, ... j d -> ... i j', q, k) * self.scale
+
+        forget_gates = F.logsigmoid(forget_gates) * self.post_log_scale
+
+        # mask out upper triangle + diagonal
+
+        n = x.shape[-2]
+        causal_mask = torch.ones((n, n), dtype = torch.bool, device = x.device).triu()
+
+        forget_gates = forget_gates.masked_fill(causal_mask, 0.)
+
+        # reverse cumsum
+
+        forget_gates = forget_gates.flip(dims = (-1,))
+        forget_gates = forget_gates.cumsum(dim = -1)
+        forget_gates = forget_gates.flip(dims = (-1,))
+
+        return forget_gates
 
 class RotaryEmbedding(Module):
     def __init__(
@@ -945,6 +1050,10 @@ class Attention(Module):
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
         add_zero_kv = False,         # same as add_zero_attn in pytorch
         rotary_embed_values = False,
+        data_dependent_alibi = False,
+        data_dependent_alibi_per_row = False,
+        data_dependent_alibi_per_row_dim_head = 8,
+        data_dependent_alibi_kwargs: dict = dict(),
         use_cope = False,
         cope_max_pos = 16,
         cope_soft_onehot_pos = False,
@@ -953,7 +1062,12 @@ class Attention(Module):
         logit_softclamp_value = 50.,
         neutreno_value_residual = False, # Nguyen et al. https://arxiv.org/abs/2312.00751
         neutreno_alpha = 0.4,
-        onnxable = False
+        onnxable = False,
+        attend_sdp_kwargs: dict = dict(
+            enable_flash = True,
+            enable_math = True,
+            enable_mem_efficient = True
+        )
     ):
         super().__init__()
         dim_kv = default(dim_context, dim)
@@ -1048,6 +1162,21 @@ class Attention(Module):
                 soft_onehot = cope_soft_onehot_pos
             )
 
+        # data dependent alibi
+        # https://openreview.net/forum?id=q2Lnyegkr8
+
+        self.data_dependent_alibi = None
+
+        if data_dependent_alibi:
+
+            dda_klass = DataDependentAlibi if not data_dependent_alibi_per_row else PerRowDataDependentAlibi
+            dda_kwargs = dict(dim = dim, heads = heads, causal = causal)
+
+            if data_dependent_alibi_per_row:
+                dda_kwargs.update(dim_head = data_dependent_alibi_per_row_dim_head)
+
+            self.data_dependent_alibi = dda_klass(**dda_kwargs, **data_dependent_alibi_kwargs)
+
         # attend class - includes core attention algorithm + talking heads
 
         self.attend = Attend(
@@ -1071,7 +1200,8 @@ class Attention(Module):
             softclamp_logits = softclamp_logits,
             logit_softclamp_value = logit_softclamp_value,
             cope = cope,
-            onnxable = onnxable
+            onnxable = onnxable,
+            sdp_kwargs = attend_sdp_kwargs
         )
 
         # head scaling
@@ -1123,6 +1253,7 @@ class Attention(Module):
         rel_pos = None,
         attn_bias = None,
         rotary_pos_emb = None,
+        pos = None, # for custom alibi positions
         prev_attn = None,
         mem = None,
         mem_mask = None,
@@ -1151,6 +1282,20 @@ class Attention(Module):
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
         k, v, r = tuple(maybe(rearrange)(t, 'b n (h d) -> b h n d', h = kv_h) for t in (k, v, r))
+
+        # if previous values passed in for residual, either invoke resformer or neutreno
+
+        orig_values = v
+
+        if exists(value_residual):
+            if self.neutreno_value_residual:
+                diff_values = (value_residual - v) * self.neutreno_alpha
+                diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
+            else:
+                # https://arxiv.org/abs/2410.17897v1
+                v = 0.5 * (v + value_residual)
+
+        # take care of caching
 
         if exists(cache):
             ck, cv = cache.cached_kv
@@ -1243,7 +1388,7 @@ class Attention(Module):
         if exists(self.max_attend_past):
             range_q = torch.arange(j - i, j, device = device)
             range_k = torch.arange(j, device = device)
-            dist = rearrange(range_q, 'i -> 1 1 i 1') - rearrange(range_k, 'j -> 1 1 1 j')
+            dist = einx.subtract('i, j -> 1 1 i j', range_q, range_k)
             max_attend_past_mask = dist > self.max_attend_past
             max_attend_past_mask = pad_at_dim(max_attend_past_mask, (num_mem_kv, 0), value = False, dim = -1) # handle memory key / values
             masks.append(max_attend_past_mask)
@@ -1255,18 +1400,20 @@ class Attention(Module):
 
         if exists(rel_pos):
             assert not exists(attn_bias)
-            attn_bias = rel_pos(i, j)
+
+            if exists(pos):
+                assert isinstance(rel_pos, AlibiPositionalBias), 'only alibi allowed for custom positions at the moment'
+                # allow for custom positions to be passed in
+                attn_bias = rel_pos.forward_custom_pos(pos)
+            else:
+                attn_bias = rel_pos(i, j)
+
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
 
-        # if previous values passed in for residual, either invoke resformer or neutreno
+        # prepare data dependent alibi from forgetting transformers paper, if needed
 
-        if exists(value_residual):
-            if self.neutreno_value_residual:
-                diff_values = (value_residual - v) * self.neutreno_alpha
-                diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
-            else:
-                # https://arxiv.org/abs/2410.17897v1
-                v = v + value_residual
+        if exists(self.data_dependent_alibi):
+            attn_bias = self.data_dependent_alibi(x)
 
         # attention is all we need
 
@@ -1279,7 +1426,7 @@ class Attention(Module):
 
         # store the values for resformer or Neutreno
 
-        intermediates.values = v
+        intermediates.values = orig_values
 
         if exists(value_residual) and self.neutreno_value_residual:
             out = out + diff_values
@@ -1298,7 +1445,7 @@ class Attention(Module):
 
         if exists(self.to_v_head_gate):
             head_gate = self.to_v_head_gate(x)
-            out = out * rearrange(head_gate, 'b n h -> b h n 1').sigmoid()
+            out = einx.multiply('b n h, b h n d ->b h n d', head_gate.sigmoid(), out)
 
         # merge heads
 
@@ -1315,8 +1462,7 @@ class Attention(Module):
         out = self.to_out(out)
 
         if exists(mask):
-            mask = rearrange(mask, 'b n -> b n 1')
-            out = out.masked_fill(~mask, 0.)
+            out = einx.where('b n, b n d, -> b n d', mask, out, 0.)
 
         if not return_intermediates:
             return out
@@ -1396,10 +1542,13 @@ class AttentionLayers(Module):
         attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
         cross_attn_kwargs, kwargs = groupby_prefix_and_trim('cross_attn_', kwargs)
 
+        dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
+        data_dependent_alibi = attn_kwargs.get('data_dependent_alibi', False)
+        neutreno_value_residual = attn_kwargs.get('neutreno_value_residual', False)
+
         assert len(kwargs) == 0, f'unrecognized kwargs passed in {kwargs.keys()}'
 
-        dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
-        add_value_residual |= attn_kwargs.get('neutreno_value_residual', False)
+        add_value_residual |= neutreno_value_residual
 
         self.dim = dim
         self.causal = causal
@@ -1412,7 +1561,7 @@ class AttentionLayers(Module):
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor, base_rescale_factor = rotary_base_rescale_factor) if rotary_pos_emb else None
 
-        assert not (alibi_pos_bias and rel_pos_bias), 'you can only choose Alibi positional bias or T5 relative positional bias, not both'
+        assert at_most_one_of(alibi_pos_bias, rel_pos_bias, data_dependent_alibi), 'you can only choose one of Alibi positional bias, data dependent Alibi (forgetting transformers), or T5 relative positional bias'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
 
         # relative positional bias
@@ -1709,6 +1858,7 @@ class AttentionLayers(Module):
         cache_age = 1,
         return_hiddens = False,
         rotary_pos_emb = None,
+        pos = None,
         attn_bias = None,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
@@ -1772,7 +1922,9 @@ class AttentionLayers(Module):
             maybe_mem = mems[0] # todo - handle edge case where different layers get different memory lengths. don't think this will ever come up but who knows
             mem_len = maybe_mem.shape[1] if exists(maybe_mem) else 0
 
-            pos = torch.arange(x.shape[1] + mem_len, device = x.device) - mem_len
+            if not exists(pos):
+                pos = torch.arange(x.shape[1] + mem_len, device = x.device) - mem_len
+
             rotary_pos_emb = self.rotary_pos_emb(pos)
 
         # assume cached key / values
@@ -1896,7 +2048,7 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, return_intermediates = True)
             elif layer_type == 'f':
