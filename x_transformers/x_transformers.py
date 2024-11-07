@@ -244,18 +244,6 @@ class TokenEmbedding(Module):
         nn.init.kaiming_normal_(self.emb.weight)
 
 
-# logits mapper
-
-class LogitsMapper(Module):
-    def __init__(self, dim, num_tokens):
-        super().__init__()
-        self.num_tokens = num_tokens
-        self.to_logits = LinearNoBias(dim, num_tokens)
-
-    def forward(self, x, **kwargs):
-        return self.to_logits(x)
-
-
 # positional embeddings
 
 class AbsolutePositionalEmbedding(Module):
@@ -1724,8 +1712,7 @@ class AttentionLayers(Module):
         attn_bias = None,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
-        layers_execute_order: tuple[int, ...] | None = None,
-        **kwargs
+        layers_execute_order: tuple[int, ...] | None = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
@@ -2126,8 +2113,7 @@ class TransformerWrapper(Module):
         use_cls_token = False,
         num_cls_tokens = 1,
         squeeze_out_last_dim = False,
-        token_emb: TokenEmbedding | Module | None = None,
-        to_logits: LogitsMapper | Module | None = None,
+        token_emb: TokenEmbedding | None = None,
         mixture_of_softmax = False,
         mixture_of_softmax_k = 4,
         sigsoftmax_logits = False
@@ -2232,14 +2218,11 @@ class TransformerWrapper(Module):
         if return_only_embed:
             self.to_logits = None
         elif tie_embedding:
-            assert isinstance(token_emb, TokenEmbedding), \
-                'Tied embedding only supported with the `TokenEmbedding` embedder class'
             self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
         elif num_output_heads > 1:
-            assert not exists(to_logits), 'Cannot pass in `to_logits` when using multiple heads'
             self.to_logits = ModuleList([LinearNoBias(dim, logits_dim) for _ in range(num_output_heads)])
         else:
-            self.to_logits = LogitsMapper(dim, logits_dim) if to_logits is None else to_logits
+            self.to_logits = LinearNoBias(dim, logits_dim)
 
         # memory tokens (like [cls]) from Memory Transformers paper
 
@@ -2298,7 +2281,7 @@ class TransformerWrapper(Module):
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
-        x = self.token_emb(x, **kwargs) + pos_emb
+        x = self.token_emb(x) + pos_emb
 
         # add additional embeddings
 
@@ -2453,9 +2436,9 @@ class TransformerWrapper(Module):
 
         if not return_embeddings:
             if self.has_multiple_heads:
-                logits = tuple(fn(x, **kwargs) for fn in self.to_logits)
+                logits = tuple(fn(x) for fn in self.to_logits)
             else:
-                logits = self.to_logits(x, **kwargs)
+                logits = self.to_logits(x)
 
         # maybe sig softmax
 
