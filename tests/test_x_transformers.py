@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 import pytest
 import torch
 
@@ -5,10 +7,7 @@ from x_transformers.x_transformers import (
     XTransformer,
     TransformerWrapper,
     Encoder,
-    Decoder,
-    AutoregressiveWrapper,
-    TokenEmbedding,
-    LogitsMapper
+    Decoder, LinearNoBias,
 )
 
 from x_transformers.multi_input import MultiInputTransformerWrapper
@@ -348,7 +347,7 @@ def test_value_residual():
 def test_embedder(embedder_type):
     num_tokens = 20000
     dim = 128
-    forward_kwargs = {}
+    token_emb_kwargs = {}
     if embedder_type == 'embedding':
         embedder = torch.nn.Embedding(num_tokens, dim)
     elif embedder_type == 'none':
@@ -368,7 +367,7 @@ def test_embedder(embedder_type):
             def init_(self):
                 pass
         embedder = CustomEmbedder(num_tokens, dim)
-        forward_kwargs['y'] = torch.randint(0, num_tokens, (2, 1024))
+        token_emb_kwargs['y'] = torch.randint(0, num_tokens, (2, 1024))
     model = TransformerWrapper(
         num_tokens = num_tokens,
         max_seq_len = 1024,
@@ -382,45 +381,50 @@ def test_embedder(embedder_type):
 
     x = torch.randint(0, 20000, (2, 1024))
 
-    output = model(x, **forward_kwargs)
+    output = model(x, token_emb_kwargs=token_emb_kwargs)
     assert output.shape == (2, 1024, 20000)
 
 
-@pytest.mark.parametrize('logit_mapper_type', ('linear', 'none', 'pointer'))
-@pytest.mark.parametrize('tie_embeddings', (True, False))
-def test_to_logits(logit_mapper_type: str, tie_embedding: bool):
+@pytest.mark.parametrize("to_logits", ('linear', 'none', 'pointer'))
+@pytest.mark.parametrize('tie_embedding', (True, False))
+def test_to_logits(to_logits, tie_embedding: bool):
     num_tokens = 20000
     dim = 128
-    forward_kwargs = {}
-    if logit_mapper_type == 'linear':
-        logit_mapper = LogitsMapper(dim, num_tokens)
-    elif logit_mapper_type == 'none':
+    to_logits_kwargs = {}
+    if to_logits == 'linear':
+        logit_mapper = LinearNoBias(dim, num_tokens)
+    elif to_logits == 'none':
         logit_mapper = None
     else:
         class PointerNetworkLogits(torch.nn.Module):
             def __init__(self, dim):
                 super().__init__()
                 self.proj_to_pointers = torch.nn.Linear(dim, dim)
-            def forward(self, model_embeddings, **kwargs):
-                input_embeddings = kwargs['input_embeddings']
+            def forward(self, model_embeddings, input_embeddings):
                 pointers = self.proj_to_pointers(model_embeddings)
                 logits = torch.matmul(pointers, input_embeddings.permute(0, 2, 1))
                 return logits
 
         logit_mapper = PointerNetworkLogits(dim)
-        forward_kwargs['input_embeddings'] = torch.randn(2, 20000, dim)
-    model = TransformerWrapper(
-        num_tokens = num_tokens,
-        max_seq_len = 1024,
-        attn_layers = Decoder(
-            dim = dim,
-            depth = 6,
-            heads = 8,
-        ),
-        to_logits = logit_mapper,
-        tie_embedding=tie_embedding,
-    )
+        to_logits_kwargs['input_embeddings'] = torch.randn(2, 20000, dim)
+
+    if to_logits not in ('linear', 'none') and tie_embedding:
+        exception_context = pytest.raises(AssertionError)
+    else:
+        exception_context = nullcontext()
+    with exception_context:
+        model = TransformerWrapper(
+            num_tokens = num_tokens,
+            max_seq_len = 1024,
+            attn_layers = Decoder(
+                dim = dim,
+                depth = 6,
+                heads = 8,
+            ),
+            to_logits = logit_mapper,
+            tie_embedding=tie_embedding,
+        )
 
     x = torch.randint(0, num_tokens, (2, 1024))
-    output = model(x, **forward_kwargs)
+    output = model(x, to_logits_kwargs=to_logits_kwargs)
     assert output.shape == (2, 1024, 20000)
