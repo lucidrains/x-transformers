@@ -1,5 +1,3 @@
-from contextlib import nullcontext
-
 import pytest
 import torch
 
