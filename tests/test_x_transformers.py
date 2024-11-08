@@ -381,6 +381,7 @@ def test_neo_mlp():
     assert out.shape == (3, 7)
 
 def test_custom_alibi():
+
     model = TransformerWrapper(
         num_tokens = 20_000,
         max_seq_len = 1024,
@@ -398,6 +399,26 @@ def test_custom_alibi():
 
     logits = model(x, pos = pos)
 
+def test_custom_alibi_across_heads():
+
+    model = Decoder(
+        dim = 512,
+        depth = 2,
+        heads = 2,
+        alibi_pos_bias = True,
+        rel_pos_kwargs = dict(
+            slopes = [1, 1]
+        ),
+    )
+
+    x = torch.randn(2, 4, 512)
+
+    pos = torch.tensor([
+        [[0, 1, 2, 4], [1, 3, 5, 7]],
+        [[2, 3, 4, 5], [6, 8, 9, 10]]
+    ])
+
+    embed = model(x, pos = pos)
 
 @pytest.mark.parametrize('embedder_type', ('embedding', 'none', 'custom'))
 def test_embedder(embedder_type):

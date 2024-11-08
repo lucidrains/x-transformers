@@ -452,13 +452,20 @@ class DynamicPositionBias(Module):
         return bias
 
 class AlibiPositionalBias(Module):
-    def __init__(self, heads, total_heads = None, **kwargs):
+    def __init__(
+        self,
+        heads,
+        total_heads = None,
+        slopes: list[int] | None = None,
+        **kwargs
+    ):
         super().__init__()
         self.heads = heads
         self.total_heads = default(total_heads, heads)
 
-        slopes = Tensor(self._get_slopes(heads))
+        slopes = Tensor(default(slopes, self._get_slopes(heads)))
         slopes = rearrange(slopes, 'h -> h 1 1')
+
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
     
@@ -487,7 +494,10 @@ class AlibiPositionalBias(Module):
         h, device = self.total_heads, self.device
 
         pos_j = default(pos_j, pos_i)
-        bias = -einx.subtract('... j, ... i -> ... 1 i j', pos_j, pos_i).abs()
+        bias = -einx.subtract('... j, ... i -> ... i j', pos_j, pos_i).abs()
+
+        if bias.ndim == 3:
+            bias = rearrange(bias, 'b i j -> b 1 i j')
 
         bias = bias * self.slopes
         num_heads_unalibied = h - bias.shape[-3]
@@ -1531,8 +1541,9 @@ class AttentionLayers(Module):
         use_layerscale = False,
         layerscale_init_value = 0.,
         unet_skips = False,
-        reinject_input = False, # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
-        add_value_residual = False, # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1
+        reinject_input = False,         # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
+        add_value_residual = False,     # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1
+        rel_pos_kwargs: dict = dict(),
         **kwargs
     ):
         super().__init__()
@@ -1573,14 +1584,14 @@ class AttentionLayers(Module):
 
         if rel_pos_bias:
             assert not flash_attn, 'flash attention not compatible with t5 relative positional bias'
-            self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance)
+            self.rel_pos = RelativePositionBias(scale = dim_head ** 0.5, causal = causal, heads = heads, num_buckets = rel_pos_num_buckets, max_distance = rel_pos_max_distance, **rel_pos_kwargs)
         elif dynamic_pos_bias:
             assert not flash_attn, 'flash attention not compatible with dynamic positional bias'
-            self.rel_pos = DynamicPositionBias(dim = dim // 4, heads = heads, log_distance = dynamic_pos_bias_log_distance, depth = dynamic_pos_bias_mlp_depth, norm = dynamic_pos_bias_norm)
+            self.rel_pos = DynamicPositionBias(dim = dim // 4, heads = heads, log_distance = dynamic_pos_bias_log_distance, depth = dynamic_pos_bias_mlp_depth, norm = dynamic_pos_bias_norm, **rel_pos_kwargs)
         elif alibi_pos_bias:
             alibi_num_heads = default(alibi_num_heads, heads)
             assert alibi_num_heads <= heads, 'number of ALiBi heads must be less than the total number of heads'
-            self.rel_pos = AlibiPositionalBias(heads = alibi_num_heads, total_heads = heads)
+            self.rel_pos = AlibiPositionalBias(heads = alibi_num_heads, total_heads = heads, **rel_pos_kwargs)
 
         assert at_most_one_of(sandwich_norm, resi_dual), 'either sandwich norm or resiDual is selected, but not both'
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
