@@ -2,7 +2,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from einops import pack, repeat, unpack
+import einx
+from einops import reduce, pack, repeat, unpack
 
 from x_transformers.x_transformers import (
     AttentionLayers,
@@ -23,6 +24,15 @@ def default(val, d):
     if exists(val):
         return val
     return d() if callable(d) else d
+
+def masked_mean(t, mask):
+    t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
+
+    num = reduce(t, 'b n d -> b', 'sum')
+    den = mask.sum(dim = -1)
+
+    masked_average = num / den.clamp(min = 1.)
+    return masked_average
 
 # main classes
 
@@ -169,12 +179,15 @@ class ContinuousAutoregressiveWrapper(nn.Module):
         net: ContinuousTransformerWrapper,
         ignore_index = -100,
         pad_value = 0,
-        loss_fn = nn.MSELoss(reduction = 'none')
+        loss_fn = nn.MSELoss(reduction = 'none'),
+        equal_loss_weight_batch = False  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
     ):
         super().__init__()
         self.net = net
         self.max_seq_len = net.max_seq_len
+
         self.loss_fn = loss_fn
+        self.equal_loss_weight_batch = equal_loss_weight_batch
 
     @torch.no_grad()
     def generate(self, start_tokens, seq_len, **kwargs):
@@ -222,6 +235,10 @@ class ContinuousAutoregressiveWrapper(nn.Module):
 
         if exists(mask):
             assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
-            loss = loss[mask]
+
+            if self.equal_loss_weight_batch:
+                loss = masked_mean(loss, mask)
+            else:
+                loss = loss[mask]
 
         return loss.mean()
