@@ -48,7 +48,7 @@ def align_right(t, lens, pad_id = 0):
     batch_arange = torch.arange(batch, device = device, dtype = torch.long)[..., None]
     prompt_len_arange = torch.arange(seq_len, device = device, dtype = torch.long)
 
-    t = F.pad(t, (max_pad_len, 0), value = 0)
+    t = F.pad(t, (max_pad_len, 0), value = pad_id)
     offset = max_pad_len - pad_lens
 
     aligned = t[batch_arange, prompt_len_arange + offset[..., None]]
