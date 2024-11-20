@@ -18,7 +18,8 @@ setup(
   install_requires=[
     'torch>=2.0',
     'einx>=0.3.0',
-    'einops>=0.8.0'
+    'einops>=0.8.0',
+    'packaging>=21.0',
   ],
   setup_requires=[
     'pytest-runner',
