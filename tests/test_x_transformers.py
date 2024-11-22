@@ -331,7 +331,10 @@ def test_reinject_input():
 
     model(x) # (1, 1024, 20000)
 
-def test_value_residual():
+@pytest.mark.parametrize('learned_value_residual_mix', (False, True))
+def test_value_residual(
+    learned_value_residual_mix: bool
+):
 
     model = TransformerWrapper(
         num_tokens = 20000,
@@ -341,6 +344,7 @@ def test_value_residual():
             depth = 6,
             heads = 8,
             add_value_residual = True,
+            learned_value_residual_mix = learned_value_residual_mix
         )
     )
 
