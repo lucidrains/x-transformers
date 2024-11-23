@@ -1235,9 +1235,9 @@ class Attention(Module):
         # maybe learned value residual mixer per token
 
         self.to_value_residual_mix = nn.Sequential(
-            nn.Linear(dim, 1),
+            nn.Linear(dim, heads),
             nn.Sigmoid(),
-            Rearrange('b n 1 -> b 1 n 1')
+            Rearrange('b n h -> b h n 1')
          ) if learned_value_residual_mix else always(0.5)
 
         # attention on attention
