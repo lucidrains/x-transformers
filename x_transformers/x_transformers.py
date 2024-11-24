@@ -1428,12 +1428,14 @@ class Attention(Module):
             else:
                 attn_bias = rel_pos(i, j)
 
-            attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0), value = 0.) # handle memory key / values
+            attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0)) # handle memory key / values
 
         # prepare data dependent alibi from forgetting transformers paper, if needed
 
         if exists(self.data_dependent_alibi):
             attn_bias = self.data_dependent_alibi(x)
+
+            attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0))
 
         # attention is all we need
 

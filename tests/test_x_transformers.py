@@ -352,7 +352,10 @@ def test_value_residual(
 
     model(x)
 
-def test_forgetting_transformer():
+@pytest.mark.parametrize('has_num_mem_kv', (False, True))
+def test_forgetting_transformer(
+    has_num_mem_kv: bool
+):
 
     model = TransformerWrapper(
         num_tokens = 20000,
@@ -361,7 +364,8 @@ def test_forgetting_transformer():
             dim = 128,
             depth = 6,
             heads = 8,
-            attn_data_dependent_alibi = False
+            attn_num_mem_kv = 1 if has_num_mem_kv else 0,
+            attn_data_dependent_alibi = True
         )
     )
 
