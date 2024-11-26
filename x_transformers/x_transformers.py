@@ -20,6 +20,8 @@ import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, reduce, pack, unpack
 
+from loguru import logger
+
 from x_transformers.attend import Attend, Intermediates
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
@@ -1580,7 +1582,12 @@ class AttentionLayers(Module):
 
         self.disable_abs_pos_emb = default(disable_abs_pos_emb, (rel_pos_bias or rotary_pos_emb))
 
-        rotary_emb_dim = max(default(rotary_emb_dim, dim_head // 2), 32)
+        rotary_emb_dim = default(rotary_emb_dim, dim_head // 2)
+
+        assert rotary_emb_dim <= dim_head, f'rotary emb dim {rotary_emb_dim} must be less than or equal to attention head dimension {dim_head}'
+
+        if rotary_emb_dim < 32:
+            logger.warning('when training language model, rotary embedding dimension should be at least 32')
 
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor, base_rescale_factor = rotary_base_rescale_factor) if rotary_pos_emb else None
