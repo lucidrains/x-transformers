@@ -1075,6 +1075,7 @@ class Attention(Module):
         neutreno_value_residual = False, # Nguyen et al. https://arxiv.org/abs/2312.00751
         neutreno_alpha = 0.4,
         learned_value_residual_mix = False,
+        laser = False, # https://arxiv.org/abs/2411.03493v1
         onnxable = False,
         attend_sdp_kwargs: dict = dict(
             enable_flash = True,
@@ -1113,6 +1114,11 @@ class Attention(Module):
 
         assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
         self.to_v = LinearNoBias(dim_kv, v_dim) if not shared_kv else None
+
+        # enhancing gradients to attention through exponentiated values
+        # todo - compare it to `attn = attn * large_value + attn.detach() * (1. - large_value)`
+
+        self.laser = laser
 
         # relations projection from tp-attention
 
@@ -1439,6 +1445,11 @@ class Attention(Module):
 
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0))
 
+        if self.laser:
+            values_max = v.amax(dim = -2, keepdim = True).detach() # numerical stability
+            v = v - values_max
+            v = v.exp()
+
         # attention is all we need
 
         out, intermediates = self.attend(
@@ -1447,6 +1458,11 @@ class Attention(Module):
             attn_bias = attn_bias,
             prev_attn = prev_attn
         )
+
+        # laser
+
+        if self.laser:
+            out = out.log() + values_max
 
         # store the values for resformer or Neutreno
 

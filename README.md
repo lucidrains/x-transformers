@@ -2352,4 +2352,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Duvvuri2024LASERAW,
+    title   = {LASER: Attention with Exponential Transformation},
+    author  = {Sai Surya Duvvuri and Inderjit S. Dhillon},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273849947}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

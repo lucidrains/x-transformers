@@ -516,3 +516,19 @@ def test_to_logits(to_logits):
     output = model(x, to_logits_kwargs=to_logits_kwargs)
 
     assert output.shape == (2, 1024, 20000)
+
+def test_laser():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_laser = True
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    model(x)
