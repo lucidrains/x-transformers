@@ -388,7 +388,8 @@ def test_neo_mlp():
     out = mlp(x)
     assert out.shape == (3, 7)
 
-def test_custom_alibi():
+@pytest.mark.parametrize('flash', (True, False))
+def test_custom_alibi(flash: bool):
 
     model = TransformerWrapper(
         num_tokens = 20_000,
@@ -397,7 +398,8 @@ def test_custom_alibi():
             dim = 512,
             depth = 2,
             heads = 8,
-            alibi_pos_bias = True
+            alibi_pos_bias = True,
+            attn_flash = flash
         )
     )
 
@@ -407,7 +409,8 @@ def test_custom_alibi():
 
     logits = model(x, pos = pos)
 
-def test_custom_alibi_across_heads():
+@pytest.mark.parametrize('flash', (True, False))
+def test_custom_alibi_across_heads(flash: bool):
 
     model = Decoder(
         dim = 512,
@@ -417,6 +420,7 @@ def test_custom_alibi_across_heads():
         rel_pos_kwargs = dict(
             slopes = [1, 1]
         ),
+        attn_flash = flash
     )
 
     x = torch.randn(2, 4, 512)
