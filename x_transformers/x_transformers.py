@@ -655,7 +655,10 @@ class RotaryEmbedding(Module):
     def forward(self, t):
         max_pos = t.max() + 1
 
-        freqs = torch.einsum('i , j -> i j', t.type_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
+        if t.ndim == 1:
+            t = rearrange(t, 'n -> 1 n')
+
+        freqs = torch.einsum('b i , j -> b i j', t.type_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
         freqs = torch.stack((freqs, freqs), dim = -1)
         freqs = rearrange(freqs, '... d r -> ... (d r)')
 
@@ -679,8 +682,8 @@ def rotate_half(x):
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
 
-    freqs = freqs[-seq_len:, :]
-    scale = scale[-seq_len:, :] if isinstance(scale, torch.Tensor) else scale
+    freqs = freqs[:, -seq_len:, :]
+    scale = scale[:, -seq_len:, :] if isinstance(scale, torch.Tensor) else scale
 
     if t.ndim == 4 and freqs.ndim == 3:
         freqs = rearrange(freqs, 'b n d -> b 1 n d')

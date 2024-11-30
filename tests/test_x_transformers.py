@@ -409,9 +409,30 @@ def test_custom_alibi(flash: bool):
 
     logits = model(x, pos = pos)
 
+def test_custom_rotary_pos_emb():
+    from einops import repeat
+
+    model = TransformerWrapper(
+        num_tokens = 20_000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 2,
+            heads = 8,
+            rotary_pos_emb = True
+        )
+    )
+
+    x = torch.randint(0, 20000, (4, 4))
+
+    pos = repeat(torch.arange(0, 4), "n -> b n", b=4)
+
+    logits1 = model(x, pos = pos)
+    logits2 = model(x)
+    assert torch.allclose(logits1, logits2)
+
 @pytest.mark.parametrize('flash', (True, False))
 def test_custom_alibi_across_heads(flash: bool):
-
     model = Decoder(
         dim = 512,
         depth = 2,
