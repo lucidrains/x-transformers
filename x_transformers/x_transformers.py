@@ -1119,7 +1119,6 @@ class Attention(Module):
         self.to_v = LinearNoBias(dim_kv, v_dim) if not shared_kv else None
 
         # enhancing gradients to attention through exponentiated values
-        # todo - compare it to `attn = attn * large_value + attn.detach() * (1. - large_value)`
 
         self.laser = laser
 
