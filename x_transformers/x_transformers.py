@@ -1465,7 +1465,7 @@ class Attention(Module):
         # laser
 
         if self.laser:
-            out = out.log() + values_max
+            out = log(out) + values_max
 
         # store the values for resformer or Neutreno
 
