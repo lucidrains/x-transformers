@@ -1079,6 +1079,7 @@ class Attention(Module):
         neutreno_alpha = 0.4,
         learned_value_residual_mix = False,
         laser = False, # https://arxiv.org/abs/2411.03493v1
+        laser_softclamp_value = 15.,
         onnxable = False,
         attend_sdp_kwargs: dict = dict(
             enable_flash = True,
@@ -1121,6 +1122,7 @@ class Attention(Module):
         # enhancing gradients to attention through exponentiated values
 
         self.laser = laser
+        self.laser_softclamp_value = laser_softclamp_value
 
         # relations projection from tp-attention
 
@@ -1448,8 +1450,7 @@ class Attention(Module):
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0))
 
         if self.laser:
-            values_max = v.amax(dim = -2, keepdim = True).detach() # numerical stability
-            v = v - values_max
+            v = softclamp(v, self.laser_softclamp_value)
             v = v.exp()
 
         # attention is all we need
@@ -1464,7 +1465,7 @@ class Attention(Module):
         # laser
 
         if self.laser:
-            out = log(out) + values_max
+            out = log(out)
 
         # store the values for resformer or Neutreno
 
