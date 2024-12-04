@@ -1848,8 +1848,7 @@ class AttentionLayers(Module):
                 layer = Attention(dim, heads = heads, causal = causal, learned_value_residual_mix = self_attn_learned_value_residual, **attn_kwargs)
                 is_first_self_attn = False
             elif layer_type == 'c':
-                cross_attn_learned_value_residual = learned_value_residual_mix and not is_first_cross_attn
-                layer = Attention(dim, heads = heads, learned_value_residual_mix = cross_attn_learned_value_residual, **{**attn_kwargs, **cross_attn_kwargs})
+                layer = Attention(dim, heads = heads, **{**attn_kwargs, **cross_attn_kwargs})
                 is_first_cross_attn = False
             elif layer_type == 'f':
                 layer = FeedForward(dim, **ff_kwargs)
