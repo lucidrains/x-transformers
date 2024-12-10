@@ -558,8 +558,10 @@ def test_laser():
 
     model(x)
 
+@pytest.mark.parametrize('self_attn_custom_pos', (True, False))
 @pytest.mark.parametrize('cross_attn_rotary', (True, False))
 def test_cross_attn_rotary(
+    self_attn_custom_pos: bool,
     cross_attn_rotary: bool
 ):
 
@@ -577,12 +579,14 @@ def test_cross_attn_rotary(
         cross_attn_dim_context = 512
     )
 
-    context_pos = torch.arange(128)
+    pos = torch.arange(64) if self_attn_custom_pos else None
+    context_pos = torch.arange(128) if cross_attn_rotary else None
 
     embed = model(
       x = x,
       mask = mask,
       context = context,
-      context_pos = context_pos if cross_attn_rotary else None,
+      pos = pos,
+      context_pos = context_pos,
       context_mask = context_mask
     )
