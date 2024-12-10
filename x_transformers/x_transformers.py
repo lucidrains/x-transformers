@@ -51,8 +51,8 @@ def default(val, d):
         return val
     return d() if callable(d) else d
 
-def first(it):
-    return it[0]
+def first(it, default = None):
+    return it[0] if len(it) > 0 else default
 
 def is_empty(x):
     return len(x) == 0
@@ -1357,7 +1357,6 @@ class Attention(Module):
             k = k * self.qk_norm_k_scale
 
         if exists(rotary_pos_emb):
-
             freqs, xpos_scale = rotary_pos_emb
             q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.) if exists(xpos_scale) else (1., 1.)
 
@@ -1989,7 +1988,7 @@ class AttentionLayers(Module):
 
         if exists(self.rotary_pos_emb):
             if not exists(rotary_pos_emb):
-                maybe_mem = mems[0] # todo - handle edge case where different layers get different memory lengths. don't think this will ever come up but who knows
+                maybe_mem = first(mems, None) # todo - handle edge case where different layers get different memory lengths. don't think this will ever come up but who knows
                 mem_len = maybe_mem.shape[1] if exists(maybe_mem) else 0
 
                 if not exists(pos):
