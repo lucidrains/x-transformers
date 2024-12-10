@@ -557,3 +557,32 @@ def test_laser():
     x = torch.randint(0, 20000, (2, 1024))
 
     model(x)
+
+@pytest.mark.parametrize('cross_attn_rotary', (True, False))
+def test_cross_attn_rotary(
+    cross_attn_rotary: bool
+):
+
+    x = torch.randn((1, 64, 256))
+    mask = torch.ones((1, 64)).bool()
+    context = torch.randn((1, 128, 512))
+    context_mask = torch.ones((1, 128)).bool()
+
+    model = Encoder(
+        dim = 256,
+        depth = 4,
+        heads = 4,
+        rotary_pos_emb = True,
+        cross_attend = True,
+        cross_attn_dim_context = 512
+    )
+
+    context_pos = torch.arange(128)
+
+    embed = model(
+      x = x,
+      mask = mask,
+      context = context,
+      context_pos = context_pos if cross_attn_rotary else None,
+      context_mask = context_mask
+    )
