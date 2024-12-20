@@ -1077,7 +1077,7 @@ class Attention(Module):
         logit_softclamp_value = 50.,
         neutreno_value_residual = False, # Nguyen et al. https://arxiv.org/abs/2312.00751
         neutreno_alpha = 0.4,
-        learned_value_residual_mix = False,
+        learned_value_residual_mix = True,
         laser = False, # https://arxiv.org/abs/2411.03493v1
         laser_softclamp_value = 15.,
         onnxable = False,
