@@ -2240,7 +2240,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
-```
+```bibtex
 @article{Yang2017BreakingTS,
     title     = {Breaking the Softmax Bottleneck: A High-Rank RNN Language Model},
     author    = {Zhilin Yang and Zihang Dai and Ruslan Salakhutdinov and William W. Cohen},

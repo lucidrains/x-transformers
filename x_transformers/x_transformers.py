@@ -1650,7 +1650,7 @@ class AttentionLayers(Module):
         unet_skips = False,
         num_residual_streams = 1,
         reinject_input = False,              # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
-        add_value_residual = False,          # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1
+        add_value_residual = False,          # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1 - further corroboration by https://arxiv.org/abs/2412.15113 (faster emergence of ICL) - looks like this setting may becoming a necessity for every transformer soon
         learned_value_residual_mix = True,   # seeing big improvements when the value residual mix value is learned per token - credit goes to @faresobeid for taking the first step with learned scalar mix, then @Blinkdl for taking it a step further with data dependent. here we will use per token learned
         rel_pos_kwargs: dict = dict(),
         **kwargs
