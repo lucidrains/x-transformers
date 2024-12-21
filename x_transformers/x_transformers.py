@@ -824,12 +824,15 @@ class SimpleRMSNorm(Module):
 # residual and residual gates
 
 class Residual(Module):
-    def __init__(self, dim, scale_residual = False, scale_residual_constant = 1.):
+    def __init__(self, dim, scale_residual = False, scale_residual_constant = 1., **kwargs):
         super().__init__()
         self.residual_scale = nn.Parameter(torch.ones(dim)) if scale_residual else None
         self.scale_residual_constant = scale_residual_constant
 
-    def forward(self, x, residual):
+    def prepare(self, residual):
+        return residual, residual, dict()
+
+    def forward(self, x, residual, **kwargs):
         if exists(self.residual_scale):
             residual = residual * self.residual_scale
 
@@ -844,7 +847,10 @@ class GRUGating(Module):
         self.gru = nn.GRUCell(dim, dim)
         self.residual_scale = nn.Parameter(torch.ones(dim)) if scale_residual else None
 
-    def forward(self, x, residual):
+    def prepare(self, residual):
+        return residual, residual, dict()
+
+    def forward(self, x, residual, **kwargs):
         if exists(self.residual_scale):
             residual = residual * self.residual_scale
 
@@ -854,6 +860,66 @@ class GRUGating(Module):
         )
 
         return gated_output.reshape_as(x)
+
+# hyper connections
+
+class HyperConnection(Module):
+    def __init__(
+        self,
+        dim,
+        *,
+        layer_index,
+        num_residual_streams,
+        **kwargs
+    ):
+        """
+        https://arxiv.org/abs/2409.19606
+        Appendix J - Algorithm 2, Dynamic only
+        """
+        super().__init__()
+
+        self.norm = nn.LayerNorm(dim, bias = False)
+
+        self.num_residual_streams = num_residual_streams
+        self.layer_index = layer_index
+
+        self.static_beta = nn.Parameter(torch.ones(num_residual_streams))
+
+        init_alpha0 = torch.zeros((num_residual_streams, 1))
+        init_alpha0[layer_index % num_residual_streams, 0] = 1.
+
+        self.static_alpha = nn.Parameter(torch.cat([init_alpha0, torch.eye(num_residual_streams)], dim = 1))
+
+        self.dynamic_alpha_fn = nn.Parameter(torch.zeros(dim, num_residual_streams + 1))
+        self.dynamic_alpha_scale = nn.Parameter(torch.ones(()) * 1e-2)
+        self.dynamic_beta_fn = nn.Parameter(torch.zeros(dim))
+        self.dynamic_beta_scale = nn.Parameter(torch.ones(()) * 1e-2)
+
+    def prepare(self, residuals):
+
+        residuals = rearrange(residuals, '(b s) n d -> b n s d', s = self.num_residual_streams)
+
+        normed = self.norm(residuals)
+
+        wc_weight = (normed @ self.dynamic_alpha_fn).tanh()
+        dynamic_alpha = wc_weight * self.dynamic_alpha_scale
+        alpha = dynamic_alpha + self.static_alpha
+
+        dc_weight = (normed @ self.dynamic_beta_fn).tanh()
+        dynamic_beta = dc_weight * self.dynamic_beta_scale
+        beta = dynamic_beta + self.static_beta
+
+        # width connection
+
+        mix_h = einsum('... s t, ... s d -> ... t d', alpha, residuals)
+
+        branch_input, residuals = mix_h[..., 0, :], mix_h[..., 1:, :]
+
+        return branch_input, residuals, dict(beta = beta)
+
+    def forward(self, x, residuals, *, beta):
+        residuals = einsum('b n d, b n s -> b n s d', x, beta) + residuals
+        return rearrange(residuals, 'b n s d -> (b s) n d')
 
 # token shifting
 
@@ -1582,6 +1648,7 @@ class AttentionLayers(Module):
         use_layerscale = False,
         layerscale_init_value = 0.,
         unet_skips = False,
+        num_residual_streams = 1,
         reinject_input = False,              # seen first in DEQ paper https://arxiv.org/abs/1909.01377, but later used in a number of papers trying to achieve depthwise generalization https://arxiv.org/abs/2410.03020v1
         add_value_residual = False,          # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1
         learned_value_residual_mix = True,   # seeing big improvements when the value residual mix value is learned per token - credit goes to @faresobeid for taking the first step with learned scalar mix, then @Blinkdl for taking it a step further with data dependent. here we will use per token learned
@@ -1606,6 +1673,17 @@ class AttentionLayers(Module):
         self.dim = dim
         self.causal = causal
         self.layers = ModuleList([])
+
+        # greater than one residual stream, proposed in Hyper-Connections paper https://arxiv.org/abs/2409.19606
+
+        assert num_residual_streams > 0
+
+        self.num_residual_streams = num_residual_streams
+        self.stream_emb = nn.Parameter(torch.zeros(num_residual_streams, dim)) if num_residual_streams > 1 else None
+
+        assert not (num_residual_streams > 1 and gate_residual)
+
+        # positions related
 
         self.disable_abs_pos_emb = default(disable_abs_pos_emb, (rel_pos_bias or rotary_pos_emb))
 
@@ -1872,9 +1950,14 @@ class AttentionLayers(Module):
             if exists(post_branch_fn):
                 layer = post_branch_fn(layer)
 
-            residual_fn = GRUGating if gate_residual else Residual
+            if num_residual_streams > 1:
+                residual_fn = partial(HyperConnection, num_residual_streams = num_residual_streams)
+            elif gate_residual:
+                residual_fn = GRUGating
+            else:
+                residual_fn = Residual
 
-            residual = residual_fn(dim, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
+            residual = residual_fn(dim, layer_index = ind, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
 
             # handle unet skip connection
 
@@ -2024,6 +2107,16 @@ class AttentionLayers(Module):
 
         iter_attn_cache = iter(attn_cache)
 
+        # setup multistreams if needed
+
+        streams = self.num_residual_streams
+        is_multistream = streams > 1
+
+        if is_multistream:
+            x = repeat(x, 'b n d -> b n s d', s = streams)
+            x = x + self.stream_emb
+            x = rearrange(x, 'b n s d -> (b s) n d')
+
         # outer residual - for resiDual paper
 
         outer_residual = x * self.resi_dual_scale
@@ -2090,7 +2183,7 @@ class AttentionLayers(Module):
                 if self.training and self.cross_attn_tokens_dropout > 0.:
                     context, context_mask = dropout_seq(context, context_mask, self.cross_attn_tokens_dropout)
 
-            inner_residual = x
+            x, inner_residual, residual_kwargs = residual_fn.prepare(x)
 
             if return_hiddens:
                 layer_hiddens.append(x)
@@ -2148,7 +2241,7 @@ class AttentionLayers(Module):
             if exists(post_branch_norm):
                 out = post_branch_norm(out)
 
-            x = residual_fn(out, inner_residual)
+            x = residual_fn(out, inner_residual, **residual_kwargs)
 
             if layer_type in ('a', 'c') and return_hiddens:
                 inter.layer_type = layer_type
@@ -2177,6 +2270,11 @@ class AttentionLayers(Module):
             x = x + final_norm(outer_residual)
         else:
             x = final_norm(x)
+
+        # take care of multistreams if needed, use sum for now
+
+        if is_multistream:
+            x = reduce(x, '(b s) n d -> b n d', 'sum', s = streams)
 
         if not return_hiddens:
             return x

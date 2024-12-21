@@ -590,3 +590,19 @@ def test_cross_attn_rotary(
       context_pos = context_pos,
       context_mask = context_mask
     )
+
+def test_hyper_connections():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            num_residual_streams = 8 # 8 dynamic hyper connection residual streams
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    model(x)
