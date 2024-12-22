@@ -870,6 +870,7 @@ class HyperConnection(Module):
         *,
         layer_index,
         num_residual_streams,
+        tanh = True,
         **kwargs
     ):
         """
@@ -877,6 +878,8 @@ class HyperConnection(Module):
         Appendix J - Algorithm 2, Dynamic only
         """
         super().__init__()
+
+        self.act = nn.Tanh() if tanh else nn.Identity()
 
         self.norm = nn.LayerNorm(dim, bias = False)
 
@@ -901,11 +904,11 @@ class HyperConnection(Module):
 
         normed = self.norm(residuals)
 
-        wc_weight = (normed @ self.dynamic_alpha_fn).tanh()
+        wc_weight = self.act(normed @ self.dynamic_alpha_fn)
         dynamic_alpha = wc_weight * self.dynamic_alpha_scale
         alpha = dynamic_alpha + self.static_alpha
 
-        dc_weight = (normed @ self.dynamic_beta_fn).tanh()
+        dc_weight = self.act(normed @ self.dynamic_beta_fn)
         dynamic_beta = dc_weight * self.dynamic_beta_scale
         beta = dynamic_beta + self.static_beta
 
@@ -1653,6 +1656,7 @@ class AttentionLayers(Module):
         add_value_residual = False,          # resformer from Zhou et al - https://arxiv.org/abs/2410.17897v1 - further corroboration by https://arxiv.org/abs/2412.15113 (faster emergence of ICL) - looks like this setting may becoming a necessity for every transformer soon
         learned_value_residual_mix = True,   # seeing big improvements when the value residual mix value is learned per token - credit goes to @faresobeid for taking the first step with learned scalar mix, then @Blinkdl for taking it a step further with data dependent. here we will use per token learned
         rel_pos_kwargs: dict = dict(),
+        residual_fn_kwargs: dict = dict(),
         **kwargs
     ):
         super().__init__()
@@ -1957,7 +1961,7 @@ class AttentionLayers(Module):
             else:
                 residual_fn = Residual
 
-            residual = residual_fn(dim, layer_index = ind, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant)
+            residual = residual_fn(dim, layer_index = ind, scale_residual = scale_residual, scale_residual_constant = scale_residual_constant, **residual_fn_kwargs)
 
             # handle unet skip connection
 

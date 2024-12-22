@@ -591,7 +591,9 @@ def test_cross_attn_rotary(
       context_mask = context_mask
     )
 
-def test_hyper_connections():
+@pytest.mark.parametrize('tanh', (True, False))
+def test_hyper_connections(tanh):
+
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
@@ -599,7 +601,10 @@ def test_hyper_connections():
             dim = 128,
             depth = 6,
             heads = 8,
-            num_residual_streams = 8 # 8 dynamic hyper connection residual streams
+            num_residual_streams = 8, # 8 dynamic hyper connection residual streams
+            residual_fn_kwargs = dict(
+                tanh = tanh
+            )
         )
     )
 
