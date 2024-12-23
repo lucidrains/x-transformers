@@ -409,7 +409,8 @@ def test_custom_alibi(flash: bool):
 
     logits = model(x, pos = pos)
 
-def test_custom_rotary_pos_emb():
+@pytest.mark.parametrize('rotary_xpos', (True, False))
+def test_custom_rotary_pos_emb(rotary_xpos):
     from einops import repeat
 
     model = TransformerWrapper(
@@ -419,7 +420,8 @@ def test_custom_rotary_pos_emb():
             dim = 512,
             depth = 2,
             heads = 8,
-            rotary_pos_emb = True
+            rotary_pos_emb = True,
+            rotary_xpos = rotary_xpos
         )
     )
 

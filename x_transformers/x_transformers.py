@@ -666,7 +666,7 @@ class RotaryEmbedding(Module):
             return freqs, 1.
 
         power = (t - (max_pos // 2)) / self.scale_base
-        scale = self.scale ** rearrange(power, 'n -> n 1')
+        scale = self.scale ** rearrange(power, '... n -> ... n 1')
         scale = torch.stack((scale, scale), dim = -1)
         scale = rearrange(scale, '... d r -> ... (d r)')
 
