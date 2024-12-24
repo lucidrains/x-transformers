@@ -2270,15 +2270,15 @@ class AttentionLayers(Module):
         if self.need_condition:
             final_norm = maybe(partial)(final_norm, **norm_kwargs)
 
-        if self.resi_dual:
-            x = x + final_norm(outer_residual)
-        else:
-            x = final_norm(x)
-
         # take care of multistreams if needed, use sum for now
 
         if is_multistream:
             x = reduce(x, '(b s) n d -> b n d', 'sum', s = streams)
+
+        if self.resi_dual:
+            x = x + final_norm(outer_residual)
+        else:
+            x = final_norm(x)
 
         if not return_hiddens:
             return x
