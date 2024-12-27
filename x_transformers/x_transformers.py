@@ -38,6 +38,7 @@ class LayerIntermediates:
     attn_z_loss:        Tensor | None = None
     mems:               Tensor | None = None
     memory_tokens:      Tensor | None = None
+    logit_entropies:    Tensor | None = None
 
 LinearNoBias = partial(nn.Linear, bias = False)
 
@@ -135,6 +136,15 @@ def or_reduce(masks):
     for rest in body:
         head = head | rest
     return head
+
+# entropy
+
+def calc_entropy(
+    t: Tensor,
+    is_prob = False
+):
+    prob = t.softmax(dim = -1) if not is_prob else t
+    return -(prob * log(prob)).sum(dim = -1)
 
 # auxiliary loss helpers
 
@@ -2592,6 +2602,7 @@ class TransformerWrapper(Module):
         return_embeddings = False,
         return_logits_and_embeddings = False,
         return_intermediates = False,
+        return_logit_entropies = False,
         mask = None,
         return_mems = False,
         return_attn = False,
@@ -2808,6 +2819,12 @@ class TransformerWrapper(Module):
             out = x
         else:
             out = logits
+
+        # logit entropies
+
+        if return_logit_entropies:
+            intermediates.logit_entropies = calc_entropy(logits)
+            return_intermediates = True
 
         # aux loss
 
