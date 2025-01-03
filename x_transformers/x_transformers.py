@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Callable
 
 import math
+from copy import deepcopy
 from random import random, randrange
 from packaging import version
 
@@ -1136,6 +1137,7 @@ class Attention(Module):
         sigmoid = False,
         selective = False,
         custom_attn_fn: Callable | None = None,
+        hybrid_module: Module | None = None,
         one_kv_head = False,
         kv_heads = None,
         shared_kv = False,
@@ -1335,6 +1337,10 @@ class Attention(Module):
 
         self.attn_on_attn = on_attn
 
+        # hybrid module, in same vein as hymba https://www.arxiv.org/abs/2411.13676
+
+        self.hybrid_module = deepcopy(hybrid_module) if exists(hybrid_module) else None
+
         # output dimension by default same as input, but can be overridden
 
         dim_out = default(dim_out, dim)
@@ -1407,6 +1413,16 @@ class Attention(Module):
                 value_residual_mix = self.to_value_residual_mix(q_input)
                 v = v * value_residual_mix + value_residual * (1. - value_residual_mix)
 
+        # qk normalization
+
+        if self.qk_norm:
+            qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
+            q, k = map(qk_l2norm, (q, k))
+            scale = self.qk_norm_scale
+
+            q = q * self.qk_norm_q_scale
+            k = k * self.qk_norm_k_scale
+
         # take care of caching
 
         if exists(cache):
@@ -1426,14 +1442,6 @@ class Attention(Module):
         if return_intermediates:
             mem_len = mem.shape[-2] if exists(mem) else 0
             cached_kv = (k[..., mem_len:, :], v[..., mem_len:, :])
-
-        if self.qk_norm:
-            qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
-            q, k = map(qk_l2norm, (q, k))
-            scale = self.qk_norm_scale
-
-            q = q * self.qk_norm_q_scale
-            k = k * self.qk_norm_k_scale
 
         if exists(rotary_pos_emb):
             freqs, xpos_scale = rotary_pos_emb
@@ -1580,6 +1588,12 @@ class Attention(Module):
         # merge heads
 
         out = rearrange(out, 'b h n d -> b n (h d)')
+
+        # hybrid module
+
+        if exists(self.hybrid_module):
+            hybrid_out, _ = self.hybrid_module(x)
+            out = 0.5 * (out + hybrid_out)
 
         # alphafold2 styled gating of the values
 
@@ -2003,7 +2017,7 @@ class AttentionLayers(Module):
 
         # determine whether can cache kv
 
-        self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention) ])
+        self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
 
     def forward(
         self,

@@ -2374,4 +2374,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{anonymous2024hymba,
+    title   = {Hymba: A Hybrid-head Architecture for Small Language Models},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Thirteenth International Conference on Learning Representations},
+    year    = {2024},
+    url     = {https://openreview.net/forum?id=A1ztozypga},
+    note    = {under review}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
