@@ -10,7 +10,7 @@ import torch
 from torch.amp import autocast
 import torch.nn.functional as F
 from torch import nn, einsum, Tensor
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.nn import Module, ModuleList, ModuleDict
 
 from functools import partial, wraps
@@ -966,6 +966,42 @@ class ShiftTokens(Module):
         x = torch.cat((*segments_to_shift, *rest), dim = -1)
         return self.fn(x, **kwargs)
 
+class FoldAxially(Module):
+    def __init__(
+        self,
+        axial_dim,
+        fn: Module
+    ):
+        super().__init__()
+        self.fn = fn
+        self.axial_dim = axial_dim # will fold the sequence as rearrange("b (n axial_dim) ... -> (b axial_dim) n ...")
+
+    def forward(
+        self,
+        x,
+        **kwargs
+    ):
+        if self.axial_dim == 1:
+            return self.fn(x, **kwargs)
+
+        seq_len, axial_dim = x.shape[1], self.axial_dim
+
+        next_multiple = math.ceil(seq_len / axial_dim) * axial_dim
+        x = pad_at_dim(x, (0, next_multiple - seq_len), dim = 1)
+
+        x = rearrange(x, 'b (n axial_dim) ... -> (b axial_dim) n ...', axial_dim = axial_dim)
+
+        out = self.fn(x, **kwargs)
+
+        (out, *rest_out), tree_spec = tree_flatten(out)
+
+        out = rearrange(out, '(b axial_dim) n ... -> b (n axial_dim) ...', axial_dim = axial_dim)
+
+        out = out[:, :seq_len]
+        out = tree_unflatten((out, *rest_out), tree_spec)
+
+        return out
+
 # post branch operator
 
 class LayerScale(Module):
@@ -1140,6 +1176,7 @@ class Attention(Module):
         custom_attn_fn: Callable | None = None,
         hybrid_module: Module | None = None,
         hybrid_mask_kwarg: str | None = None,
+        hybrid_fold_axial_dim: int | None = None,
         one_kv_head = False,
         kv_heads = None,
         shared_kv = False,
@@ -1341,8 +1378,12 @@ class Attention(Module):
 
         # hybrid module, in same vein as hymba https://www.arxiv.org/abs/2411.13676
 
-        self.hybrid_module = deepcopy(hybrid_module) if exists(hybrid_module) else None
+        hybrid_module = maybe(deepcopy)(hybrid_module)
 
+        if exists(hybrid_module) and exists(hybrid_fold_axial_dim):
+            hybrid_module = FoldAxially(axial_dim = hybrid_fold_axial_dim, fn = hybrid_module)
+
+        self.hybrid_module = hybrid_module
         self.hybrid_mask_kwarg = hybrid_mask_kwarg # for bidirectional, can forward `mask` into the hybrid module and let it handle variable lengths
 
         # output dimension by default same as input, but can be overridden

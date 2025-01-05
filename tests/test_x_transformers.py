@@ -614,7 +614,8 @@ def test_hyper_connections(tanh):
 
     model(x)
 
-def test_hybrid():
+@pytest.mark.parametrize('hybrid_axial_dim', (1, 4))
+def test_hybrid(hybrid_axial_dim):
     from torch.nn import GRU
 
     dec = TransformerWrapper(
@@ -625,6 +626,7 @@ def test_hybrid():
             depth = 6,
             heads = 8,
             attn_dim_head = 64,
+            attn_hybrid_fold_axial_dim = hybrid_axial_dim,
             attn_hybrid_module = GRU(128, 64 * 8, batch_first = True)
         )
     )
@@ -641,6 +643,7 @@ def test_hybrid():
             depth = 6,
             heads = 8,
             attn_dim_head = 64,
+            attn_hybrid_fold_axial_dim = hybrid_axial_dim,
             attn_hybrid_module = GRU(128, 64 * 4, batch_first = True, bidirectional = True)
         )
     )
