@@ -617,7 +617,7 @@ def test_hyper_connections(tanh):
 def test_hybrid():
     from torch.nn import GRU
 
-    model = TransformerWrapper(
+    dec = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
         attn_layers = Decoder(
@@ -631,4 +631,19 @@ def test_hybrid():
 
     x = torch.randint(0, 20000, (2, 1024))
 
-    embed = model(x)
+    embed = dec(x)
+
+    enc = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Encoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_dim_head = 64,
+            attn_hybrid_module = GRU(128, 64 * 4, batch_first = True, bidirectional = True)
+        )
+    )
+
+    mask = torch.randint(0, 2, (2, 1024)).bool()
+    embed = enc(x, mask = mask)

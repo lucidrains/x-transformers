@@ -7,10 +7,11 @@ from random import random, randrange
 from packaging import version
 
 import torch
+from torch.amp import autocast
 import torch.nn.functional as F
 from torch import nn, einsum, Tensor
+from torch.utils._pytree import tree_flatten
 from torch.nn import Module, ModuleList, ModuleDict
-from torch.amp import autocast
 
 from functools import partial, wraps
 from collections import namedtuple
@@ -1138,6 +1139,7 @@ class Attention(Module):
         selective = False,
         custom_attn_fn: Callable | None = None,
         hybrid_module: Module | None = None,
+        hybrid_mask_kwarg: str | None = None,
         one_kv_head = False,
         kv_heads = None,
         shared_kv = False,
@@ -1340,6 +1342,8 @@ class Attention(Module):
         # hybrid module, in same vein as hymba https://www.arxiv.org/abs/2411.13676
 
         self.hybrid_module = deepcopy(hybrid_module) if exists(hybrid_module) else None
+
+        self.hybrid_mask_kwarg = hybrid_mask_kwarg # for bidirectional, can forward `mask` into the hybrid module and let it handle variable lengths
 
         # output dimension by default same as input, but can be overridden
 
@@ -1592,7 +1596,21 @@ class Attention(Module):
         # hybrid module
 
         if exists(self.hybrid_module):
-            hybrid_out, _ = self.hybrid_module(x)
+
+            # hybrid input
+
+            hybrid_forward_kwargs = dict()
+
+            if not self.causal and exists(self.hybrid_mask_kwarg):
+                hybrid_forward_kwargs = {self.hybrid_mask_kwarg: mask}
+
+            # hybrid forward
+
+            hybrid_outputs = self.hybrid_module(x, **hybrid_forward_kwargs)
+
+            # handle hybrid out
+
+            (hybrid_out, *rest_hybrid_outs), _ = tree_flatten(hybrid_outs)
             out = 0.5 * (out + hybrid_out)
 
         # alphafold2 styled gating of the values
