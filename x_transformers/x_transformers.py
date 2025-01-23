@@ -2224,7 +2224,7 @@ class AttentionLayers(Module):
         layer_variables = tuple(tuple(layer_variable[i] for i in layers_execute_order) for layer_variable in layer_variables)
 
         # derived input for reinjection if needed
-
+        inp_inject = None
         if self.reinject_input:
             assert not exists(in_attn_cond)
             inp_inject = self.reinject_input_proj(x)
@@ -2282,7 +2282,7 @@ class AttentionLayers(Module):
                 post_branch_norm = maybe(partial)(post_branch_norm, **norm_kwargs)
                 post_main_norm = maybe(partial)(post_main_norm, **norm_kwargs)
 
-            if self.reinject_input:
+            if exists(inp_inject):
                 x = x + inp_inject
 
             if exists(pre_norm):
