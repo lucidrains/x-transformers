@@ -650,3 +650,22 @@ def test_hybrid(hybrid_axial_dim):
 
     mask = torch.randint(0, 2, (2, 1024)).bool()
     embed = enc(x, mask = mask)
+
+def test_latent_q_and_kv():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_dim_latent_q = 64,
+            attn_use_latent_q = True,
+            attn_dim_latent_kv = 64,
+            attn_use_latent_kv = True
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    model(x)

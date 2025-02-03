@@ -1947,15 +1947,6 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
-@misc{schlag2020enhancing,
-    title   = {Enhancing the Transformer with explicit relational encoding for math problem solving},
-    author  = {Imanol Schlag and Paul Smolensky and Roland Fernandez and Nebojsa Jojic and J{\"u}rgen Schmidhuber and Jianfeng Gao},
-    year    = {2020},
-    url     = {https://openreview.net/forum?id=B1xfElrKPr}
-}
-```
-
-```bibtex
 @article{Liu2022FCMFC,
     title   = {FCM: Forgetful Causal Masking Makes Causal Language Models Better Zero-Shot Learners},
     author  = {Hao Liu and Xinyang Geng and Lisa Lee and Igor Mordatch and Sergey Levine and Sharan Narang and P. Abbeel},
@@ -2324,17 +2315,6 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
-@article{Nguyen2023MitigatingOI,
-    title   = {Mitigating Over-smoothing in Transformers via Regularized Nonlocal Functionals},
-    author  = {Tam Nguyen and Tan M. Nguyen and Richard G. Baraniuk},
-    journal = {ArXiv},
-    year    = {2023},
-    volume  = {abs/2312.00751},
-    url     = {https://api.semanticscholar.org/CorpusID:264300597}
-}
-```
-
-```bibtex
 @inproceedings{anonymous2024forgetting,
     title   = {Forgetting Transformer: Softmax Attention with a Forget Gate},
     author  = {Anonymous},
@@ -2384,6 +2364,17 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     year    = {2024},
     url     = {https://openreview.net/forum?id=A1ztozypga},
     note    = {under review}
+}
+```
+
+```bibtex
+@article{Shao2024DeepSeekV2AS,
+    title   = {DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model},
+    author  = {Zhihong Shao and Damai Dai and Daya Guo and Bo Liu (Benjamin Liu) and Zihan Wang and Huajian Xin},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2405.04434},
+    url     = {https://api.semanticscholar.org/CorpusID:269613809}
 }
 ```
 

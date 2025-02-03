@@ -1189,7 +1189,6 @@ class Attention(Module):
         hybrid_fold_axial_dim: int | None = None,
         one_kv_head = False,
         kv_heads = None,
-        shared_kv = False,
         value_dim_head = None,
         dim_out = None,
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
@@ -1205,12 +1204,14 @@ class Attention(Module):
         cope_talking_heads = False,
         softclamp_logits = False,
         logit_softclamp_value = 50.,
-        neutreno_value_residual = False, # Nguyen et al. https://arxiv.org/abs/2312.00751
-        neutreno_alpha = 0.4,
         learned_value_residual_mix = False,
         laser = False, # https://arxiv.org/abs/2411.03493v1
         laser_softclamp_value = 15.,
         qkv_receive_diff_residuals = False,
+        use_latent_q = False,
+        dim_latent_q = None,
+        use_latent_kv = False,
+        dim_latent_kv = None,
         onnxable = False,
         attend_sdp_kwargs: dict = dict(
             enable_flash = True,
@@ -1242,13 +1243,33 @@ class Attention(Module):
         v_dim = value_dim_head * kv_heads
         out_dim = value_dim_head * heads
 
-        self.to_q = LinearNoBias(dim, q_dim)
-        self.to_k = LinearNoBias(dim_kv, k_dim)
+        # determine input dimensions to qkv based on whether intermediate latent q and kv are being used
+        # for eventually supporting multi-latent attention (MLA)
 
-        # shared key / values, for further memory savings during inference
+        self.to_latent_q = None
+        self.to_latent_kv = None
 
-        assert not (shared_kv and value_dim_head != dim_head), 'key and value head dimensions must be equal for shared key / values'
-        self.to_v = LinearNoBias(dim_kv, v_dim) if not shared_kv else None
+        dim_q_input = dim
+        dim_kv_input = dim_kv
+
+        if use_latent_q:
+            assert exists(dim_latent_q)
+            self.to_latent_q = LinearNoBias(dim, dim_latent_q)
+            dim_q_input = dim_latent_q
+
+        if use_latent_kv:
+            assert exists(dim_latent_kv)
+            self.to_latent_kv = LinearNoBias(dim, dim_latent_kv)
+            dim_kv_input = dim_latent_kv
+
+        self.use_latent_q = use_latent_q
+        self.use_latent_kv = use_latent_kv
+
+        # query key projection
+
+        self.to_q = LinearNoBias(dim_q_input, q_dim)
+        self.to_k = LinearNoBias(dim_kv_input, k_dim)
+        self.to_v = LinearNoBias(dim_kv_input, v_dim)
 
         # whether qkv receives different residual stream combinations from hyper connections
 
@@ -1258,15 +1279,6 @@ class Attention(Module):
 
         self.laser = laser
         self.laser_softclamp_value = laser_softclamp_value
-
-        # relations projection from tp-attention
-
-        self.to_r = LinearNoBias(dim, v_dim) if tensor_product else None
-
-        # the value residual used by Nguyen et al. in https://arxiv.org/abs/2312.00751 for countering oversmoothing
-
-        self.neutreno_value_residual = neutreno_value_residual
-        self.neutreno_alpha = neutreno_alpha
 
         # add GLU gating for aggregated values, from alphafold2
 
@@ -1443,8 +1455,6 @@ class Attention(Module):
         assert not (qkv_receive_diff_residuals and has_context), 'qkv receiving different sequences can only be used for self attention'
 
         if qkv_receive_diff_residuals:
-            assert not exists(self.to_r)
-
             q_input, k_input, v_input = x
         else:
             kv_input = default(context, x)
@@ -1458,27 +1468,34 @@ class Attention(Module):
             k_input, mem_packed_shape = pack([mem, k_input], 'b * d')
             v_input, _ = pack([mem, v_input], 'b * d')
 
+        # maybe project to latent queries and cache-able latent key values
+        # https://arxiv.org/abs/2405.04434 - Deepseek-AI team
+
+        if self.use_latent_q:
+            q_input = self.to_latent_q(q_input)
+
+        if self.use_latent_kv:
+            assert not qkv_receive_diff_residuals
+            v_input = k_input = self.to_latent_kv(k_input)
+
+        # query, key, value projection
+
         q = self.to_q(q_input)
         k = self.to_k(k_input)
-        v = self.to_v(v_input) if exists(self.to_v) else k
-        r = self.to_r(r_input) if exists(self.to_r) else None
+        v = self.to_v(v_input)
 
         q = rearrange(q, 'b n (h d) -> b h n d', h = h)
 
-        k, v, r = tuple(maybe(rearrange)(t, 'b n (h d) -> b h n d', h = kv_h) for t in (k, v, r))
+        k, v = tuple(rearrange(t, 'b n (h d) -> b h n d', h = kv_h) for t in (k, v))
 
-        # if previous values passed in for residual, either invoke resformer or neutreno
+        # if previous values passed in for residual, either invoke resformer
 
         orig_values = v
 
         if exists(value_residual):
-            if self.neutreno_value_residual:
-                diff_values = (value_residual - v) * self.neutreno_alpha
-                diff_values = repeat(diff_values, 'b h n d -> b (r h) n d', r = h // kv_h)
-            else:
-                # https://arxiv.org/abs/2410.17897v1
-                value_residual_mix = self.to_value_residual_mix(q_input)
-                v = v * value_residual_mix + value_residual * (1. - value_residual_mix)
+            # https://arxiv.org/abs/2410.17897v1
+            value_residual_mix = self.to_value_residual_mix(q_input)
+            v = v * value_residual_mix + value_residual * (1. - value_residual_mix)
 
         # qk normalization
 
@@ -1629,17 +1646,9 @@ class Attention(Module):
         if self.laser:
             out = log(out)
 
-        # store the values for resformer or Neutreno
+        # store the values for resformer
 
         intermediates.values = orig_values
-
-        if exists(value_residual) and self.neutreno_value_residual:
-            out = out + diff_values
-
-        # https://arxiv.org/abs/2208.06061 proposes to add a residual for better gradients
-
-        if exists(r):
-            out = out * r + out
 
         # normformer scaling of heads
 
@@ -1775,11 +1784,8 @@ class AttentionLayers(Module):
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
         data_dependent_alibi = attn_kwargs.get('data_dependent_alibi', False)
-        neutreno_value_residual = attn_kwargs.get('neutreno_value_residual', False)
 
         assert len(kwargs) == 0, f'unrecognized kwargs passed in {kwargs.keys()}'
-
-        add_value_residual |= neutreno_value_residual
 
         self.dim = dim
         self.causal = causal
