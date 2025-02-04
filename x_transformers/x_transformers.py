@@ -1484,6 +1484,7 @@ class Attention(Module):
             q_input = self.to_latent_q(q_input)
 
         if is_multi_latent_attn:
+            assert not exists(rotary_pos_emb), 'rotary positions not supported yet'
             assert not qkv_receive_diff_residuals
 
             latent_kv_input = self.to_latent_kv(k_input)
