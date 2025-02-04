@@ -1201,7 +1201,7 @@ class Attention(Module):
         dim_out = None,
         tensor_product = False,      # https://arxiv.org/abs/2208.06061
         add_zero_kv = False,         # same as add_zero_attn in pytorch
-        rotary_embed_values = False,
+        rotate_num_heads = None,
         data_dependent_alibi = False,
         data_dependent_alibi_per_row = False,
         data_dependent_alibi_per_row_dim_head = 8,
@@ -1426,9 +1426,12 @@ class Attention(Module):
         dim_out = default(dim_out, dim)
         self.to_out = nn.Sequential(LinearNoBias(out_dim, dim_out * 2), nn.GLU()) if on_attn else LinearNoBias(out_dim, dim_out)
 
-        # whether to rotate positions into values, for absolute positions in addition to relative
+        # the number of attention heads to rotate, for decoupled rope in multi-latent attention
 
-        self.rotary_embed_values = rotary_embed_values
+        rotate_num_heads = default(rotate_num_heads, heads)
+        assert 0 < rotate_num_heads <= heads
+
+        self.rotate_num_heads = rotate_num_heads
 
         # whether parent can kv cache
 
@@ -1484,7 +1487,6 @@ class Attention(Module):
             q_input = self.to_latent_q(q_input)
 
         if is_multi_latent_attn:
-            assert not exists(rotary_pos_emb), 'rotary positions not supported yet'
             assert not qkv_receive_diff_residuals
 
             latent_kv_input = self.to_latent_kv(k_input)
@@ -1549,8 +1551,15 @@ class Attention(Module):
             cached_kv = (k[..., mem_len:, :], v[..., mem_len:, :])
 
         if exists(rotary_pos_emb):
+            rotate_num_heads = self.rotate_num_heads
+            partial_rotate_heads = rotate_num_heads < h
+
             freqs, xpos_scale = rotary_pos_emb
             q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.) if exists(xpos_scale) else (1., 1.)
+
+            if partial_rotate_heads:
+                q, q_rest = q[:, -rotate_num_heads:], q[:, :-rotate_num_heads]
+                k, k_rest = k[:, -rotate_num_heads:], k[:, :-rotate_num_heads]
 
             q = apply_rotary_pos_emb(q, freqs, q_xpos_scale)
 
@@ -1562,8 +1571,9 @@ class Attention(Module):
 
             k = apply_rotary_pos_emb(k, freqs, k_xpos_scale)
 
-            if self.rotary_embed_values:
-                v = apply_rotary_pos_emb(v, freqs, k_xpos_scale)
+            if partial_rotate_heads:
+                q = cat((q, q_rest), dim = 1)
+                k = cat((k, k_rest), dim = 1)
 
         input_mask = context_mask
 
