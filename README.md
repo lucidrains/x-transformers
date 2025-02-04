@@ -2016,16 +2016,6 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
-@article{Xie2023ResiDualTW,
-  title     = {ResiDual: Transformer with Dual Residual Connections},
-  author    = {Shufang Xie and Huishuai Zhang and Junliang Guo and Xu Tan and Jiang Bian and Hany Hassan Awadalla and Arul Menezes and Tao Qin and Rui Yan},
-  journal   = {ArXiv},
-  year      = {2023},
-  volume    = {abs/2304.14802}
-}
-```
-
-```bibtex
 @inproceedings{Dehghani2023ScalingVT,
     title   = {Scaling Vision Transformers to 22 Billion Parameters},
     author  = {Mostafa Dehghani and Josip Djolonga and Basil Mustafa and Piotr Padlewski and Jonathan Heek and Justin Gilmer and Andreas Steiner and Mathilde Caron and Robert Geirhos and Ibrahim M. Alabdulmohsin and Rodolphe Jenatton and Lucas Beyer and Michael Tschannen and Anurag Arnab and Xiao Wang and Carlos Riquelme and Matthias Minderer and Joan Puigcerver and Utku Evci and Manoj Kumar and Sjoerd van Steenkiste and Gamaleldin F. Elsayed and Aravindh Mahendran and Fisher Yu and Avital Oliver and Fantine Huot and Jasmijn Bastings and Mark Collier and Alexey A. Gritsenko and Vighnesh Birodkar and Cristina Nader Vasconcelos and Yi Tay and Thomas Mensink and Alexander Kolesnikov and Filip Paveti'c and Dustin Tran and Thomas Kipf and Mario Luvci'c and Xiaohua Zhai and Daniel Keysers and Jeremiah Harmsen and Neil Houlsby},
