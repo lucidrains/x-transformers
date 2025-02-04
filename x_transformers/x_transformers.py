@@ -1460,17 +1460,18 @@ class Attention(Module):
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context, qkv_receive_diff_residuals, is_multi_latent_attn = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context), self.qkv_receive_diff_residuals, self.use_latent_kv
 
+        # an interesting possibility with hyper connections
+        # having queries, keys, values be routed from different layers
+
         assert not (qkv_receive_diff_residuals and has_context), 'qkv receiving different sequences can only be used for self attention'
 
         if qkv_receive_diff_residuals:
+            assert x.ndim == 4 and x.shape[0] == 3
+
             q_input, k_input, v_input = x
         else:
             kv_input = default(context, x)
-
-            q_input = x
-            k_input = kv_input
-            v_input = kv_input
-            r_input = x
+            q_input, k_input, v_input = x, kv_input, kv_input
 
         if exists(mem):
             k_input, mem_packed_shape = pack([mem, k_input], 'b * d')
@@ -1510,10 +1511,11 @@ class Attention(Module):
 
         orig_values = v
 
+        # https://arxiv.org/abs/2410.17897v1
+
         if exists(value_residual):
-            # https://arxiv.org/abs/2410.17897v1
             value_residual_mix = self.to_value_residual_mix(q_input)
-            v = v * value_residual_mix + value_residual * (1. - value_residual_mix)
+            v = value_residual.lerp(v, value_residual_mix)
 
         # qk normalization
 
@@ -2245,9 +2247,7 @@ class AttentionLayers(Module):
         is_multistream = streams > 1
 
         if is_multistream:
-            x = repeat(x, 'b n d -> b n s d', s = streams)
-            x = x + self.stream_emb
-            x = rearrange(x, 'b n s d -> (b s) n d')
+            x = einx.add('b n d, s d -> (b s) n d', x, self.stream_emb)
 
         # get layers to be executed
 
