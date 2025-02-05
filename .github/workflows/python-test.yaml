@@ -27,7 +27,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip uv
         python -m uv pip install torch==2.1.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-        python -m uv pip install .
+        python -m uv pip install .[test]
     - name: Test with pytest
       run: |
-        python setup.py test
+        pytest tests
