@@ -841,6 +841,15 @@ class SimpleRMSNorm(Module):
     def forward(self, x):
         return F.normalize(x, dim = -1) * self.scale
 
+class MultiheadRMSNorm(Module):
+    def __init__(self, dim, heads):
+        super().__init__()
+        self.rmsnorm = SimpleRMSNorm(dim)
+        self.gamma = nn.Parameter(torch.zeros(heads, 1, dim))
+
+    def forward(self, x):
+        return self.rmsnorm(x) * (self.gamma + 1.)
+
 # residual and residual gates
 
 class Residual(Module):
@@ -1431,12 +1440,22 @@ class Attention(Module):
 
         # hybrid module, in same vein as hymba https://www.arxiv.org/abs/2411.13676
 
+        hybrid_mix = None
+        hybrid_norms = None
         hybrid_module = maybe(deepcopy)(hybrid_module)
 
         if exists(hybrid_module) and exists(hybrid_fold_axial_dim):
             hybrid_module = FoldAxially(axial_dim = hybrid_fold_axial_dim, fn = hybrid_module)
+            hybrid_mix = LinearNoBias(dim, heads)
+
+            hybrid_norms = ModuleList([
+                MultiheadRMSNorm(dim_head, heads = heads),
+                MultiheadRMSNorm(dim_head, heads = heads)
+            ])
 
         self.hybrid_module = hybrid_module
+        self.hybrid_norms = hybrid_norms
+        self.hybrid_mix = hybrid_mix
         self.hybrid_mask_kwarg = hybrid_mask_kwarg # for bidirectional, can forward `mask` into the hybrid module and let it handle variable lengths
 
         # output dimension by default same as input, but can be overridden
@@ -1729,11 +1748,9 @@ class Attention(Module):
             head_gate = self.to_v_head_gate(x)
             out = einx.multiply('b n h, b h n d ->b h n d', head_gate.sigmoid(), out)
 
-        # merge heads
+        # if exists hybrid module, must do a normalization
 
-        out = self.merge_heads(out)
-
-        # hybrid module
+         # hybrid module
 
         if exists(self.hybrid_module):
 
@@ -1751,7 +1768,22 @@ class Attention(Module):
             # handle hybrid out
 
             (hybrid_out, *rest_hybrid_outs), _ = tree_flatten(hybrid_outputs)
+
+            # handle variable hybrid output and multi rmsnorm before summing to main attention output (also normed)
+
+            if hybrid_out.ndim == 3:
+                hybrid_out = rearrange(hybrid_out, 'b n (h d) -> b h n d', h = h)
+
+            out_norm, hybrid_out_norm = self.hybrid_norms
+
+            out = out_norm(out)
+            hybrid_out = hybrid_out_norm(hybrid_out)
+
             out = 0.5 * (out + hybrid_out)
+
+        # merge heads
+
+        out = self.merge_heads(out)
 
         # alphafold2 styled gating of the values
 
