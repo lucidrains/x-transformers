@@ -1,6 +1,6 @@
 [project]
 name = "x-transformers"
-version = "2.0.1"
+version = "2.0.2"
 description = "X-Transformers"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -34,7 +34,11 @@ Homepage = "https://pypi.org/project/x-transformers/"
 Repository = "https://github.com/lucidrains/x-transformers"
 
 [project.optional-dependencies]
-examples = ["tqdm", "torchvision"]
+examples = [
+    "lion-pytorch",
+    "tqdm",
+    "torchvision"
+]
 
 test = [
     "pytest",

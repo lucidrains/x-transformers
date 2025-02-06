@@ -1204,6 +1204,7 @@ class Attention(Module):
         hybrid_module: Module | None = None,
         hybrid_mask_kwarg: str | None = None,
         hybrid_fold_axial_dim: int | None = None,
+        hybrid_learned_mix = False,
         one_kv_head = False,
         kv_heads = None,
         value_dim_head = None,
@@ -1446,7 +1447,7 @@ class Attention(Module):
 
         if exists(hybrid_module) and exists(hybrid_fold_axial_dim):
             hybrid_module = FoldAxially(axial_dim = hybrid_fold_axial_dim, fn = hybrid_module)
-            hybrid_mix = LinearNoBias(dim, heads)
+            hybrid_mix = LinearNoBias(dim, heads) if hybrid_learned_mix else None
 
             hybrid_norms = ModuleList([
                 MultiheadRMSNorm(dim_head, heads = heads),
@@ -1779,7 +1780,12 @@ class Attention(Module):
             out = out_norm(out)
             hybrid_out = hybrid_out_norm(hybrid_out)
 
-            out = 0.5 * (out + hybrid_out)
+            if exists(self.hybrid_mix):
+                mix = self.hybrid_mix(x)
+                mix = rearrange(mix, 'b n h -> b h n 1')
+                out = out.lerp(hybrid_out, mix.sigmoid())
+            else:
+                out = 0.5 * (out + hybrid_out)
 
         # merge heads
 

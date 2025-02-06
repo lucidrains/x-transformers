@@ -7,12 +7,16 @@ from x_transformers import TransformerWrapper, Decoder
 
 # constants
 
-NUM_BATCHES = 100000
 BATCH_SIZE = 256
 LEARNING_RATE = 3e-4
 EVAL_EVERY  = 500
-TRAIN_MAX_LENGTH = 64
+
 EVAL_LENGTHS = (16, 32, 64, 128, 256, 512)
+TRAIN_MAX_LENGTH = EVAL_LENGTHS[-2]
+
+LOSS_THRES_INCREASE_LEN = 1e-3
+MEET_CRITERIA_THRES_INCREASE_LEN = 10
+
 HYBRIDIZE_WITH_RNN = True
 
 # rnn for fully resolving state tracking by hybridization
@@ -28,6 +32,7 @@ if HYBRIDIZE_WITH_RNN:
 
     decoder_kwargs = dict(
         attn_hybrid_fold_axial_dim = 4, # even if recurrence is every 4 tokens, can generalize for parity
+        attn_hybrid_learned_mix = True,
         attn_hybrid_module = GRU(dim, dim_head * heads, batch_first = True)
     )
 
@@ -48,7 +53,9 @@ model = TransformerWrapper(
 
 # optimizer
 
-adam = optim.Adam(model.parameters(), lr = LEARNING_RATE)
+from lion_pytorch.cautious_lion import Lion
+
+optimizer = Lion(model.parameters(), lr = LEARNING_RATE, cautious_factor = 0.1)
 
 # data generator
 
@@ -73,7 +80,8 @@ meet_criteria = 0
 train_seq_len = 1
 stop_length = EVAL_LENGTHS[-2]
 
-with tqdm.tqdm(range(NUM_BATCHES), mininterval = 10., desc = 'training') as pbar:
+with tqdm.tqdm(mininterval = 10., desc = 'training') as pbar:
+
     while train_seq_len < stop_length:
         model.train()
 
@@ -90,12 +98,12 @@ with tqdm.tqdm(range(NUM_BATCHES), mininterval = 10., desc = 'training') as pbar
         last_loss = loss[:, -1].mean()
         loss.mean().backward()
 
-        if last_loss.item() < 0.001:
+        if last_loss.item() < LOSS_THRES_INCREASE_LEN:
             meet_criteria += 1
         else:
             meet_criteria = 0
 
-        if meet_criteria >= 10:
+        if meet_criteria >= MEET_CRITERIA_THRES_INCREASE_LEN:
             meet_criteria = 0
             train_seq_len += 1
             print(f'criteria met, incrementing to {train_seq_len}')
@@ -103,8 +111,8 @@ with tqdm.tqdm(range(NUM_BATCHES), mininterval = 10., desc = 'training') as pbar
         print(f'({train_seq_len})| {i}: {last_loss.item()}')
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
 
-        adam.step()
-        adam.zero_grad()
+        optimizer.step()
+        optimizer.zero_grad()
 
         last_step = train_seq_len == stop_length
 
