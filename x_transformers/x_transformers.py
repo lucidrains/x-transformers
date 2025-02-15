@@ -1282,7 +1282,7 @@ class Attention(Module):
             dim_kv_input = dim_latent_kv
 
         if exists(latent_rope_subheads):
-            assert not exists(rotate_num_heads)
+            assert not exists(rotate_num_heads), '`rotate_num_heads` cannot be set when multi-latent attention is being used'
             rotate_num_heads = latent_rope_subheads
 
             k_dim = dim_head * (kv_heads - latent_rope_subheads)
