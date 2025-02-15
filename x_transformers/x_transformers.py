@@ -1845,6 +1845,7 @@ class AttentionLayers(Module):
         rotary_interpolation_factor = 1.,
         rotary_xpos_scale_base = 512,
         rotary_base_rescale_factor = 1.,
+        rotate_num_heads = None,
         weight_tie_layers = False,
         custom_layers: tuple[str, ...] | None = None,
         layers_execute_order: tuple[int, ...] | None = None,
@@ -2147,7 +2148,7 @@ class AttentionLayers(Module):
 
             if layer_type == 'a':
                 self_attn_learned_value_residual = learned_value_residual_mix and not is_first_self_attn
-                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = qkv_receive_diff_residuals, learned_value_residual_mix = self_attn_learned_value_residual, **attn_kwargs)
+                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = qkv_receive_diff_residuals, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, **attn_kwargs)
                 is_first_self_attn = False
             elif layer_type == 'c':
                 layer = Attention(dim, heads = heads, **{**attn_kwargs, **cross_attn_kwargs})

@@ -901,7 +901,8 @@ model_xl = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        rotary_pos_emb = True
+        rotary_pos_emb = True,
+        rotate_num_heads = 4   # only rotate 4 out of the 8 attention heads
     )
 )
 
@@ -1787,6 +1788,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     eprint  = {2104.09864},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL}
+}
+```
+
+```bibtex
+@inproceedings{Yang2025RopeTN,
+    title   = {Rope to Nope and Back Again: A New Hybrid Attention Strategy},
+    author  = {Bowen Yang and Bharat Venkitesh and Dwarak Talupuru and Hangyu Lin and David Cairuz and Phil Blunsom and Acyr F. Locatelli},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:276079501}
 }
 ```
 
