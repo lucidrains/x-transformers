@@ -449,17 +449,16 @@ class DynamicPositionBias(Module):
         return next(self.parameters()).device
 
     def forward(self, i, j):
-        assert i == j
         n, device = j, self.device
 
         # get the (n x n) matrix of distances
-        seq_arange = arange(n, device = device)
-        context_arange = arange(n, device = device)
+        seq_arange = arange(j - i, j, device = device)
+        context_arange = arange(j, device = device)
         indices = einx.subtract('i, j -> i j', seq_arange, context_arange)
-        indices += (n - 1)
+        indices += (j - 1)
 
         # input to continuous positions MLP
-        pos = arange(-n + 1, n, device = device).float()
+        pos = arange(-j + 1, j, device = device).float()
         pos = rearrange(pos, '... -> ... 1')
 
         if self.log_distance:
