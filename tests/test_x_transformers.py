@@ -671,3 +671,25 @@ def test_multi_latent_attention():
     x = torch.randint(0, 20000, (2, 1024))
 
     model(x)
+
+@pytest.mark.parametrize('num_residual_streams', (1, 4))
+@pytest.mark.parametrize('integrate_layers', (False, True))
+def test_lime(
+    num_residual_streams,
+    integrate_layers
+):
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            num_residual_streams = num_residual_streams,
+            integrate_layers = integrate_layers
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    model(x)
