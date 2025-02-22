@@ -2378,4 +2378,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Gerasimov2025YouDN,
+    title   = {You Do Not Fully Utilize Transformer's Representation Capacity},
+    author  = {Gleb Gerasimov and Yaroslav Aksenov and Nikita Balagansky and Viacheslav Sinii and Daniil Gavrilov},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:276317819}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
