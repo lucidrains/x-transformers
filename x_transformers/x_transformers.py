@@ -970,6 +970,7 @@ class DynamicLIMe(Module):
         dim,
         num_layers,
         num_views = 1,
+        norm = True,
         use_softmax = True
     ):
         super().__init__()
@@ -977,6 +978,7 @@ class DynamicLIMe(Module):
         self.multiple_views = num_views > 1
 
         self.to_weights = Sequential(
+            RMSNorm(dim) if norm else None,
             nn.Linear(dim, num_views * num_layers),
             Rearrange('... (views layers) -> views ... layers', views = num_views),
             nn.Softmax(dim = -1) if use_softmax else nn.ReLU()
@@ -987,6 +989,7 @@ class DynamicLIMe(Module):
         x,
         hiddens
     ):
+
         if not is_tensor(hiddens):
             hiddens = stack(hiddens)
 
