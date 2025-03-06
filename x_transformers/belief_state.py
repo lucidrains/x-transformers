@@ -35,11 +35,12 @@ class BeliefStateWrapper(Module):
     def __init__(
         self,
         forward_decoder: TransformerWrapper,
-        backward_decoder: TransformerWrapper
+        backward_decoder: TransformerWrapper,
+        train_frac_forward_backward_pairs: float = 1.
     ):
         super().__init__()
         assert forward_decoder.emb_dim == backward_decoder.emb_dim, 'forward and backwards model must have the same embedding dimension'
-        assert forward_decoder.num_tokens == backward_decoder.num_tokens, 'forward and backwards model must have the same embedding dimension'
+        assert forward_decoder.num_tokens == backward_decoder.num_tokens, 'forward and backwards model must have the same number of tokens'
 
         dim = forward_decoder.emb_dim
         num_tokens = forward_decoder.num_tokens
@@ -47,6 +48,7 @@ class BeliefStateWrapper(Module):
         # the suffix token
 
         self.suffix_token = nn.Parameter(torch.zeros(dim))
+        nn.init.normal_(self.suffix_token, std = 0.02)
 
         # the text prediction head, which predicts for the combinations of prefix and suffix the next and previous token for forwards and backward sequences
 
@@ -60,6 +62,13 @@ class BeliefStateWrapper(Module):
 
         self.forward_decoder = forward_decoder
         self.backward_decoder = backward_decoder
+
+        # what fraction of forward backward pairs to train on
+        # for further memory efficiency
+
+        assert 0 < train_frac_forward_backward_pairs <= 1.
+        self.train_frac_fb_pairs = train_frac_forward_backward_pairs
+        self.needs_subsample_fb_pairs = train_frac_forward_backward_pairs < 1.
 
     def forward(
         self,
@@ -106,6 +115,17 @@ class BeliefStateWrapper(Module):
         valid_mask = (bi - fi) >= 2
 
         fb_pairs = fb_pairs[valid_mask]
+
+        # maybe subsample fb pairs
+
+        if self.needs_subsample_fb_pairs:
+            num_pairs = fb_pairs.shape[0]
+
+            num_subsampled = max(int(num_pairs * self.train_frac_fb_pairs), 1)
+
+            rand_subsampled_indices = torch.randperm(num_pairs, device = device)[:num_subsampled]
+
+            fb_pairs = fb_pairs[rand_subsampled_indices]
 
         # get labels for both
 
