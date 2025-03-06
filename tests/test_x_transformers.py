@@ -693,3 +693,37 @@ def test_lime(
     x = torch.randint(0, 20000, (2, 1024))
 
     model(x)
+
+def test_belief_state_wrapper():
+    from x_transformers.belief_state import BeliefStateWrapper
+
+    forward_model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            rotary_pos_emb = True
+        )
+    )
+
+    backward_model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            rotary_pos_emb = True
+        )
+    )
+
+    model = BeliefStateWrapper(
+        forward_decoder = forward_model,
+        backward_decoder = backward_model
+    )
+
+    seq = torch.randint(0, 20000, (2, 16))
+
+    loss = model(seq)

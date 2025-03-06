@@ -2387,4 +2387,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Hu2024TheBS,
+    title   = {The Belief State Transformer},
+    author  = {Edward S. Hu and Kwangjun Ahn and Qinghua Liu and Haoran Xu and Manan Tomar and Ada Langford and Dinesh Jayaraman and Alex Lamb and John Langford},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273707334}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
