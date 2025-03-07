@@ -6,7 +6,7 @@
 import torch
 from torch.autograd import Function
 from torch.nn import Module, ModuleList
-from torch import nn, cat, stack, arange, cartesian_prod
+from torch import nn, cat, stack, tensor, arange, cartesian_prod
 import torch.nn.functional as F
 
 from x_transformers.x_transformers import (
@@ -36,7 +36,8 @@ class BeliefStateWrapper(Module):
         self,
         forward_decoder: TransformerWrapper,
         backward_decoder: TransformerWrapper,
-        train_frac_forward_backward_pairs: float = 1.
+        train_frac_forward_backward_pairs: float = 1.,
+        backward_ar_loss_weight: float = 1. # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
     ):
         super().__init__()
         assert forward_decoder.emb_dim == backward_decoder.emb_dim, 'forward and backwards model must have the same embedding dimension'
@@ -70,9 +71,17 @@ class BeliefStateWrapper(Module):
         self.train_frac_fb_pairs = train_frac_forward_backward_pairs
         self.needs_subsample_fb_pairs = train_frac_forward_backward_pairs < 1.
 
+        # loss weighting
+
+        self.backward_ar_loss_weight = backward_ar_loss_weight
+        self.needs_loss_weight = backward_ar_loss_weight != 1.
+
+        self.register_buffer('loss_weights', tensor([1., self.backward_ar_loss_weight]))
+
     def forward(
         self,
-        seq
+        seq,
+        backward = True
     ):
         batch, seq_len, device = *seq.shape, seq.device
 
@@ -149,14 +158,31 @@ class BeliefStateWrapper(Module):
 
         fb_loss = F.cross_entropy(
             rearrange(logits, 'b n (fb l) -> b l (fb n)', fb = 2),
-            rearrange(labels, 'b n fb -> b (fb n)')
+            rearrange(labels, 'b n fb -> b (fb n)'),
+            reduction = 'none' if self.needs_loss_weight else 'mean'
         )
+
+        # maybe loss weighting
+
+        if self.needs_loss_weight:
+            fb_loss = rearrange(fb_loss, 'b (fb n) -> b fb n')
+            fb_loss = fb_loss * self.fwd_bwd_loss_weights
+            fb_loss = fb_loss.mean()
 
         # backwards
 
-        fb_loss.backward()
+        orig_backward = getattr(fb_loss, 'backward')
 
-        orig_forward_embeds.backward(forward_embeds.grad)
-        orig_backward_embeds.backward(backward_embeds.grad)
+        def patched_backward_fn(*args, **kwargs):
+            orig_backward(*args, **kwargs)
+            orig_forward_embeds.backward(forward_embeds.grad)
+            orig_backward_embeds.backward(backward_embeds.grad)
+
+        # can allow the researcher to call .backward from the outside
+
+        if backward:
+            patched_backward_fn()
+        else:
+            setattr(fb_loss, 'backward', patched_backward_fn)
 
         return fb_loss
