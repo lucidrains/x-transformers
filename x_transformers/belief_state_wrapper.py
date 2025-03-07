@@ -12,13 +12,18 @@ from torch.nn import Module, ModuleList
 from torch import nn, cat, stack, tensor, arange, cartesian_prod
 import torch.nn.functional as F
 
+from x_transformers.autoregressive_wrapper import (
+    eval_decorator,
+    min_p,
+)
+
 from x_transformers.x_transformers import (
     Decoder,
     TransformerWrapper
 )
 
 import einx
-from einops import rearrange, repeat
+from einops import rearrange, repeat, pack, unpack
 
 # helper functions
 
@@ -27,6 +32,15 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+def eval_decorator(fn):
+    def inner(self, *args, **kwargs):
+        was_training = self.training
+        self.eval()
+        out = fn(self, *args, **kwargs)
+        self.train(was_training)
+        return out
+    return inner
 
 # wrappers
 
@@ -86,6 +100,83 @@ class BeliefStateWrapper(Module):
         self.needs_loss_weight = backward_ar_loss_weight != 1.
 
         self.register_buffer('loss_weights', tensor([1., self.backward_ar_loss_weight]))
+
+        # sampling
+
+        self.max_seq_len = self.forward_decoder.max_seq_len
+
+    @torch.no_grad()
+    @eval_decorator
+    def generate_with_suffix_token_only(
+        self,
+        prompts,
+        seq_len,
+        temperature = 1.25,
+        cache_kv = True,
+        filter_logits_fn = min_p,
+        filter_kwargs = dict(
+            min_p = 0.1
+        ),
+        **kwargs
+    ):
+        max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
+
+        prompts, ps = pack([prompts], '* n')
+
+        batch, orig_seq_len = prompts.shape
+
+        out = prompts
+
+        # kv caches
+
+        cache = None
+
+        # get the encoded suffix token once
+
+        suffix_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
+
+        suffix_tokens = repeat(suffix_tokens, '1 1 d -> b 1 d', b = batch)
+
+        suffix_embed = self.backward_decoder(
+            out[:, 0:0],
+            prepend_embeds = suffix_tokens,
+            return_embeddings = True
+        )
+
+        # sampling up to seq_len
+
+        for _ in range(seq_len):
+
+            embeds, new_cache = self.forward_decoder(
+                out,
+                return_intermediates = True,
+                return_embeddings = True,
+                cache = cache,
+                **kwargs
+            )
+
+            last_embeds = embeds[:, -1:]
+            embeds = cat((last_embeds, suffix_embed), dim = -1)
+
+            if cache_kv and self.forward_decoder.can_cache_kv:
+                cache = new_cache
+
+            logits, _ = self.text_head(embeds).chunk(2, dim = -1)
+
+            logits = logits[:, -1]
+
+            if greedy:
+                sample = logits.argmax(dim = -1, keepdim = True)
+            else:
+                filtered_logits = filter_logits_fn(logits, **filter_kwargs)
+                probs = F.softmax(filtered_logits / temperature, dim = -1)
+                sample = torch.multinomial(probs, 1)
+
+            # concat sample
+
+            out = torch.cat((out, sample), dim=-1)
+
+        return out[:, orig_seq_len:]
 
     def forward(
         self,

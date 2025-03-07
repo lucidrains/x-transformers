@@ -732,3 +732,6 @@ def test_belief_state_wrapper(
 
     loss = model(seq, backward = False)
     loss.backward()
+
+    sampled = model.generate_with_suffix_token_only(seq[:, :1], 16)
+    assert sampled.shape == (2, 16)
