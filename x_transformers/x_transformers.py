@@ -2898,6 +2898,15 @@ class TransformerWrapper(Module):
         to_logits_kwargs = dict(),
         **kwargs,
     ):
+
+        # if sequence is None, auto create an empty one if `prepend_embeds` was supplied
+
+        if not exists(x):
+            assert exists(prepend_embeds)
+            x = prepend_embeds.new_empty((prepend_embeds.shape[0], 0), dtype = torch.long)
+
+        # shapes and variables
+
         b, n, device, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
 
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss

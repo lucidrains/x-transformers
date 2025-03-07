@@ -132,10 +132,7 @@ class BeliefStateWrapper(Module):
 
         # get the encoded suffix token once
 
-        if not exists(suffix):
-            suffix = out[:, 0:0]
-
-        if suffix.ndim == 1:
+        if exists(suffix) and suffix.ndim == 1:
             suffix = repeat(suffix, 'n -> b n', b = batch)
 
         suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
