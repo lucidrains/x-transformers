@@ -38,12 +38,14 @@ class BeliefStateWrapper(Module):
     def __init__(
         self,
         forward_decoder: TransformerWrapper,
-        backward_decoder: TransformerWrapper,
+        backward_decoder: TransformerWrapper | None = None,
         train_frac_forward_backward_pairs: float = 1.,
         text_head: Module | None = None,
         backward_ar_loss_weight: float = 1. # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
     ):
         super().__init__()
+        backward_decoder = default(backward_decoder, forward_decoder) # if backward decoder not set, use the same transformer, assume it knows how to switch gears based on suffix token
+
         assert forward_decoder.emb_dim == backward_decoder.emb_dim, 'forward and backwards model must have the same embedding dimension'
         assert forward_decoder.num_tokens == backward_decoder.num_tokens, 'forward and backwards model must have the same number of tokens'
 
