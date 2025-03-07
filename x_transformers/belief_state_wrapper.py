@@ -1,7 +1,10 @@
+
 # Belief State Transformer
 
 # https://arxiv.org/abs/2410.23506
 # https://www.youtube.com/watch?v=aqhbRtB2Fyg
+
+from __future__ import annotations
 
 import torch
 from torch.autograd import Function
@@ -37,6 +40,7 @@ class BeliefStateWrapper(Module):
         forward_decoder: TransformerWrapper,
         backward_decoder: TransformerWrapper,
         train_frac_forward_backward_pairs: float = 1.,
+        text_head: Module | None = None,
         backward_ar_loss_weight: float = 1. # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
     ):
         super().__init__()
@@ -53,11 +57,14 @@ class BeliefStateWrapper(Module):
 
         # the text prediction head, which predicts for the combinations of prefix and suffix the next and previous token for forwards and backward sequences
 
-        self.text_head = nn.Sequential(
-            nn.Linear(dim * 2, dim),
-            nn.LeakyReLU(),
-            nn.Linear(dim, num_tokens * 2),
-        )
+        if not exists(text_head):
+            text_head = nn.Sequential(
+                nn.Linear(dim * 2, dim),
+                nn.LeakyReLU(),
+                nn.Linear(dim, num_tokens * 2),
+            )
+
+        self.text_head = text_head
 
         # the two decoders, one which is causal forward, the other causal backwards
 
