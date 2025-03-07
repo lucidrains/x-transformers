@@ -23,7 +23,7 @@ from x_transformers.x_transformers import (
 )
 
 import einx
-from einops import rearrange, repeat, pack, unpack
+from einops import rearrange, repeat
 
 # helper functions
 
@@ -113,6 +113,7 @@ class BeliefStateWrapper(Module):
         seq_len,
         temperature = 1.25,
         cache_kv = True,
+        suffix: Tensor | None = None, # the goal conditioning
         filter_logits_fn = min_p,
         filter_kwargs = dict(
             min_p = 0.1
@@ -120,8 +121,6 @@ class BeliefStateWrapper(Module):
         **kwargs
     ):
         max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
-
-        prompts, ps = pack([prompts], '* n')
 
         batch, orig_seq_len = prompts.shape
 
@@ -133,13 +132,19 @@ class BeliefStateWrapper(Module):
 
         # get the encoded suffix token once
 
-        suffix_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
+        if not exists(suffix):
+            suffix = out[:, 0:0]
 
-        suffix_tokens = repeat(suffix_tokens, '1 1 d -> b 1 d', b = batch)
+        if suffix.ndim == 1:
+            suffix = repeat(suffix, 'n -> b n', b = batch)
+
+        suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
+
+        suffix_sos_tokens = repeat(suffix_sos_tokens, '1 1 d -> b 1 d', b = batch)
 
         suffix_embed = self.backward_decoder(
-            out[:, 0:0],
-            prepend_embeds = suffix_tokens,
+            suffix,
+            prepend_embeds = suffix_sos_tokens,
             return_embeddings = True
         )
 
