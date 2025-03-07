@@ -694,7 +694,10 @@ def test_lime(
 
     model(x)
 
-def test_belief_state_wrapper():
+@pytest.mark.parametrize('backward_ar_loss_weight', (1., 0.5))
+def test_belief_state_wrapper(
+    backward_ar_loss_weight
+):
     from x_transformers.belief_state_wrapper import BeliefStateWrapper
 
     forward_model = TransformerWrapper(
@@ -722,7 +725,7 @@ def test_belief_state_wrapper():
     model = BeliefStateWrapper(
         forward_decoder = forward_model,
         backward_decoder = backward_model,
-        backward_ar_loss_weight = 0.5
+        backward_ar_loss_weight = backward_ar_loss_weight
     )
 
     seq = torch.randint(0, 20000, (2, 16))
