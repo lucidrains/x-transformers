@@ -695,8 +695,10 @@ def test_lime(
     model(x)
 
 @pytest.mark.parametrize('backward_ar_loss_weight', (1., 0.5))
+@pytest.mark.parametrize('goal_suffix', (False, True))
 def test_belief_state_wrapper(
-    backward_ar_loss_weight
+    backward_ar_loss_weight,
+    goal_suffix
 ):
     from x_transformers.belief_state_wrapper import BeliefStateWrapper
 
@@ -733,5 +735,9 @@ def test_belief_state_wrapper(
     loss = model(seq, backward = False)
     loss.backward()
 
-    sampled = model.generate_with_suffix_token_only(seq[:, :1], 16)
+    suffix = None
+    if goal_suffix:
+        suffix = torch.randint(0, 20000, (2, 2))
+
+    sampled = model.generate_with_suffix_token_only(seq[:, :1], 16, suffix = suffix)
     assert sampled.shape == (2, 16)
