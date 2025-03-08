@@ -132,8 +132,11 @@ class BeliefStateWrapper(Module):
 
         # get the encoded suffix token once
 
-        if exists(suffix) and suffix.ndim == 1:
-            suffix = repeat(suffix, 'n -> b n', b = batch)
+        if exists(suffix):
+            if suffix.ndim == 1:
+                suffix = repeat(suffix, 'n -> b n', b = batch)
+
+            suffix = suffix.flip(1) # reverse autoregressive
 
         suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
 
@@ -144,6 +147,10 @@ class BeliefStateWrapper(Module):
             prepend_embeds = suffix_sos_tokens,
             return_embeddings = True
         )
+
+        # pick out the last embedding for fill in the middle
+
+        suffix_embed = suffix_embed[:, -1:]
 
         # sampling up to seq_len
 
