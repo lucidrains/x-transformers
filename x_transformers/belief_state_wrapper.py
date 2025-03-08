@@ -1,7 +1,7 @@
 
 # Belief State Transformer
 
-# https://arxiv.org/abs/2410.23506
+# Hu et al. https://arxiv.org/abs/2410.23506
 # https://www.youtube.com/watch?v=aqhbRtB2Fyg
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ class BeliefStateWrapper(Module):
 
     @torch.no_grad()
     @eval_decorator
-    def generate_with_suffix_token_only(
+    def generate_with_suffix_cond(
         self,
         prompts,
         seq_len,

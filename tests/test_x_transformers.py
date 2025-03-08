@@ -739,5 +739,5 @@ def test_belief_state_wrapper(
     if goal_suffix:
         suffix = torch.randint(0, 20000, (2, 2))
 
-    sampled = model.generate_with_suffix_token_only(seq[:, :1], 16, suffix = suffix)
+    sampled = model.generate_with_suffix_cond(seq[:, :1], 16, suffix = suffix)
     assert sampled.shape == (2, 16)
