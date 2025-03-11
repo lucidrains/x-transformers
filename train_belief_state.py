@@ -121,7 +121,10 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10., desc = 'training'):
         model.eval()
         inp = random.choice(val_dataset)[:-1]
         prime = decode_tokens(inp)
+
         print(f'%s \n\n %s', (prime, '*' * 100))
+
+        print('forwards:\n')
 
         sample = model.generate_with_suffix_cond(
             prompts = inp,
@@ -130,4 +133,16 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10., desc = 'training'):
         )
 
         output_str = decode_tokens(sample)
+        print(output_str)
+
+        print('\nbackwards:\n')
+
+        sample = model.generate_with_suffix_cond(
+            prompts = inp,
+            seq_len = GENERATE_LENGTH,
+            cache_kv = True,
+            decode_backwards = True
+        )
+
+        output_str = decode_tokens(sample.flip(0))
         print(output_str)

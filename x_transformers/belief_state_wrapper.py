@@ -60,6 +60,8 @@ class BeliefStateWrapper(Module):
         dim = forward_decoder.emb_dim
         num_tokens = forward_decoder.num_tokens
 
+        self.num_tokens = num_tokens
+
         # the suffix token
 
         self.suffix_token = nn.Parameter(torch.zeros(dim))
@@ -123,6 +125,7 @@ class BeliefStateWrapper(Module):
         filter_kwargs = dict(
             min_p = 0.1
         ),
+        decode_backwards = False,
         **kwargs
     ):
         max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
@@ -130,6 +133,14 @@ class BeliefStateWrapper(Module):
         prompts, batch_ps = pack([prompts], '* d')
 
         batch, orig_seq_len = prompts.shape
+
+        # allow for decoding backwards, to make sure it is working
+
+        main_decoder = self.forward_decoder
+
+        if decode_backwards:
+            prompts = prompts.flip(1)
+            main_decoder = self.backward_decoder
 
         out = prompts
 
@@ -139,31 +150,39 @@ class BeliefStateWrapper(Module):
 
         # get the encoded suffix token once
 
-        if exists(suffix):
-            if suffix.ndim == 1:
-                suffix = repeat(suffix, 'n -> b n', b = batch)
+        if not decode_backwards:
+            if exists(suffix):
+                if suffix.ndim == 1:
+                    suffix = repeat(suffix, 'n -> b n', b = batch)
 
-            suffix = suffix.flip(1) # reverse autoregressive
+                suffix = suffix.flip(1) # reverse autoregressive
 
-        suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
+            suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
 
-        suffix_sos_tokens = repeat(suffix_sos_tokens, '1 1 d -> b 1 d', b = batch)
+            suffix_sos_tokens = repeat(suffix_sos_tokens, '1 1 d -> b 1 d', b = batch)
 
-        suffix_embed = self.backward_decoder(
-            suffix,
-            prepend_embeds = suffix_sos_tokens,
-            return_embeddings = True
-        )
+            suffix_embed = self.backward_decoder(
+                suffix,
+                prepend_embeds = suffix_sos_tokens,
+                return_embeddings = True
+            )
 
-        # pick out the last embedding for fill in the middle
+            # pick out the last embedding for fill in the middle
 
-        suffix_embed = suffix_embed[:, -1:]
+            suffix_embed = suffix_embed[:, -1:]
+
+        else:
+            # just grab a random token for now for prefix
+
+            prefix_embed = torch.randint(0, self.num_tokens, (batch, 1), device = device)
+
+            prefix_embed = self.forward_decoder(prefix_embed, return_embeddings = True)
 
         # sampling up to seq_len
 
         for _ in range(seq_len):
 
-            embeds, new_cache = self.forward_decoder(
+            embeds, new_cache = main_decoder(
                 out,
                 return_intermediates = True,
                 return_embeddings = True,
@@ -172,12 +191,18 @@ class BeliefStateWrapper(Module):
             )
 
             last_embeds = embeds[:, -1:]
-            embeds = cat((last_embeds, suffix_embed), dim = -1)
+
+            if not decode_backwards:
+                embeds = cat((last_embeds, suffix_embed), dim = -1)
+            else:
+                embeds = cat((prefix_embed, last_embeds), dim = -1)
 
             if cache_kv and self.forward_decoder.can_cache_kv:
                 cache = new_cache
 
-            logits, _ = self.text_head(embeds).chunk(2, dim = -1)
+            forward_logits, backward_logits = self.text_head(embeds).chunk(2, dim = -1)
+
+            logits = forward_logits if not decode_backwards else backward_logits
 
             logits = logits[:, -1]
 
