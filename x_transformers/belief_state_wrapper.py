@@ -150,16 +150,16 @@ class BeliefStateWrapper(Module):
 
         # get the encoded suffix token once
 
+        suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
+
+        suffix_sos_tokens = repeat(suffix_sos_tokens, '1 1 d -> b 1 d', b = batch)
+
         if not decode_backwards:
             if exists(suffix):
                 if suffix.ndim == 1:
                     suffix = repeat(suffix, 'n -> b n', b = batch)
 
                 suffix = suffix.flip(1) # reverse autoregressive
-
-            suffix_sos_tokens = rearrange(self.suffix_token, 'd -> 1 1 d')
-
-            suffix_sos_tokens = repeat(suffix_sos_tokens, '1 1 d -> b 1 d', b = batch)
 
             suffix_embed = self.backward_decoder(
                 suffix,
@@ -184,6 +184,7 @@ class BeliefStateWrapper(Module):
 
             embeds, new_cache = main_decoder(
                 out,
+                prepend_embeds = suffix_sos_tokens if decode_backwards else None,
                 return_intermediates = True,
                 return_embeddings = True,
                 cache = cache,

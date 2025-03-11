@@ -21,6 +21,8 @@ GENERATE_EVERY  = 500
 GENERATE_LENGTH = 256
 SEQ_LEN = 256
 
+FORWARD_BACKWARD_SAME_MODEL = True
+
 # helpers
 
 def cycle(loader):
@@ -47,16 +49,19 @@ forward_model = TransformerWrapper(
     )
 )
 
-backward_model = TransformerWrapper(
-    num_tokens = 256,
-    max_seq_len = SEQ_LEN,
-    attn_layers = Decoder(
-        dim = 512,
-        depth = 4, # do a smaller backwards
-        heads = 8,
-        rotary_pos_emb = True
+backward_model = None
+
+if not FORWARD_BACKWARD_SAME_MODEL:
+    backward_model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = SEQ_LEN,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 4, # do a smaller backwards
+            heads = 8,
+            rotary_pos_emb = True
+        )
     )
-)
 
 model = BeliefStateWrapper(
     forward_decoder = forward_model,
