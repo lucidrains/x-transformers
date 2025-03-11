@@ -281,7 +281,7 @@ class BeliefStateWrapper(Module):
 
         fb_embeds = cat((
             forward_embeds[:, fi],
-            backward_embeds[:, bi]
+            backward_embeds[:, bi + 1] # needs plus one for auto matically added suffix token
         ), dim = -1)
 
         logits = self.text_head(fb_embeds)
