@@ -34,15 +34,6 @@ def exists(v):
 def default(v, d):
     return v if exists(v) else d
 
-def eval_decorator(fn):
-    def inner(self, *args, **kwargs):
-        was_training = self.training
-        self.eval()
-        out = fn(self, *args, **kwargs)
-        self.train(was_training)
-        return out
-    return inner
-
 # wrappers
 
 class BeliefStateWrapper(Module):
@@ -245,7 +236,7 @@ class BeliefStateWrapper(Module):
 
         seq_arange = arange(seq_len, device = device)
 
-        fb_pairs = cartesian_prod(seq_arange, seq_arange)
+        fb_pairs = cartesian_prod(seq_arange, seq_arange + 1) # plus one for suffix token
 
         # filter down to valid pairs, as in figure 11
         # f - forward, b - backward, i - indices
@@ -271,7 +262,7 @@ class BeliefStateWrapper(Module):
 
         fi, bi = fb_pairs.unbind(dim = -1)
 
-        labels_fi, labels_bi = (fi + 1), bi
+        labels_fi, labels_bi = (fi + 1), (bi - 1)
 
         forward_labels, backward_labels = seq[:, labels_fi], seq[:, labels_bi]
 
