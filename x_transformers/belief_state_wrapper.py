@@ -24,6 +24,7 @@ from x_transformers.x_transformers import (
 
 import einx
 from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 
 # helper functions
 
@@ -55,7 +56,9 @@ class BeliefStateWrapper(Module):
         backward_decoder: TransformerWrapper | None = None,
         train_frac_forward_backward_pairs: float = 1.,
         text_head: Module | None = None,
-        backward_ar_loss_weight: float = 1. # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
+        backward_ar_loss_weight: float = 1., # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
+        pred_terminal = False,
+        pred_terminal_loss_weight: float = 1.
     ):
         super().__init__()
         backward_decoder = default(backward_decoder, forward_decoder) # if backward decoder not set, use the same transformer, assume it knows how to switch gears based on suffix token
@@ -81,6 +84,17 @@ class BeliefStateWrapper(Module):
             )
 
         self.text_head = text_head
+
+        # predicting terminal state (when suffix and prefix predict the same token)
+
+        self.to_terminal_logit = nn.Sequential(
+            nn.Linear(dim * 2, dim),
+            nn.LeakyReLU(),
+            nn.Linear(dim, 1),
+            Rearrange('... 1 -> ...')
+        ) if pred_terminal else None
+
+        self.pred_terminal_loss_weight = pred_terminal_loss_weight
 
         # the two decoders, one which is causal forward, the other causal backwards
 
@@ -265,22 +279,40 @@ class BeliefStateWrapper(Module):
 
         # cross entropy loss
 
-        fb_loss = F.cross_entropy(
+        loss = F.cross_entropy(
             rearrange(logits, 'b n (fb l) -> b l (fb n)', fb = 2),
             rearrange(labels, 'b n fb -> b (fb n)'),
             reduction = 'none' if self.needs_loss_weight else 'mean'
         )
 
+        # maybe predict terminal
+
+        if exists(self.to_terminal_logit):
+            terminal_logits = self.to_terminal_logit(fb_embeds)
+
+            labels = ((bi - fi) == 2).float() # distance is exactly 2
+            labels = repeat(labels, 'n -> b n', b = batch)
+
+            is_end_loss = F.binary_cross_entropy_with_logits(
+                terminal_logits,
+                labels
+            )
+
+            loss = (
+                loss +
+                is_end_loss * self.pred_terminal_loss_weight
+            )
+
         # maybe loss weighting
 
         if self.needs_loss_weight:
-            fb_loss = rearrange(fb_loss, 'b (fb n) -> b fb n', fb = 2)
-            fb_loss = einx.multiply('b fb n, fb', fb_loss, self.loss_weights)
-            fb_loss = fb_loss.mean()
+            loss = rearrange(loss, 'b (fb n) -> b fb n', fb = 2)
+            loss = einx.multiply('b fb n, fb', loss, self.loss_weights)
+            loss = loss.mean()
 
         # backwards
 
-        orig_backward = getattr(fb_loss, 'backward')
+        orig_backward = getattr(loss, 'backward')
 
         def patched_backward_fn(*args, **kwargs):
             orig_backward(*args, **kwargs)
@@ -292,6 +324,6 @@ class BeliefStateWrapper(Module):
         if backward:
             patched_backward_fn()
         else:
-            setattr(fb_loss, 'backward', patched_backward_fn)
+            setattr(loss, 'backward', patched_backward_fn)
 
-        return fb_loss
+        return loss
