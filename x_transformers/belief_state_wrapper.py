@@ -23,7 +23,7 @@ from x_transformers.x_transformers import (
 )
 
 import einx
-from einops import rearrange, repeat
+from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
 # helper functions
@@ -126,7 +126,7 @@ class BeliefStateWrapper(Module):
         prompts,
         seq_len,
         temperature = 1.25,
-        cache_kv = True,
+        cache_kv = False,
         suffix: Tensor | None = None, # the goal conditioning
         filter_logits_fn = min_p,
         filter_kwargs = dict(
@@ -135,6 +135,8 @@ class BeliefStateWrapper(Module):
         **kwargs
     ):
         max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
+
+        prompts, batch_ps = pack([prompts], '* d')
 
         batch, orig_seq_len = prompts.shape
 
@@ -197,14 +199,19 @@ class BeliefStateWrapper(Module):
 
             # concat sample
 
-            out = torch.cat((out, sample), dim=-1)
+            out = torch.cat((out, sample), dim = -1)
 
-        return out[:, orig_seq_len:]
+        out = out[:, orig_seq_len:]
+
+        out, = unpack(out, batch_ps, '* n')
+
+        return out
 
     def forward(
         self,
         seq,
-        backward = True
+        return_loss_only = False,
+        loss_scale = 1.
     ):
         batch, seq_len, device = *seq.shape, seq.device
 
@@ -244,6 +251,7 @@ class BeliefStateWrapper(Module):
         # f - forward, b - backward, i - indices
 
         fi, bi = fb_pairs.unbind(dim = -1)
+
         valid_mask = (bi - fi) >= 2
 
         fb_pairs = fb_pairs[valid_mask]
@@ -265,8 +273,9 @@ class BeliefStateWrapper(Module):
 
         labels_fi, labels_bi = (fi + 1), bi
 
-        forward_labels, backward_labels = seq[:, fi], seq[:, bi]
-        labels = stack((forward_labels, backward_labels), dim = -1)
+        forward_labels, backward_labels = seq[:, labels_fi], seq[:, labels_bi]
+
+        labels = cat((forward_labels, backward_labels), dim = -1)
 
         # get the forward and backward embedding pairs and feed them through the text head for both forward and backward predictions
 
@@ -281,7 +290,7 @@ class BeliefStateWrapper(Module):
 
         loss = F.cross_entropy(
             rearrange(logits, 'b n (fb l) -> b l (fb n)', fb = 2),
-            rearrange(labels, 'b n fb -> b (fb n)'),
+            labels,
             reduction = 'none' if self.needs_loss_weight else 'mean'
         )
 
@@ -290,18 +299,23 @@ class BeliefStateWrapper(Module):
         if exists(self.to_terminal_logit):
             terminal_logits = self.to_terminal_logit(fb_embeds)
 
-            labels = ((bi - fi) == 2).float() # distance is exactly 2
-            labels = repeat(labels, 'n -> b n', b = batch)
+            terminal_labels = ((bi - fi) == 2).float() # distance is exactly 2
+            terminal_labels = repeat(terminal_labels, 'n -> b n', b = batch)
 
             is_end_loss = F.binary_cross_entropy_with_logits(
                 terminal_logits,
-                labels
+                terminal_labels
             )
 
             loss = (
                 loss +
                 is_end_loss * self.pred_terminal_loss_weight
             )
+
+        # maybe early return loss
+
+        if return_loss_only:
+            return loss
 
         # maybe loss weighting
 
@@ -312,18 +326,9 @@ class BeliefStateWrapper(Module):
 
         # backwards
 
-        orig_backward = getattr(loss, 'backward')
+        (loss * loss_scale).backward()
 
-        def patched_backward_fn(*args, **kwargs):
-            orig_backward(*args, **kwargs)
-            orig_forward_embeds.backward(forward_embeds.grad)
-            orig_backward_embeds.backward(backward_embeds.grad)
-
-        # can allow the researcher to call .backward from the outside
-
-        if backward:
-            patched_backward_fn()
-        else:
-            setattr(loss, 'backward', patched_backward_fn)
+        orig_forward_embeds.backward(forward_embeds.grad)
+        orig_backward_embeds.backward(backward_embeds.grad)
 
         return loss
