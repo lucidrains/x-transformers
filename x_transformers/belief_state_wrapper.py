@@ -228,7 +228,8 @@ class BeliefStateWrapper(Module):
         self,
         seq,
         return_loss_only = False,
-        loss_scale = 1.
+        loss_scale = 1.,
+        loss_weight_by_fb_indices: callable | None = None
     ):
         batch, seq_len, device = *seq.shape, seq.device
 
@@ -336,9 +337,21 @@ class BeliefStateWrapper(Module):
 
         # maybe loss weighting
 
-        if self.needs_loss_weight:
+        needs_loss_weight = default(self.needs_loss_weight, exists(loss_weight_by_fb_indices))
+
+        if needs_loss_weight:
             loss = rearrange(loss, 'b (fb n) -> b fb n', fb = 2)
-            loss = einx.multiply('b fb n, fb', loss, self.loss_weights)
+
+            if self.needs_loss_weight:
+                loss = einx.multiply('b fb n, fb', loss, self.loss_weights)
+
+            # allow researcher to pass in a function that acts on the the forward backward indices Int['n fb']
+            # the reason this may be needed is because the earlier tokens will have more eligible pairs for training, and perhaps this could be normalized
+
+            if exists(loss_weight_by_fb_indices):
+                loss_weight = loss_weight_by_fb_indices(fb_pairs)
+                loss = einx.multiply('b fb n, n', loss, loss_weight)
+
             loss = loss.mean()
 
         # backwards
