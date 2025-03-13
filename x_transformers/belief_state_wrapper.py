@@ -48,8 +48,9 @@ class BeliefStateWrapper(Module):
         train_frac_forward_backward_pairs: float = 1.,
         text_head: Module | None = None,
         backward_ar_loss_weight: float = 1., # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
-        pred_terminal = False,
-        pred_terminal_loss_weight: float = 1.
+        pred_distance = False,
+        pred_distance_loss_weight: float = 1.,
+        max_pred_distance = None
     ):
         super().__init__()
         backward_decoder = default(backward_decoder, forward_decoder) # if backward decoder not set, use the same transformer, assume it knows how to switch gears based on suffix token
@@ -59,6 +60,7 @@ class BeliefStateWrapper(Module):
 
         dim = forward_decoder.emb_dim
         num_tokens = forward_decoder.num_tokens
+        max_seq_len = forward_decoder.max_seq_len
 
         self.num_tokens = num_tokens
 
@@ -80,14 +82,15 @@ class BeliefStateWrapper(Module):
 
         # predicting terminal state (when suffix and prefix predict the same token)
 
-        self.to_terminal_logit = nn.Sequential(
+        self.max_pred_distance = default(max_pred_distance, max_seq_len)
+
+        self.to_distance_logits = nn.Sequential(
             nn.Linear(dim * 2, dim),
             nn.LeakyReLU(),
-            nn.Linear(dim, 1),
-            Rearrange('... 1 -> ...')
-        ) if pred_terminal else None
+            nn.Linear(dim, self.max_pred_distance),
+        ) if pred_distance else None
 
-        self.pred_terminal_loss_weight = pred_terminal_loss_weight
+        self.pred_distance_loss_weight = pred_distance_loss_weight
 
         # the two decoders, one which is causal forward, the other causal backwards
 
@@ -314,20 +317,20 @@ class BeliefStateWrapper(Module):
 
         # maybe predict terminal
 
-        if exists(self.to_terminal_logit):
-            terminal_logits = self.to_terminal_logit(fb_embeds)
+        if exists(self.to_distance_logits):
+            distance_logits = self.to_distance_logits(fb_embeds)
 
-            terminal_labels = ((bi - fi) == 2).float() # distance is exactly 2
-            terminal_labels = repeat(terminal_labels, 'n -> b n', b = batch)
+            distance_labels = (bi - fi).clamp(max = self.max_pred_distance - 1)
+            distance_labels = repeat(distance_labels, 'n -> b n', b = batch)
 
-            is_end_loss = F.binary_cross_entropy_with_logits(
-                terminal_logits,
-                terminal_labels
+            pred_dist_loss = F.cross_entropy(
+                rearrange(distance_logits, 'b n l -> b l n'),
+                distance_labels
             )
 
             loss = (
                 loss +
-                is_end_loss * self.pred_terminal_loss_weight
+                pred_dist_loss * self.pred_distance_loss_weight
             )
 
         # maybe early return loss
