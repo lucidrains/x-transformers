@@ -9,7 +9,7 @@ from packaging import version
 import torch
 from torch.amp import autocast
 import torch.nn.functional as F
-from torch import nn, einsum, Tensor, cat, stack, arange, is_tensor
+from torch import nn, einsum, tensor, Tensor, cat, stack, arange, is_tensor
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.nn import Module, ModuleList, ModuleDict
 
@@ -265,7 +265,6 @@ class TokenEmbedding(Module):
             nn.init.normal_(self.emb.weight, std=1e-5)
             return
         nn.init.kaiming_normal_(self.emb.weight)
-
 
 # positional embeddings
 
@@ -848,6 +847,31 @@ class MultiheadRMSNorm(Module):
 
     def forward(self, x):
         return self.rmsnorm(x) * (self.gamma + 1.)
+
+class DynamicTanh(Module):
+    """ https://arxiv.org/abs/2503.10622 """
+    def __init__(
+        self,
+        init_alpha = 1.,
+        gamma = 1.,
+        beta = 0.,
+        unit_offset = False
+    ):
+        super().__init__()
+        self.pre_tanh_scale = nn.Parameter(tensor(init_alpha))
+
+        self.gamma = nn.Parameter(tensor(init_alpha))
+        self.beta = nn.Parameter(tensor(init_alpha))
+
+        self.unit_offset = int(unit_offset)
+
+        nn.init.constant_(self.pre_tanh_scale, 1. - float(unit_offset))
+        nn.init.constant_(self.gamma, 1. - float(unit_offset))
+
+    def forward(self, x):
+        pre_tanh_scale = self.pre_tanh_scale + self.unit_offset
+        gamma = self.gamma + self.unit_offset
+        return (x * pre_tanh_scale).tanh() * gamma + self.beta
 
 # residual and residual gates
 
@@ -1863,6 +1887,8 @@ class AttentionLayers(Module):
         only_cross = False,
         use_scalenorm = False,
         use_rmsnorm = False,
+        use_dynamic_tanh = False,
+        dynamic_tanh_init_alpha = 1.,
         use_simple_rmsnorm = False,
         use_adaptive_layernorm = False,
         use_adaptive_rmsnorm = False,
@@ -2012,8 +2038,9 @@ class AttentionLayers(Module):
 
         # determine norm
 
-        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, or simple rmsnorm'
+        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_dynamic_tanh, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, or simple rmsnorm'
 
+        norm_fn = None
         norm_need_condition = False
         dim_condition = default(dim_condition, dim)
         dim_condition_mult = 1
@@ -2027,6 +2054,8 @@ class AttentionLayers(Module):
             norm_class = RMSNorm
         elif use_simple_rmsnorm:
             norm_class = SimpleRMSNorm
+        elif use_dynamic_tanh:
+            norm_fn = partial(DynamicTanh, init_alpha = dynamic_tanh_init_alpha)
         elif use_adaptive_layernorm:
             norm_need_condition = True
             norm_class = partial(AdaptiveLayerNorm, dim_condition = dim_condition * dim_condition_mult)
@@ -2036,7 +2065,8 @@ class AttentionLayers(Module):
         else:
             norm_class = LayerNorm
 
-        norm_fn = partial(norm_class, dim)
+        if not exists(norm_fn):
+            norm_fn = partial(norm_class, dim)
 
         if not norm_need_condition and norm_add_unit_offset:
             # researcher Ohad Rubin shares in a blog post by adding an offset to gammas, they can be subjected to weight decay safely
