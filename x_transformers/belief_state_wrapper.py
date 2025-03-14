@@ -258,8 +258,11 @@ class BeliefStateWrapper(Module):
 
         # handle variable length sequences
 
+        seq_for_labels = seq
+
         if exists(lens):
             mask = einx.less('j, i -> i j', arange(seq_len, device = device), lens)
+            seq_for_labels = torch.where(mask, seq, -1)
 
         # forward autoregressive
 
@@ -319,7 +322,7 @@ class BeliefStateWrapper(Module):
 
         labels_fi, labels_bi = (fi + 1), (bi - 1)
 
-        forward_labels, backward_labels = seq[:, labels_fi], seq[:, labels_bi]
+        forward_labels, backward_labels = seq_for_labels[:, labels_fi], seq_for_labels[:, labels_bi]
 
         labels = cat((forward_labels, backward_labels), dim = -1)
 
@@ -337,7 +340,8 @@ class BeliefStateWrapper(Module):
         loss = F.cross_entropy(
             rearrange(logits, 'b n (fb l) -> b l (fb n)', fb = 2),
             labels,
-            reduction = 'none' if self.needs_loss_weight else 'mean'
+            reduction = 'none' if self.needs_loss_weight else 'mean',
+            ignore_index = -1
         )
 
         # maybe predict terminal
