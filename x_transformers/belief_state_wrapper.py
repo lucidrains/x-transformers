@@ -9,7 +9,7 @@ from __future__ import annotations
 import torch
 from torch.autograd import Function
 from torch.nn import Module, ModuleList
-from torch import nn, cat, stack, tensor, arange, cartesian_prod
+from torch import nn, cat, stack, tensor, Tensor, arange, cartesian_prod
 import torch.nn.functional as F
 
 from x_transformers.autoregressive_wrapper import (
@@ -33,6 +33,25 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+# a custom flip that can handle variable lengths across batch
+
+def flip(x, dim = 1, lens = None):
+    if not exists(lens):
+        return x.flip(dim)
+
+    batch, seq_len, device = *x.shape[:2], x.device
+    seq = arange(seq_len, device = device)
+
+    mask = einx.less('j, i -> i j', seq, lens)
+    masked_seq = einx.where('i j, j,', mask, seq, -1)
+
+    flip_indices = masked_seq.argsort(dim = -1, descending = True)
+
+    if x.ndim == 3:
+        flip_indices = repeat(flip_indices, '... -> ... d', d = x.shape[-1])
+
+    return x.gather(dim, flip_indices)
 
 # wrappers
 
@@ -230,11 +249,17 @@ class BeliefStateWrapper(Module):
     def forward(
         self,
         seq,
+        lens: Tensor | None = None, # Int['b']
         return_loss_only = False,
         loss_scale = 1.,
         loss_weight_by_fb_indices: callable | None = None
     ):
         batch, seq_len, device = *seq.shape, seq.device
+
+        # handle variable length sequences
+
+        if exists(lens):
+            mask = einx.less('j, i -> i j', arange(seq_len, device = device), lens)
 
         # forward autoregressive
 
@@ -242,7 +267,7 @@ class BeliefStateWrapper(Module):
 
         # backward autoregressive
 
-        backward_seq = seq.flip(1)
+        backward_seq = flip(seq, lens = lens)
 
         suffix_tokens = repeat(self.suffix_token, 'd -> b 1 d', b = batch)
 
@@ -252,7 +277,7 @@ class BeliefStateWrapper(Module):
             return_embeddings = True
         )
 
-        backward_embeds = backward_embeds.flip(1)
+        backward_embeds = flip(backward_embeds, lens = lens)
 
         # trick to reduce memory on backwards pass
 
