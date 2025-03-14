@@ -750,3 +750,20 @@ def test_belief_state_wrapper(
 
     sampled = model.generate_with_suffix_cond(seq[:, :1], 16, suffix = suffix)
     assert sampled.shape == (2, 16)
+
+def test_dynamic_tanh():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            use_dynamic_tanh = True,
+            dynamic_tanh_init_alpha = 1.5
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    model(x)
