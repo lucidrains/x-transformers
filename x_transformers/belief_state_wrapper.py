@@ -5,6 +5,7 @@
 # https://www.youtube.com/watch?v=aqhbRtB2Fyg
 
 from __future__ import annotations
+from random import random
 
 import torch
 from torch.autograd import Function
@@ -69,6 +70,8 @@ class BeliefStateWrapper(Module):
         backward_ar_loss_weight: float = 1., # can weigh the training of the backwards decoder differently, perhaps fwd/bwd have a shared backbone etc etc
         pred_distance = False,
         pred_distance_loss_weight: float = 1.,
+        cond_on_distance = False,
+        cond_on_distance_prob = 0.5,
         max_pred_distance = None
     ):
         super().__init__()
@@ -110,6 +113,21 @@ class BeliefStateWrapper(Module):
         ) if pred_distance else None
 
         self.pred_distance_loss_weight = pred_distance_loss_weight
+
+        # conditioning on distance
+
+        assert 0. < cond_on_distance_prob < 1.
+
+        self.cond_on_distance = cond_on_distance
+        self.cond_on_distance_prob = cond_on_distance_prob
+
+        if cond_on_distance:
+            self.to_distance_cond = nn.Sequential(
+                Rearrange('... -> ... 1'),
+                nn.Linear(1, dim),
+                nn.LeakyReLU(),
+                nn.Linear(dim, dim * 2),
+            )
 
         # the two decoders, one which is causal forward, the other causal backwards
 
@@ -344,9 +362,19 @@ class BeliefStateWrapper(Module):
             ignore_index = -1
         )
 
-        # maybe predict terminal
+        # maybe condition on distance
 
-        if exists(self.to_distance_logits):
+        cond_on_distance = self.cond_on_distance and (random() < self.cond_on_distance_prob)
+
+        if cond_on_distance:
+            distance = (bi - fi).float()
+            distance_cond = self.to_distance_cond(distance)
+
+            fb_embeds = fb_embeds * distance_cond
+
+        # maybe predict distance
+
+        if exists(self.to_distance_logits) and not cond_on_distance:
             distance_logits = self.to_distance_logits(fb_embeds)
 
             distance_labels = (bi - fi).clamp(max = self.max_pred_distance - 1)
