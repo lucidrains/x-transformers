@@ -2055,6 +2055,7 @@ class AttentionLayers(Module):
         elif use_simple_rmsnorm:
             norm_class = SimpleRMSNorm
         elif use_dynamic_tanh:
+            assert pre_norm, 'only tested for pre-norm'
             norm_class = partial(DynamicTanh, init_alpha = dynamic_tanh_init_alpha)
         elif use_adaptive_layernorm:
             norm_need_condition = True
