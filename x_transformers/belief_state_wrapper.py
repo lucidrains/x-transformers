@@ -54,6 +54,26 @@ def flip(x, dim = 1, lens = None):
 
     return x.gather(dim, flip_indices)
 
+# detach multiple tensors and backward the gradients once
+
+class DetachMultiple(Function):
+
+    @classmethod
+    def forward(self, ctx, *tensors):
+        detached_tensors = tuple(t.detach() for t in tensors)
+
+        for detached_tensor in detached_tensors:
+            detached_tensor.requires_grad_()
+
+        return detached_tensors
+
+    @classmethod
+    def backward(self, ctx, *grads):
+
+        return grads
+
+detach_multiple = DetachMultiple.apply
+
 # wrappers
 
 class BeliefStateWrapper(Module):
@@ -268,8 +288,6 @@ class BeliefStateWrapper(Module):
         self,
         seq,
         lens: Tensor | None = None, # Int['b']
-        return_loss_only = False,
-        loss_scale = 1.,
         loss_weight_by_fb_indices: callable | None = None
     ):
         batch, seq_len, device = *seq.shape, seq.device
@@ -302,11 +320,7 @@ class BeliefStateWrapper(Module):
 
         # trick to reduce memory on backwards pass
 
-        orig_forward_embeds, forward_embeds = forward_embeds, forward_embeds.detach()
-        orig_backward_embeds, backward_embeds = backward_embeds, backward_embeds.detach()
-
-        forward_embeds.requires_grad_()
-        backward_embeds.requires_grad_()
+        forward_embeds, backward_embeds = detach_multiple(forward_embeds, backward_embeds)
 
         # belief state objective
 
@@ -390,11 +404,6 @@ class BeliefStateWrapper(Module):
                 pred_dist_loss * self.pred_distance_loss_weight
             )
 
-        # maybe early return loss
-
-        if return_loss_only:
-            return loss
-
         # maybe loss weighting
 
         needs_loss_weight = default(self.needs_loss_weight, exists(loss_weight_by_fb_indices))
@@ -419,12 +428,5 @@ class BeliefStateWrapper(Module):
                     raise ValueError('invalid loss weight dims')
 
             loss = loss.mean()
-
-        # backwards
-
-        (loss * loss_scale).backward()
-
-        orig_forward_embeds.backward(forward_embeds.grad)
-        orig_backward_embeds.backward(backward_embeds.grad)
 
         return loss

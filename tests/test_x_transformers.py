@@ -743,6 +743,7 @@ def test_belief_state_wrapper(
         lens = torch.randint(4, 16, (2,))
 
     loss = model(seq, lens = lens) # backwards happen automatically
+    loss.backward()
 
     suffix = None
     if goal_suffix:
