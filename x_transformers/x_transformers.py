@@ -2909,6 +2909,7 @@ class TransformerWrapper(Module):
         return_embeddings = False,
         return_logits_and_embeddings = False,
         return_intermediates = False,
+        return_embeddings_and_intermediates = False,
         return_logit_entropies = False,
         mask = None,
         return_mems = False,
@@ -2940,8 +2941,8 @@ class TransformerWrapper(Module):
 
         b, n, device, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
 
-        return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss
-        return_embeddings = return_embeddings | (not exists(self.to_logits))
+        return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss | return_embeddings_and_intermediates
+        return_embeddings = return_embeddings | (not exists(self.to_logits)) | return_embeddings_and_intermediates
 
         # absolute positional embedding
 
@@ -3131,6 +3132,8 @@ class TransformerWrapper(Module):
 
         if return_logits_and_embeddings:
             out = (logits, x)
+        elif return_embeddings_and_intermediates:
+            out = (x, intermediates)
         elif return_embeddings:
             out = x
         else:
