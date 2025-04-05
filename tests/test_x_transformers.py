@@ -768,3 +768,25 @@ def test_dynamic_tanh():
     x = torch.randint(0, 20000, (2, 1024))
 
     model(x)
+
+def test_entropy_based_tokenizer():
+    from x_transformers.entropy_based_tokenizer import EntropyBasedTokenizer
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_dim_head = 64,
+        )
+    )
+
+    tokenizer = EntropyBasedTokenizer(model, entropy_threshold = 9.738)
+
+    seq = torch.randint(0, 20000, (2, 1024))
+
+    segmented_seq = tokenizer(seq, return_segmented_seq = True)
+
+    assert len(segmented_seq) == seq.shape[0]
