@@ -2416,4 +2416,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{Pagnoni2024ByteLT,
+    title   = {Byte Latent Transformer: Patches Scale Better Than Tokens},
+    author  = {Artidoro Pagnoni and Ram Pasunuru and Pedro Rodriguez and John Nguyen and Benjamin Muller and Margaret Li and Chunting Zhou and Lili Yu and Jason Weston and Luke S. Zettlemoyer and Gargi Ghosh and Mike Lewis and Ari Holtzman and Srinivasan Iyer},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2412.09871},
+    url     = {https://api.semanticscholar.org/CorpusID:274762821}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

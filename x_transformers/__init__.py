@@ -37,3 +37,5 @@ from x_transformers.dpo import (
 from x_transformers.neo_mlp import (
     NeoMLP
 )
+
+from x_transformers.entropy_based_tokenizer import EntropyBasedTokenizer
