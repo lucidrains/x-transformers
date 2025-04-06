@@ -6,8 +6,6 @@ import torch.nn.functional as F
 from torch.nn import Module
 from torch.nn.utils.rnn import pad_sequence
 
-from x_transformers.x_transformers import Decoder, TransformerWrapper
-
 import einx
 from einops import repeat, rearrange, pack, unpack
 
@@ -19,6 +17,13 @@ def exists(v):
 def default(v, d):
     return v if exists(v) else d
 
+def log(t, eps = 1e-20):
+    return t.clamp(min = eps).log()
+
+def calc_entropy_from_logits(logits):
+    prob = logits.softmax(dim = -1)
+    return -(prob * log(prob)).sum(dim = -1)
+
 # entropy based tokenizer applied in byte-latent transformer paper
 # they use a simple entropy threshold for segmenting a string into variable sized tokens
 
@@ -27,12 +32,10 @@ def default(v, d):
 class EntropyBasedTokenizer(Module):
     def __init__(
         self,
-        decoder: TransformerWrapper,
+        decoder: Module,
         entropy_threshold: float
     ):
         super().__init__()
-        assert isinstance(decoder.attn_layers, Decoder)
-
         self.decoder = decoder
         self.entropy_threshold = entropy_threshold
 
@@ -41,7 +44,8 @@ class EntropyBasedTokenizer(Module):
         self,
         seq,            # Float['b n'] | Float['n']
         lens = None,    # Int['b']
-        return_segmented_seq = False
+        return_segmented_seq = False,
+        decoder_forward_kwargs: dict = dict()
     ):
         no_batch_dim = seq.ndim == 1
         seq, maybe_batch_ps = pack((seq,), '* n')
@@ -55,9 +59,9 @@ class EntropyBasedTokenizer(Module):
 
         # forward through a small trained decoder and get the entropies of the logits
 
-        _, intermediates = self.decoder(seq, return_logit_entropies = True)
+        logits = self.decoder(seq, **decoder_forward_kwargs)
 
-        entropies = intermediates.logit_entropies
+        entropies = calc_entropy_from_logits(logits)
 
         # get length mask for boundaries
 
