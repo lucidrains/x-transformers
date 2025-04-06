@@ -769,7 +769,10 @@ def test_dynamic_tanh():
 
     model(x)
 
-def test_entropy_based_tokenizer():
+@pytest.mark.parametrize('var_length', (False, True))
+def test_entropy_based_tokenizer(
+    var_length
+):
     from x_transformers.entropy_based_tokenizer import EntropyBasedTokenizer
 
     model = TransformerWrapper(
@@ -787,6 +790,10 @@ def test_entropy_based_tokenizer():
 
     seq = torch.randint(0, 20000, (2, 1024))
 
-    segmented_seq = tokenizer(seq, return_segmented_seq = True)
+    lens = None
+    if var_length:
+        lens = torch.randint(512, 768, (2,))
+
+    segmented_seq = tokenizer(seq, lens, return_segmented_seq = True)
 
     assert len(segmented_seq) == seq.shape[0]
