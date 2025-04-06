@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 from x_transformers.x_transformers import Decoder, TransformerWrapper
 
 import einx
-from einops import repeat, rearrange
+from einops import repeat, rearrange, pack, unpack
 
 # helper functions
 
@@ -39,10 +39,13 @@ class EntropyBasedTokenizer(Module):
     @torch.no_grad()
     def forward(
         self,
-        seq,
-        lens = None, # Int['b']
+        seq,            # Float['b n'] | Float['n']
+        lens = None,    # Int['b']
         return_segmented_seq = False
     ):
+        no_batch_dim = seq.ndim == 1
+        seq, maybe_batch_ps = pack((seq,), '* n')
+
         self.decoder.eval()
 
         is_var_length = exists(lens)
@@ -106,6 +109,8 @@ class EntropyBasedTokenizer(Module):
         # early return
 
         if not return_segmented_seq:
+            token_lengths, = unpack(token_lengths, maybe_batch_ps, '* num_tokens')
+
             return token_lengths
 
         # segment the sequence based on the token lengths
@@ -122,5 +127,8 @@ class EntropyBasedTokenizer(Module):
 
             splitted_seq = one_seq.split(one_token_length.tolist())
             segmented_seq.append(splitted_seq)
+
+        if no_batch_dim:
+            segmented_seq = segmented_seq[0]
 
         return segmented_seq

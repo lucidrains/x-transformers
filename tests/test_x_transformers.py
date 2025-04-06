@@ -797,3 +797,5 @@ def test_entropy_based_tokenizer(
     segmented_seq = tokenizer(seq, lens, return_segmented_seq = True)
 
     assert len(segmented_seq) == seq.shape[0]
+
+    tokenizer(seq[0]) # able to handle without batch dim
