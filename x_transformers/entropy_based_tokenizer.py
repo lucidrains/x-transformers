@@ -6,7 +6,11 @@ import torch.nn.functional as F
 from torch.nn import Module
 from torch.nn.utils.rnn import pad_sequence
 
-from x_transformers.x_transformers import Decoder, TransformerWrapper
+from x_transformers.x_transformers import (
+    Decoder,
+    TransformerWrapper,
+    calc_entropy
+)
 
 import einx
 from einops import repeat, rearrange, pack, unpack
@@ -27,12 +31,10 @@ def default(v, d):
 class EntropyBasedTokenizer(Module):
     def __init__(
         self,
-        decoder: TransformerWrapper,
+        decoder: Module,
         entropy_threshold: float
     ):
         super().__init__()
-        assert isinstance(decoder.attn_layers, Decoder)
-
         self.decoder = decoder
         self.entropy_threshold = entropy_threshold
 
@@ -55,9 +57,9 @@ class EntropyBasedTokenizer(Module):
 
         # forward through a small trained decoder and get the entropies of the logits
 
-        _, intermediates = self.decoder(seq, return_logit_entropies = True)
+        logits = self.decoder(seq)
 
-        entropies = intermediates.logit_entropies
+        entropies = calc_entropy(logits)
 
         # get length mask for boundaries
 
