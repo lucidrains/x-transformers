@@ -309,9 +309,11 @@ class NonAutoregressiveWrapper(nn.Module):
         with context():
             logits = self.net(masked, **kwargs)
 
+        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+
         # cross entropy loss
 
-        loss = F.cross_entropy(
+        loss = loss_fn(
             logits[mask],
             orig_seq[mask]
         )

@@ -5,6 +5,7 @@ from torch.nn import Module
 import torch.nn.functional as F
 from x_transformers.x_transformers import TransformerWrapper
 
+import einx
 from einops import rearrange
 
 # helper functions
@@ -17,15 +18,17 @@ def freeze_all_layers_(module):
         param.requires_grad = False
 
 def log_prob_from_model_and_seq(model, seq):
-    logits = model(seq)
+    src_seq, tgt_seq = seq[:, :-1], seq[:, 1:]
+    logits = model(src_seq)
     log_prob = logits.log_softmax(dim = -1)
-    indices = rearrange(seq, '... -> ... 1')
-    log_probs = log_prob.gather(-1, indices)
-    return rearrange(log_probs, '... 1 -> ...')
+    return einx.get_at('b n [l], b n -> b n', log_prob, tgt_seq)
 
 def masked_mean(log_probs, mask = None):
     if not exists(mask):
         return log_probs.mean(dim = -1)
+
+    if mask.shape[-1] == (log_probs.shape[-1] + 1):
+        mask = mask[:, :-1]
 
     log_probs = log_probs.masked_fill(~mask, 0.)
     num = log_probs.sum(dim = -1)

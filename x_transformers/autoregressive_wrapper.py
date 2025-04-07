@@ -19,6 +19,9 @@ def default(val, d):
 def identity(t, *args, **kwargs):
     return t
 
+def join(arr, delimiter = ', '):
+    return delimiter.join(arr)
+
 def cast_tuple(t, length = 1):
     return t if isinstance(t, tuple) else (t,) * length
 
@@ -45,7 +48,7 @@ def align_right(t, lens, pad_id = 0):
     batch_arange = torch.arange(batch, device = device, dtype = torch.long)[..., None]
     prompt_len_arange = torch.arange(seq_len, device = device, dtype = torch.long)
 
-    t = F.pad(t, (max_pad_len, 0), value = 0)
+    t = F.pad(t, (max_pad_len, 0), value = pad_id)
     offset = max_pad_len - pad_lens
 
     aligned = t[batch_arange, prompt_len_arange + offset[..., None]]
@@ -79,10 +82,28 @@ def top_k(logits, frac_num_tokens = 0.1, k = None):
 # top_a
 
 def top_a(logits, min_p_pow = 2.0, min_p_ratio = 0.02):
-    probs = F.softmax(logits, dim = -1)
-    max_probs = torch.amax(probs, dim = -1, keepdim = True)
+    probs = logits.softmax(dim = -1)
+    max_probs = probs.amax(dim = -1, keepdim = True)
     limit = torch.pow(max_probs, min_p_pow) * min_p_ratio
     return torch.where(probs < limit, float('-inf'), logits)
+
+# min_p
+# https://arxiv.org/abs/2407.01082
+
+def min_p(logits, min_p = 0.1):
+    probs = logits.softmax(dim = -1)
+    max_probs = probs.amax(dim = -1, keepdim = True)
+    limit = min_p * max_probs
+    return torch.where(probs < limit, float('-inf'), logits)
+
+# filter logits functions dict[str -> Callable]
+
+FILTER_LOGITS_FN = dict(
+    top_p = top_p,
+    top_k = top_k,
+    top_a = top_a,
+    min_p = min_p
+)
 
 # contrastive decoding function
 
@@ -136,7 +157,7 @@ class AutoregressiveWrapper(Module):
         eos_token = None,
         temperature = 1.,
         prompt_lens: Tensor | None = None,
-        filter_logits_fn: Callable = top_k,
+        filter_logits_fn: str | Callable = top_k,
         restrict_to_max_seq_len = True,
         amateur_model: Module | Tuple[Module] | None = None,
         filter_kwargs: dict = dict(),
@@ -152,6 +173,13 @@ class AutoregressiveWrapper(Module):
         prompts, ps = pack([prompts], '* n')
 
         b, t = prompts.shape
+
+        # handle filter logits fn given as string
+
+        if isinstance(filter_logits_fn, str):
+            assert filter_logits_fn in FILTER_LOGITS_FN, f"only {join(FILTER_LOGITS_FN.keys())} are available"
+
+            filter_logits_fn = FILTER_LOGITS_FN[filter_logits_fn]
 
         # handle variable lengthed prompts (prefixes)
 
@@ -192,13 +220,14 @@ class AutoregressiveWrapper(Module):
             if restrict_to_max_seq_len:
                 max_len_exceeded = out.shape[-1] > max_seq_len
 
-                assert not (cache_kv and max_len_exceeded and not self.net.can_cache_kv_outside_max_seq_len), 'the network cannot use cached key values when decoding outside the max sequence length. most likely because you are using absolute positional embeeding. you can switch to rotary embeddings to resolve this issue'
+                assert not (cache_kv and max_len_exceeded and not self.net.can_cache_kv_outside_max_seq_len), 'the network cannot use cached key values when decoding outside the max sequence length. most likely because you are using absolute positional embedding. you can switch to rotary embeddings to resolve this issue'
 
                 x = out[:, -max_seq_len:]
 
                 if exists(cache):
                     for inter in cache.attn_intermediates:
-                        inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
+                        if inter.layer_type == 'a':
+                            inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
 
             logits, new_cache = self.net(
                 x,
@@ -288,7 +317,9 @@ class AutoregressiveWrapper(Module):
             **kwargs
         )
 
-        loss = F.cross_entropy(
+        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+
+        loss = loss_fn(
             rearrange(logits, 'b n c -> b c n'),
             target,
             ignore_index = ignore_index

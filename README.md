@@ -317,6 +317,10 @@ model = TransformerWrapper(
 
 Update: MetaAI researchers <a href="https://arxiv.org/abs/2309.16588">have found</a> that adding memory tokens (they call them register tokens), alleviates outliers (which is suspected now to be a pathology of attention networks unable to <a href="https://arxiv.org/abs/2306.12929">attend to nothing</a>).
 
+Update 2: a hybrid architecture out of Nvidia named <a href="https://openreview.net/forum?id=A1ztozypga">Hymba</a> used memory tokens successfully in the autoregressive case, termed meta tokens in their paper.
+
+Update 3: further corroborated by <a href="https://arxiv.org/abs/2501.00663">a paper</a> trying to extend memory in attention networks, termed persistent memory
+
 ### Transformers Without Tears
 
 <img src="./images/scalenorm.png"></img>
@@ -525,7 +529,23 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_sparse_topk = 8 # keep only the top 8 values before attention (softmax)
+        attn_sparse_topk = 8,                       # keep only the top 8 values before attention (softmax)
+        attn_sparse_topk_straight_through = True    # straight through the original gradients
+    )
+)
+```
+
+An extreme case of `topk` value of `1`, you can use the following
+
+```python
+model = TransformerWrapper(
+    num_tokens = 20000,
+    max_seq_len = 1024,
+    attn_layers = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+        attn_hard = True  # will only propagate the single value of the argmax of qk logit. offered in the case it addresses https://arxiv.org/abs/2410.01104
     )
 )
 ```
@@ -549,7 +569,8 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        attn_talking_heads = True  # turn on information exchange between attention heads
+        attn_pre_talking_heads = True,  # linear combination across pre-softmax attn logits across heads
+        attn_post_talking_heads = True  # linear combination across post-softmax attn across heads
     )
 )
 ```
@@ -880,7 +901,8 @@ model_xl = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        rotary_pos_emb = True
+        rotary_pos_emb = True,
+        rotate_num_heads = 4   # only rotate 4 out of the 8 attention heads
     )
 )
 
@@ -1515,11 +1537,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @article{DBLP:journals/corr/abs-1907-01470,
-    author    = {Sainbayar Sukhbaatar and
-               Edouard Grave and
-               Guillaume Lample and
-               Herv{\'{e}} J{\'{e}}gou and
-               Armand Joulin},
+    author    = {Sainbayar Sukhbaatar and Edouard Grave and Guillaume Lample and Herv{\'{e}} J{\'{e}}gou and Armand Joulin},
     title     = {Augmenting Self-attention with Persistent Memory},
     journal   = {CoRR},
     volume    = {abs/1907.01470},
@@ -1774,6 +1792,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
+@inproceedings{Yang2025RopeTN,
+    title   = {Rope to Nope and Back Again: A New Hybrid Attention Strategy},
+    author  = {Bowen Yang and Bharat Venkitesh and Dwarak Talupuru and Hangyu Lin and David Cairuz and Phil Blunsom and Acyr F. Locatelli},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:276079501}
+}
+```
+
+```bibtex
 @inproceedings{Chen2023ExtendingCW,
     title   = {Extending Context Window of Large Language Models via Positional Interpolation},
     author  = {Shouyuan Chen and Sherman Wong and Liangjian Chen and Yuandong Tian},
@@ -1930,15 +1957,6 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
-@misc{schlag2020enhancing,
-    title   = {Enhancing the Transformer with explicit relational encoding for math problem solving},
-    author  = {Imanol Schlag and Paul Smolensky and Roland Fernandez and Nebojsa Jojic and J{\"u}rgen Schmidhuber and Jianfeng Gao},
-    year    = {2020},
-    url     = {https://openreview.net/forum?id=B1xfElrKPr}
-}
-```
-
-```bibtex
 @article{Liu2022FCMFC,
     title   = {FCM: Forgetful Causal Masking Makes Causal Language Models Better Zero-Shot Learners},
     author  = {Hao Liu and Xinyang Geng and Lisa Lee and Igor Mordatch and Sergey Levine and Sharan Narang and P. Abbeel},
@@ -2004,16 +2022,6 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     author  = {Dao, Tri and Fu, Daniel Y. and Ermon, Stefano and Rudra, Atri and R{\'e}, Christopher},
     booktitle = {Advances in Neural Information Processing Systems},
     year    = {2022}
-}
-```
-
-```bibtex
-@article{Xie2023ResiDualTW,
-  title     = {ResiDual: Transformer with Dual Residual Connections},
-  author    = {Shufang Xie and Huishuai Zhang and Junliang Guo and Xu Tan and Jiang Bian and Hany Hassan Awadalla and Arul Menezes and Tao Qin and Rui Yan},
-  journal   = {ArXiv},
-  year      = {2023},
-  volume    = {abs/2304.14802}
 }
 ```
 
@@ -2159,6 +2167,263 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     author  = {Olga Golovneva and Tianlu Wang and Jason Weston and Sainbayar Sukhbaatar},
     year    = {2024},
     url     = {https://api.semanticscholar.org/CorpusID:270094992}
+}
+```
+
+```bibtex
+@article{Peebles2022ScalableDM,
+    title   = {Scalable Diffusion Models with Transformers},
+    author  = {William S. Peebles and Saining Xie},
+    journal = {2023 IEEE/CVF International Conference on Computer Vision (ICCV)},
+    year    = {2022},
+    pages   = {4172-4182},
+    url     = {https://api.semanticscholar.org/CorpusID:254854389}
+}
+```
+
+```bibtex
+@misc{Rubin2024,
+    author  = {Ohad Rubin},
+    url     = {https://medium.com/@ohadrubin/exploring-weight-decay-in-layer-normalization-challenges-and-a-reparameterization-solution-ad4d12c24950}
+}
+```
+
+```bibtex
+@article{Mesnard2024GemmaOM,
+    title   = {Gemma: Open Models Based on Gemini Research and Technology},
+    author  = {Gemma Team Thomas Mesnard and Cassidy Hardin and Robert Dadashi and Surya Bhupatiraju and Shreya Pathak and L. Sifre and Morgane Riviere and Mihir Kale and J Christopher Love and Pouya Dehghani Tafti and L'eonard Hussenot and Aakanksha Chowdhery and Adam Roberts and Aditya Barua and Alex Botev and Alex Castro-Ros and Ambrose Slone and Am'elie H'eliou and Andrea Tacchetti and Anna Bulanova and Antonia Paterson and Beth Tsai and Bobak Shahriari and Charline Le Lan and Christopher A. Choquette-Choo and Cl'ement Crepy and Daniel Cer and Daphne Ippolito and David Reid and Elena Buchatskaya and Eric Ni and Eric Noland and Geng Yan and George Tucker and George-Christian Muraru and Grigory Rozhdestvenskiy and Henryk Michalewski and Ian Tenney and Ivan Grishchenko and Jacob Austin and James Keeling and Jane Labanowski and Jean-Baptiste Lespiau and Jeff Stanway and Jenny Brennan and Jeremy Chen and Johan Ferret and Justin Chiu and Justin Mao-Jones and Katherine Lee and Kathy Yu and Katie Millican and Lars Lowe Sjoesund and Lisa Lee and Lucas Dixon and Machel Reid and Maciej Mikula and Mateo Wirth and Michael Sharman and Nikolai Chinaev and Nithum Thain and Olivier Bachem and Oscar Chang and Oscar Wahltinez and Paige Bailey and Paul Michel and Petko Yotov and Pier Giuseppe Sessa and Rahma Chaabouni and Ramona Comanescu and Reena Jana and Rohan Anil and Ross McIlroy and Ruibo Liu and Ryan Mullins and Samuel L Smith and Sebastian Borgeaud and Sertan Girgin and Sholto Douglas and Shree Pandya and Siamak Shakeri and Soham De and Ted Klimenko and Tom Hennigan and Vladimir Feinberg and Wojciech Stokowiec and Yu-hui Chen and Zafarali Ahmed and Zhitao Gong and Tris Brian Warkentin and Ludovic Peran and Minh Giang and Cl'ement Farabet and Oriol Vinyals and Jeffrey Dean and Koray Kavukcuoglu and Demis Hassabis and Zoubin Ghahramani and Douglas Eck and Joelle Barral and Fernando Pereira and Eli Collins and Armand Joulin and Noah Fiedel and Evan Senter and Alek Andreev and Kathleen Kenealy},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2403.08295},
+    url     = {https://api.semanticscholar.org/CorpusID:268379206}
+}
+```
+
+```bibtex
+@article{Nguyen2024MinPS,
+    title   = {Min P Sampling: Balancing Creativity and Coherence at High Temperature},
+    author  = {Minh Nguyen and Andrew Baker and Andreas Kirsch and Clement Neo},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2407.01082},
+    url     = {https://api.semanticscholar.org/CorpusID:270870613}
+}
+```
+
+```bibtex
+@article{Bao2022AllAW,
+    title   = {All are Worth Words: A ViT Backbone for Diffusion Models},
+    author  = {Fan Bao and Shen Nie and Kaiwen Xue and Yue Cao and Chongxuan Li and Hang Su and Jun Zhu},
+    journal = {2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+    year    = {2022},
+    pages   = {22669-22679},
+    url     = {https://api.semanticscholar.org/CorpusID:253581703}
+}
+```
+
+```bibtex
+@article{Jumper2021HighlyAP,
+    title   = {Highly accurate protein structure prediction with AlphaFold},
+    author  = {John M. Jumper and Richard Evans and Alexander Pritzel and Tim Green and Michael Figurnov and Olaf Ronneberger and Kathryn Tunyasuvunakool and Russ Bates and Augustin Ž{\'i}dek and Anna Potapenko and Alex Bridgland and Clemens Meyer and Simon A A Kohl and Andy Ballard and Andrew Cowie and Bernardino Romera-Paredes and Stanislav Nikolov and Rishub Jain and Jonas Adler and Trevor Back and Stig Petersen and David Reiman and Ellen Clancy and Michal Zielinski and Martin Steinegger and Michalina Pacholska and Tamas Berghammer and Sebastian Bodenstein and David Silver and Oriol Vinyals and Andrew W. Senior and Koray Kavukcuoglu and Pushmeet Kohli and Demis Hassabis},
+    journal = {Nature},
+    year    = {2021},
+    volume  = {596},
+    pages   = {583 - 589},
+    url     = {https://api.semanticscholar.org/CorpusID:235959867}
+}
+```
+
+```bibtex
+@article{Yang2017BreakingTS,
+    title     = {Breaking the Softmax Bottleneck: A High-Rank RNN Language Model},
+    author    = {Zhilin Yang and Zihang Dai and Ruslan Salakhutdinov and William W. Cohen},
+    journal   = {ArXiv},
+    year      = {2017},
+    volume    = {abs/1711.03953},
+    url       = {https://api.semanticscholar.org/CorpusID:26238954}
+}
+```
+
+```bibtex
+@inproceedings{Kanai2018SigsoftmaxRO,
+    title   = {Sigsoftmax: Reanalysis of the Softmax Bottleneck},
+    author  = {Sekitoshi Kanai and Yasuhiro Fujiwara and Yuki Yamanaka and Shuichi Adachi},
+    booktitle = {Neural Information Processing Systems},
+    year    = {2018},
+    url     = {https://api.semanticscholar.org/CorpusID:44064935}
+```
+
+```bibtex
+@article{Kim2020TheLC,
+    title   = {The Lipschitz Constant of Self-Attention},
+    author  = {Hyunjik Kim and George Papamakarios and Andriy Mnih},
+    journal = {ArXiv},
+    year    = {2020},
+    volume  = {abs/2006.04710},
+    url     = {https://api.semanticscholar.org/CorpusID:219530837}
+}
+```
+
+```bibtex
+@inproceedings{Ramapuram2024TheoryAA,
+    title   = {Theory, Analysis, and Best Practices for Sigmoid Self-Attention},
+    author  = {Jason Ramapuram and Federico Danieli and Eeshan Gunesh Dhekane and Floris Weers and Dan Busbridge and Pierre Ablin and Tatiana Likhomanenko and Jagrit Digani and Zijin Gu and Amitis Shidani and Russ Webb},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:272463580}
+}
+```
+
+```bibtex
+@inproceedings{Leviathan2024SelectiveAI,
+    title   = {Selective Attention Improves Transformer},
+    author  = {Yaniv Leviathan and Matan Kalman and Yossi Matias},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273098114}
+}
+```
+
+```bibtex
+@article{Bai2019DeepEM,
+    title   = {Deep Equilibrium Models},
+    author  = {Shaojie Bai and J. Zico Kolter and Vladlen Koltun},
+    journal = {ArXiv},
+    year    = {2019},
+    volume  = {abs/1909.01377},
+    url     = {https://api.semanticscholar.org/CorpusID:202539738}
+}
+```
+
+```bibtex
+@article{Wu2021MuseMorphoseFA,
+    title   = {MuseMorphose: Full-Song and Fine-Grained Piano Music Style Transfer With One Transformer VAE},
+    author  = {Shih-Lun Wu and Yi-Hsuan Yang},
+    journal = {IEEE/ACM Transactions on Audio, Speech, and Language Processing},
+    year    = {2021},
+    volume  = {31},
+    pages   = {1953-1967},
+    url     = {https://api.semanticscholar.org/CorpusID:234338162}
+}
+```
+
+```bibtex
+@inproceedings{Zhou2024ValueRL,
+    title   = {Value Residual Learning For Alleviating Attention Concentration In Transformers},
+    author  = {Zhanchao Zhou and Tianyi Wu and Zhiyun Jiang and Zhenzhong Lan},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273532030}
+}
+```
+
+```bibtex
+@inproceedings{anonymous2024forgetting,
+    title   = {Forgetting Transformer: Softmax Attention with a Forget Gate},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Thirteenth International Conference on Learning Representations},
+    year    = {2024},
+    url     = {https://openreview.net/forum?id=q2Lnyegkr8},
+    note    = {under review}
+}
+```
+
+```bibtex
+@inproceedings{anonymous2024from,
+    title   = {From {MLP} to Neo{MLP}: Leveraging Self-Attention for Neural Fields},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Thirteenth International Conference on Learning Representations},
+    year    = {2024},
+    url     = {https://openreview.net/forum?id=A8Vuf2e8y6},
+    note    = {under review}
+}
+```
+
+```bibtex
+@inproceedings{Duvvuri2024LASERAW,
+    title   = {LASER: Attention with Exponential Transformation},
+    author  = {Sai Surya Duvvuri and Inderjit S. Dhillon},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273849947}
+}
+```
+
+```bibtex
+@article{Zhu2024HyperConnections,
+    title   = {Hyper-Connections},
+    author  = {Defa Zhu and Hongzhi Huang and Zihao Huang and Yutao Zeng and Yunyao Mao and Banggu Wu and Qiyang Min and Xun Zhou},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2409.19606},
+    url     = {https://api.semanticscholar.org/CorpusID:272987528}
+}
+```
+
+```bibtex
+@inproceedings{anonymous2024hymba,
+    title   = {Hymba: A Hybrid-head Architecture for Small Language Models},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Thirteenth International Conference on Learning Representations},
+    year    = {2024},
+    url     = {https://openreview.net/forum?id=A1ztozypga},
+    note    = {under review}
+}
+```
+
+```bibtex
+@article{Shao2024DeepSeekV2AS,
+    title   = {DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model},
+    author  = {Zhihong Shao and Damai Dai and Daya Guo and Bo Liu (Benjamin Liu) and Zihan Wang and Huajian Xin},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2405.04434},
+    url     = {https://api.semanticscholar.org/CorpusID:269613809}
+}
+```
+
+```bibtex
+@inproceedings{Gerasimov2025YouDN,
+    title   = {You Do Not Fully Utilize Transformer's Representation Capacity},
+    author  = {Gleb Gerasimov and Yaroslav Aksenov and Nikita Balagansky and Viacheslav Sinii and Daniil Gavrilov},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:276317819}
+}
+```
+
+```bibtex
+@inproceedings{Hu2024TheBS,
+    title   = {The Belief State Transformer},
+    author  = {Edward S. Hu and Kwangjun Ahn and Qinghua Liu and Haoran Xu and Manan Tomar and Ada Langford and Dinesh Jayaraman and Alex Lamb and John Langford},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273707334}
+}
+```
+
+```bibtex
+@article{Charpentier2024GPTOB,
+    title   = {GPT or BERT: why not both?},
+    author  = {Lucas Georges Gabriel Charpentier and David Samuel},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2410.24159},
+    url     = {https://api.semanticscholar.org/CorpusID:273707069}
+}
+```
+
+```bibtex
+@inproceedings{Zhu2025TransformersWN,
+    title   = {Transformers without Normalization},
+    author  = {Jiachen Zhu and Xinlei Chen and Kaiming He and Yann LeCun and Zhuang Liu},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:276961218}
+}
+```
+
+```bibtex
+@article{Pagnoni2024ByteLT,
+    title   = {Byte Latent Transformer: Patches Scale Better Than Tokens},
+    author  = {Artidoro Pagnoni and Ram Pasunuru and Pedro Rodriguez and John Nguyen and Benjamin Muller and Margaret Li and Chunting Zhou and Lili Yu and Jason Weston and Luke S. Zettlemoyer and Gargi Ghosh and Mike Lewis and Ari Holtzman and Srinivasan Iyer},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2412.09871},
+    url     = {https://api.semanticscholar.org/CorpusID:274762821}
 }
 ```
 

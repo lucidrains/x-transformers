@@ -2,13 +2,15 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from einops import pack, repeat, unpack
+import einx
+from einops import reduce, pack, repeat, unpack
 
 from x_transformers.x_transformers import (
     AttentionLayers,
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
     LayerNorm,
+    masked_mean,
     always,
     pad_at_dim
 )
@@ -22,6 +24,15 @@ def default(val, d):
     if exists(val):
         return val
     return d() if callable(d) else d
+
+def masked_mean(t, mask):
+    t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
+
+    num = reduce(t, 'b n d -> b', 'sum')
+    den = mask.sum(dim = -1)
+
+    masked_average = num / den.clamp(min = 1.)
+    return masked_average
 
 # main classes
 
@@ -39,7 +50,8 @@ class ContinuousTransformerWrapper(nn.Module):
         post_emb_norm = False,
         emb_dropout = 0.,
         use_abs_pos_emb = True,
-        scaled_sinu_pos_emb = False
+        scaled_sinu_pos_emb = False,
+        average_pool_embed = False
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -72,6 +84,10 @@ class ContinuousTransformerWrapper(nn.Module):
 
         self.attn_layers = attn_layers
 
+        # average pool
+
+        self.average_pool_embed = average_pool_embed
+
         # project in and out
 
         self.project_in = nn.Linear(dim_in, dim, bias = False) if exists(dim_in) else nn.Identity()
@@ -92,7 +108,7 @@ class ContinuousTransformerWrapper(nn.Module):
         prepend_mask = None,
         **kwargs
     ):
-        batch, seq, device = *x.shape[:2], x.device
+        batch, seq, orig_mask, device = *x.shape[:2], mask, x.device
 
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
@@ -136,6 +152,11 @@ class ContinuousTransformerWrapper(nn.Module):
             m, x = unpack(x, mem_ps, 'b * d')
             intermediates.memory_tokens = m
 
+        if self.average_pool_embed:
+            x = masked_mean(x, mask = orig_mask)
+
+        # maybe linear project out
+
         out = self.project_out(x) if not return_embeddings else x
 
         if return_intermediates:
@@ -158,12 +179,15 @@ class ContinuousAutoregressiveWrapper(nn.Module):
         net: ContinuousTransformerWrapper,
         ignore_index = -100,
         pad_value = 0,
-        loss_fn = nn.MSELoss(reduction = 'none')
+        loss_fn = nn.MSELoss(reduction = 'none'),
+        equal_loss_weight_batch = False  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
     ):
         super().__init__()
         self.net = net
         self.max_seq_len = net.max_seq_len
+
         self.loss_fn = loss_fn
+        self.equal_loss_weight_batch = equal_loss_weight_batch
 
     @torch.no_grad()
     def generate(self, start_tokens, seq_len, **kwargs):
@@ -211,6 +235,10 @@ class ContinuousAutoregressiveWrapper(nn.Module):
 
         if exists(mask):
             assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
-            loss = loss[mask]
+
+            if self.equal_loss_weight_batch:
+                loss = masked_mean(loss, mask)
+            else:
+                loss = loss[mask]
 
         return loss.mean()

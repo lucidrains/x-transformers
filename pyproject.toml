@@ -1,0 +1,60 @@
+[project]
+name = "x-transformers"
+version = "2.2.7"
+description = "X-Transformers"
+authors = [
+    { name = "Phil Wang", email = "lucidrains@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">= 3.9"
+license = { file = "LICENSE" }
+keywords = [
+    'artificial intelligence',
+    'attention mechanism',
+    'transformers'
+  ]
+classifiers=[
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'Topic :: Scientific/Engineering :: Artificial Intelligence',
+    'License :: OSI Approved :: MIT License',
+    'Programming Language :: Python :: 3.6',
+  ]
+
+dependencies = [
+    'einx>=0.3.0',
+    'einops>=0.8.0',
+    'loguru',
+    'packaging>=21.0',
+    'torch>=2.0',
+]
+
+[project.urls]
+Homepage = "https://pypi.org/project/x-transformers/"
+Repository = "https://github.com/lucidrains/x-transformers"
+
+[project.optional-dependencies]
+examples = [
+    "lion-pytorch",
+    "tqdm",
+]
+
+test = [
+    "pytest",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "."
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["x_transformers"]
