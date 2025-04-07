@@ -799,3 +799,24 @@ def test_entropy_based_tokenizer(
     assert len(segmented_seq) == seq.shape[0]
 
     tokenizer(seq[0]) # able to handle without batch dim
+
+def test_custom_ff_activation():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_dim_head = 64,
+            ff_custom_activation = nn.Sigmoid()
+        )
+    )
+
+    seq = torch.randint(0, 20000, (2, 1024))
+
+    logits = model(seq)
+
+    assert logits.shape == (2, 1024, 20000)
+

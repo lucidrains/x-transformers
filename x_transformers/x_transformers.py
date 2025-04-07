@@ -1196,6 +1196,7 @@ class FeedForward(Module):
         glu_mult_bias = False,
         swish = False,
         relu_squared = False,
+        custom_activation = None,
         post_act_ln = False,
         dropout = 0.,
         no_bias = False,
@@ -1205,7 +1206,9 @@ class FeedForward(Module):
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
 
-        if relu_squared:
+        if exists(custom_activation):
+            activation = deepcopy(custom_activation)
+        elif relu_squared:
             activation = ReluSquared()
         elif swish:
             activation = nn.SiLU()
