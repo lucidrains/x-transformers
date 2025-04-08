@@ -33,11 +33,14 @@ class EntropyBasedTokenizer(Module):
     def __init__(
         self,
         decoder: Module,
-        entropy_threshold: float
+        entropy_threshold: float,
+        max_token_size: int | None = None
     ):
         super().__init__()
         self.decoder = decoder
         self.entropy_threshold = entropy_threshold
+
+        self.max_token_size = max_token_size
 
     @torch.no_grad()
     def forward(
@@ -53,7 +56,7 @@ class EntropyBasedTokenizer(Module):
         self.decoder.eval()
 
         is_var_length = exists(lens)
-        batch, seq_len, device = *seq.shape, seq.device
+        batch, seq_len, device, max_token_size = *seq.shape, seq.device, self.max_token_size
 
         arange = torch.arange(seq_len, device = device)
 
@@ -94,7 +97,29 @@ class EntropyBasedTokenizer(Module):
             scatter_indices = rearrange(lens - 1, 'b -> b 1')
             boundaries.scatter_(-1, scatter_indices, True)
 
-        num_tokens = boundaries.sum(dim = -1) # number of tokens
+        # handle max token size - technique has the flaw that repeating subsequences are grouped into one large token
+
+        if exists(max_token_size):
+            token_ids = boundaries.cumsum(dim = -1)
+            token_ids = F.pad(token_ids, (1, -1), value = 0)
+
+            max_num_tokens = boundaries.sum(dim = -1).amax().item()
+            token_ids_seq = torch.arange(max_num_tokens, device = device)
+
+            token_mask = einx.equal('j, b i -> b j i', token_ids_seq, token_ids)
+
+            token_sub_seq_arange = token_mask.cumsum(dim = -1)
+
+            sub_seq_boundaries = (token_sub_seq_arange % max_token_size == 0)
+            sub_seq_boundaries = (sub_seq_boundaries & token_mask).any(dim = 1)
+
+            boundaries = boundaries | sub_seq_boundaries
+
+        # number of tokens
+
+        num_tokens = boundaries.sum(dim = -1)
+
+        # get number of tokens as well as derived indices
 
         indices = arange_plus_one[boundaries].split(num_tokens.tolist())
 
