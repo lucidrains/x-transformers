@@ -819,4 +819,3 @@ def test_custom_ff_activation():
     logits = model(seq)
 
     assert logits.shape == (2, 1024, 20000)
-
