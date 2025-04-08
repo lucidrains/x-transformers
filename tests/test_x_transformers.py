@@ -820,9 +820,10 @@ def test_entropy_based_tokenizer_max_token_len():
         max_token_size = 4
     )
 
-    seq = torch.randint(0, 20000, (16,))
+    seq = torch.randint(0, 20000, (1, 16,))
+    lens = torch.tensor([14])
 
-    token_lengths = tokenizer(seq)
+    token_lengths = tokenizer(seq, lens = lens)
 
     assert token_lengths.amax().item() <= 4
 
