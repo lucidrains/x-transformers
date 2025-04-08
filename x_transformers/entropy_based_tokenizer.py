@@ -116,6 +116,9 @@ class EntropyBasedTokenizer(Module):
 
             boundaries = boundaries | sub_seq_boundaries
 
+            if exists(mask):
+                boundaries = boundaries & mask
+
         # number of tokens
 
         num_tokens = boundaries.sum(dim = -1)
