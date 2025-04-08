@@ -800,6 +800,32 @@ def test_entropy_based_tokenizer(
 
     tokenizer(seq[0]) # able to handle without batch dim
 
+def test_entropy_based_tokenizer_max_token_len():
+    from x_transformers.entropy_based_tokenizer import EntropyBasedTokenizer
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_dim_head = 64,
+        )
+    )
+
+    tokenizer = EntropyBasedTokenizer(
+        model,
+        entropy_threshold = 100,
+        max_token_size = 4
+    )
+
+    seq = torch.randint(0, 20000, (16,))
+
+    token_lengths = tokenizer(seq)
+
+    assert token_lengths.amax().item() <= 4
+
 def test_custom_ff_activation():
 
     model = TransformerWrapper(
@@ -819,4 +845,3 @@ def test_custom_ff_activation():
     logits = model(seq)
 
     assert logits.shape == (2, 1024, 20000)
-
