@@ -62,6 +62,9 @@ def default(val, d):
         return val
     return d() if callable(d) else d
 
+def identity(t, *args, **kwargs):
+    return t
+
 def first(it, default = None):
     return it[0] if len(it) > 0 else default
 
@@ -74,7 +77,10 @@ def cast_tuple(val, depth = 1):
 def divisible_by(num, den):
     return (num % den) == 0
 
-def maybe(fn):
+def maybe(fn = None):
+    if not exists(fn):
+        fn = identity
+
     @wraps(fn)
     def inner(x, *args, **kwargs):
         if not exists(x):
@@ -1199,6 +1205,7 @@ class FeedForward(Module):
         custom_activation = None,
         post_act_ln = False,
         dropout = 0.,
+        sublayer_dropout = 0.,
         no_bias = False,
         zero_init_output = False
     ):
@@ -1227,7 +1234,8 @@ class FeedForward(Module):
             project_in,
             LayerNorm(inner_dim) if post_act_ln else None,
             nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim_out, bias = not no_bias)
+            nn.Linear(inner_dim, dim_out, bias = not no_bias),
+            nn.Dropout(sublayer_dropout) if sublayer_dropout > 0. else None
         )
 
         # init last linear layer to 0
@@ -1256,6 +1264,7 @@ class Attention(Module):
         sparse_topk_straight_through = False,
         num_mem_kv = 0,
         dropout = 0.,
+        sublayer_dropout = 0.,
         on_attn = False,
         gate_value_heads = False,
         swiglu_values = False,
@@ -1533,6 +1542,10 @@ class Attention(Module):
 
         dim_out = default(dim_out, dim)
         self.to_out = nn.Sequential(LinearNoBias(out_dim, dim_out * 2), nn.GLU()) if on_attn else LinearNoBias(out_dim, dim_out)
+
+        # sublayer dropout
+
+        self.sublayer_dropout = nn.Dropout(sublayer_dropout) if sublayer_dropout > 0. else None
 
         # the number of attention heads to rotate, for decoupled rope in multi-latent attention
 
@@ -1870,6 +1883,10 @@ class Attention(Module):
         # combine the heads
 
         out = self.to_out(out)
+
+        # maybe sublayer dropout
+
+        out = maybe(self.sublayer_dropout)(out)
 
         if exists(mask):
             out = einx.where('b n, b n d, -> b n d', mask, out, 0.)
