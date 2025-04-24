@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import torch
-from torch import nn
+from torch import nn, cat, stack
+from torch.nn import Module
 import torch.nn.functional as F
+from torch.distributions import Normal
 
 import einx
-from einops import reduce, pack, repeat, unpack
+from einops import rearrange, reduce, pack, repeat, unpack
 
 from x_transformers.x_transformers import (
     AttentionLayers,
@@ -23,7 +27,7 @@ def exists(val):
 def default(val, d):
     if exists(val):
         return val
-    return d() if callable(d) else d
+    return d() if not isinstance(d, Module) and callable(d) else d
 
 def masked_mean(t, mask):
     t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
@@ -34,9 +38,17 @@ def masked_mean(t, mask):
     masked_average = num / den.clamp(min = 1.)
     return masked_average
 
+# probabilistic loss fn
+
+class GaussianNLL(Module):
+    def forward(self, pred, target):
+        mean, var = pred
+        dist = Normal(mean, var)
+        return -dist.log_prob(target)
+
 # main classes
 
-class ContinuousTransformerWrapper(nn.Module):
+class ContinuousTransformerWrapper(Module):
     def __init__(
         self,
         *,
@@ -51,7 +63,8 @@ class ContinuousTransformerWrapper(nn.Module):
         emb_dropout = 0.,
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
-        average_pool_embed = False
+        average_pool_embed = False,
+        probabilistic = False
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -91,7 +104,12 @@ class ContinuousTransformerWrapper(nn.Module):
         # project in and out
 
         self.project_in = nn.Linear(dim_in, dim, bias = False) if exists(dim_in) else nn.Identity()
-        self.project_out = nn.Linear(dim, dim_out, bias = False) if exists(dim_out) else nn.Identity()
+
+        # output is multipled by 2 for outputting mean and log variance
+
+        self.probabilistic = probabilistic
+
+        self.project_out = nn.Linear(dim, dim_out * (2 if probabilistic else 1), bias = False) if exists(dim_out) else nn.Identity()
 
     def forward(
         self,
@@ -132,13 +150,13 @@ class ContinuousTransformerWrapper(nn.Module):
 
             assert prepend_dim == x.shape[-1], 'prepended embeddings need to have same dimensions as model dimensions'
 
-            x = torch.cat((prepend_embeds, x), dim = -2)
+            x = cat((prepend_embeds, x), dim = -2)
 
             if exists(prepend_mask) or exists(mask):
                 mask = default(mask, lambda: torch.ones((batch, seq), device = device, dtype = torch.bool))
                 prepend_mask = default(prepend_mask, lambda: torch.ones((batch, prepend_seq), device = device, dtype = torch.bool))
 
-                mask = torch.cat((prepend_mask, mask), dim = -1)
+                mask = cat((prepend_mask, mask), dim = -1)
 
         x = self.emb_dropout(x)
 
@@ -159,6 +177,11 @@ class ContinuousTransformerWrapper(nn.Module):
 
         out = self.project_out(x) if not return_embeddings else x
 
+        if not return_embeddings and self.probabilistic:
+            mean, log_var = rearrange(out, '... (d mean_log_var) -> mean_log_var ... d', mean_log_var = 2)
+            variance = log_var.exp()
+            return stack((mean, variance))
+
         if return_intermediates:
             return out, intermediates
 
@@ -173,24 +196,35 @@ class ContinuousTransformerWrapper(nn.Module):
 
         return out
 
-class ContinuousAutoregressiveWrapper(nn.Module):
+class ContinuousAutoregressiveWrapper(Module):
     def __init__(
         self,
         net: ContinuousTransformerWrapper,
         ignore_index = -100,
         pad_value = 0,
-        loss_fn = nn.MSELoss(reduction = 'none'),
+        loss_fn: Module | None = None,
         equal_loss_weight_batch = False  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
     ):
         super().__init__()
         self.net = net
         self.max_seq_len = net.max_seq_len
 
+        probabilistic = net.probabilistic
+        self.probabilistic = probabilistic
+
+        loss_fn = default(loss_fn, nn.MSELoss(reduction = 'none') if not probabilistic else GaussianNLL())
+
         self.loss_fn = loss_fn
         self.equal_loss_weight_batch = equal_loss_weight_batch
 
     @torch.no_grad()
-    def generate(self, start_tokens, seq_len, **kwargs):
+    def generate(
+        self,
+        start_tokens,
+        seq_len,
+        temperature = 1.,
+        **kwargs
+    ):
         device = start_tokens.device
         was_training = self.net.training
         num_dims = len(start_tokens.shape)
@@ -208,8 +242,13 @@ class ContinuousAutoregressiveWrapper(nn.Module):
         for _ in range(seq_len):
             x = out[:, -self.max_seq_len:]
 
-            last = self.net(x, **kwargs)[:, -1:]
-            out = torch.cat((out, last), dim = -2)
+            last_output = self.net(x, **kwargs)[..., -1:, :]
+
+            if self.probabilistic:
+                mean, var = last_output
+                last_output = torch.normal(mean, var * temperature)
+
+            out = cat((out, last_output), dim = -2)
 
         out = out[:, t:]
 
@@ -219,7 +258,11 @@ class ContinuousAutoregressiveWrapper(nn.Module):
         self.net.train(was_training)
         return out
 
-    def forward(self, x, **kwargs):
+    def forward(
+        self,
+        x,
+        **kwargs
+    ):
         inp, target = x[:, :-1], x[:, 1:]
 
         assert 'prepend_embeds' not in kwargs

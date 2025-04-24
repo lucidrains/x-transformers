@@ -847,3 +847,45 @@ def test_custom_ff_activation():
     logits = model(seq)
 
     assert logits.shape == (2, 1024, 20000)
+
+@pytest.mark.parametrize('probabilistic', (False, True))
+def test_continuous(
+    probabilistic
+):
+    from x_transformers import (
+        ContinuousTransformerWrapper,
+        Decoder,
+        ContinuousAutoregressiveWrapper
+    )
+
+    model = ContinuousTransformerWrapper(
+        dim_in = 777,
+        dim_out = 777,
+        max_seq_len = 1024,
+        probabilistic = probabilistic,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8
+        )
+    )
+
+    # wrap it with the continuous autoregressive wrapper
+
+    model = ContinuousAutoregressiveWrapper(model)
+
+    # mock data
+
+    x = torch.randn((1, 1024, 777))
+    mask = torch.ones(1, 1024).bool()
+
+    # train on a lot of data above
+
+    loss = model(x, mask = mask)
+    loss.backward()
+
+    # then generate
+
+    start_emb = torch.randn(1, 777)
+    generated = model.generate(start_emb, 17) # (17, 777)
+    assert generated.shape == (17, 777)
