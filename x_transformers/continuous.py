@@ -123,6 +123,7 @@ class ContinuousTransformerWrapper(Module):
         return_intermediates = False,
         return_mems = False,
         mask = None,
+        lens = None,
         return_attn = False,
         mems = None,
         mem_masks = None,
@@ -132,6 +133,16 @@ class ContinuousTransformerWrapper(Module):
         **kwargs
     ):
         batch, seq, orig_mask, device = *x.shape[:2], mask, x.device
+
+        # maybe seq lengths passed in
+
+        if exists(lens):
+            assert not exists(mask), 'either `mask` or `lens` passed in, but not both'
+            seq_arange = torch.arange(seq, device = device)
+
+            mask = einx.less('j, i -> i j', seq_arange, lens)
+
+        # project in + positional embedding
 
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
@@ -283,6 +294,7 @@ class ContinuousAutoregressiveWrapper(Module):
         assert 'prepend_embeds' not in kwargs
 
         mask = kwargs.get('mask', None)
+
         if exists(mask) and mask.shape[1] == x.shape[1]:
             mask = mask[:, :-1]
             kwargs['mask'] = mask
