@@ -10,6 +10,7 @@ import einx
 from einops import rearrange, reduce, pack, repeat, unpack
 
 from x_transformers.x_transformers import (
+    Attention,
     AttentionLayers,
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
@@ -111,6 +112,10 @@ class ContinuousTransformerWrapper(Module):
 
         self.project_out = nn.Linear(dim, dim_out * (2 if probabilistic else 1), bias = False) if exists(dim_out) else nn.Identity()
 
+        # can cache kv
+
+        self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
+
     def forward(
         self,
         x,
@@ -180,7 +185,7 @@ class ContinuousTransformerWrapper(Module):
         if not return_embeddings and self.probabilistic:
             mean, log_var = rearrange(out, '... (d mean_log_var) -> mean_log_var ... d', mean_log_var = 2)
             variance = log_var.exp()
-            return stack((mean, variance))
+            out = stack((mean, variance))
 
         if return_intermediates:
             return out, intermediates
@@ -223,9 +228,12 @@ class ContinuousAutoregressiveWrapper(Module):
         start_tokens,
         seq_len,
         temperature = 1.,
+        cache_kv = True,
         **kwargs
     ):
+        should_cache_kv = cache_kv and self.net.can_cache_kv
         device = start_tokens.device
+
         was_training = self.net.training
         num_dims = len(start_tokens.shape)
 
@@ -239,16 +247,23 @@ class ContinuousAutoregressiveWrapper(Module):
         self.net.eval()
         out = start_tokens
 
+        cache = None
+
         for _ in range(seq_len):
             x = out[:, -self.max_seq_len:]
 
-            last_output = self.net(x, **kwargs)[..., -1:, :]
+            net_out, new_cache = self.net(x, cache = cache, return_intermediates = True, **kwargs)
+
+            last_output = net_out[..., -1:, :]
 
             if self.probabilistic:
                 mean, var = last_output
                 last_output = torch.normal(mean, var * temperature)
 
             out = cat((out, last_output), dim = -2)
+
+            if should_cache_kv:
+                cache = new_cache
 
         out = out[:, t:]
 

@@ -849,8 +849,10 @@ def test_custom_ff_activation():
     assert logits.shape == (2, 1024, 20000)
 
 @pytest.mark.parametrize('probabilistic', (False, True))
+@pytest.mark.parametrize('cache_kv', (False, True))
 def test_continuous(
-    probabilistic
+    probabilistic,
+    cache_kv
 ):
     from x_transformers import (
         ContinuousTransformerWrapper,
@@ -887,5 +889,5 @@ def test_continuous(
     # then generate
 
     start_emb = torch.randn(1, 777)
-    generated = model.generate(start_emb, 17) # (17, 777)
+    generated = model.generate(start_emb, 17, cache_kv = cache_kv) # (17, 777)
     assert generated.shape == (17, 777)
