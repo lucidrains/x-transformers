@@ -128,6 +128,7 @@ class ContinuousTransformerWrapper(Module):
         mems = None,
         mem_masks = None,
         pos = None,
+        sum_embeds = None,
         prepend_embeds = None,
         prepend_mask = None,
         **kwargs
@@ -146,6 +147,9 @@ class ContinuousTransformerWrapper(Module):
 
         x = self.project_in(x)
         x = x + self.pos_emb(x, pos = pos)
+
+        if exists(sum_embeds):
+            x = x + sum_embeds
 
         x = self.post_emb_norm(x)
 
