@@ -293,6 +293,20 @@ class ContinuousAutoregressiveWrapper(Module):
 
         assert 'prepend_embeds' not in kwargs
 
+        # lens
+
+        lens = kwargs.pop('lens', None)
+
+        if exists(lens):
+            assert 'mask' not in kwargs, 'either `mask` or `lens` passed in, but not both'
+            seq_len, device = inp.shape[1], inp.device
+            seq_arange = torch.arange(seq_len, device = device)
+            mask = einx.less('j, i -> i j', seq_arange, lens)
+
+            kwargs['mask'] = mask
+
+        # mask
+
         mask = kwargs.get('mask', None)
 
         if exists(mask) and mask.shape[1] == x.shape[1]:
