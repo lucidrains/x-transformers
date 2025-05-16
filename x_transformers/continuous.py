@@ -220,8 +220,6 @@ class ContinuousAutoregressiveWrapper(Module):
     def __init__(
         self,
         net: ContinuousTransformerWrapper,
-        ignore_index = -100,
-        pad_value = 0,
         loss_fn: Module | None = None,
         equal_loss_weight_batch = False  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
     ):
