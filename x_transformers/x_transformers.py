@@ -1252,7 +1252,7 @@ class Attention(Module):
         self,
         dim,
         dim_head = DEFAULT_DIM_HEAD,
-        dim_context = None,
+        context_dim = None,
         heads = 8,
         causal = False,
         flash = False,
@@ -1317,7 +1317,7 @@ class Attention(Module):
         )
     ):
         super().__init__()
-        dim_kv = default(dim_context, dim)
+        dim_kv = default(context_dim, dim)
 
         self.scale = dim_head ** -0.5
 
