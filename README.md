@@ -2427,4 +2427,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{Jordan2024,
+    author       = {Keller Jordan and Braden Koszarsky},
+    title        = {modded-nanogpt (value embeddings from nanogpt speedrun)},
+    year         = {2024},
+    publisher    = {GitHub},
+    journal      = {GitHub repository},
+    howpublished = {https://github.com/KellerJordan/modded-nanogpt},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

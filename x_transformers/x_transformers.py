@@ -1207,7 +1207,9 @@ class FeedForward(Module):
         dropout = 0.,
         sublayer_dropout = 0.,
         no_bias = False,
-        zero_init_output = False
+        zero_init_output = False,
+        deep_embed_hiddens = False,
+        deep_embed_num_tokens = None,
     ):
         super().__init__()
         inner_dim = int(dim * mult)
@@ -1223,27 +1225,51 @@ class FeedForward(Module):
             activation = nn.GELU()
 
         if glu:
-            project_in = GLU(dim, inner_dim, activation, mult_bias = glu_mult_bias)
+            proj_in = GLU(dim, inner_dim, activation, mult_bias = glu_mult_bias)
         else:
-            project_in = nn.Sequential(
+            proj_in = nn.Sequential(
                 nn.Linear(dim, inner_dim, bias = not no_bias),
                 activation
             )
 
+        proj_out = nn.Linear(inner_dim, dim_out, bias = not no_bias)
+
         self.ff = Sequential(
-            project_in,
+            proj_in,
             LayerNorm(inner_dim) if post_act_ln else None,
             nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim_out, bias = not no_bias),
+            proj_out,
             nn.Dropout(sublayer_dropout) if sublayer_dropout > 0. else None
         )
 
-        # init last linear layer to 0
-        if zero_init_output:
-            init_zero_(self.ff[-1])
+        # deep embed
 
-    def forward(self, x):
-        return self.ff(x)
+        # credit goes to Braden Koszarsky for first devising value embeddings in nanogpt-speedrun project
+        # then Bo Peng for coming up with this alternate design in feedforward for RWKV 8
+        # improvements were clearest to me (on my toy setup) with multiplying on output of feedforward, will try with attention at future date
+
+        self.deep_embed = None
+        if deep_embed_hiddens:
+            assert exists(deep_embed_num_tokens)
+            self.deep_embed = nn.Parameter(torch.zeros(deep_embed_num_tokens, dim_out))
+
+        # init last linear layer to 0
+
+        if zero_init_output:
+            init_zero_(proj_out)
+
+    def forward(
+        self,
+        x,
+        deep_embed_ids = None
+    ):
+        out = self.ff(x)
+
+        if exists(deep_embed_ids) and exists(self.deep_embed):
+            deep_embed = self.deep_embed[deep_embed_ids] + 1.
+            out = out * deep_embed
+
+        return out
 
 # attention. it is all we need
 
@@ -2354,6 +2380,7 @@ class AttentionLayers(Module):
         pos = None,
         context_pos = None,
         attn_bias = None,
+        deep_embed_ids = None,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
         layers_execute_order: tuple[int, ...] | None = None
@@ -2447,6 +2474,9 @@ class AttentionLayers(Module):
 
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
+
+                if exists(deep_embed_ids):
+                    deep_embed_ids = deep_embed_ids[:, -cache_age:]
 
             attn_cache = cache.attn_intermediates
 
@@ -2572,7 +2602,7 @@ class AttentionLayers(Module):
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
             elif layer_type == 'f':
-                out = block(x)
+                out = block(x, deep_embed_ids = deep_embed_ids)
 
             # store first self or cross attention intermediate for value residual
 
@@ -2959,7 +2989,7 @@ class TransformerWrapper(Module):
 
         # shapes and variables
 
-        b, n, device, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
+        b, n, device, token_ids, num_mems, has_memory_tokens, emb_frac_gradient, orig_mask = x.shape[0], x.shape[1], x.device, x, self.num_memory_tokens, self.num_memory_tokens > 0, self.emb_frac_gradient, mask
 
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss | return_embeddings_and_intermediates
         return_embeddings = return_embeddings | (not exists(self.to_logits)) | return_embeddings_and_intermediates
@@ -3066,7 +3096,7 @@ class TransformerWrapper(Module):
 
             # regular
 
-            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embed_ids = token_ids, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
 
         else:
             # recycling

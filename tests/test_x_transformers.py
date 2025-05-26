@@ -848,6 +848,27 @@ def test_custom_ff_activation():
 
     assert logits.shape == (2, 1024, 20000)
 
+def test_ff_deep_embed():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            rotary_pos_emb = True,
+            ff_deep_embed_hiddens = True,
+            ff_deep_embed_num_tokens = 20000,
+        )
+    )
+
+    seq = torch.randint(0, 20000, (2, 1024))
+
+    logits = model(seq)
+
+    assert logits.shape == (2, 1024, 20000)
+
 @pytest.mark.parametrize('probabilistic', (False, True))
 @pytest.mark.parametrize('cache_kv', (False, True))
 def test_continuous(
