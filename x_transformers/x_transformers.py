@@ -1208,7 +1208,7 @@ class FeedForward(Module):
         sublayer_dropout = 0.,
         no_bias = False,
         zero_init_output = False,
-        deep_embed_hiddens = False,
+        deep_embed = False,
         deep_embed_num_tokens = None,
     ):
         super().__init__()
@@ -1249,7 +1249,7 @@ class FeedForward(Module):
         # improvements were clearest to me (on my toy setup) with multiplying on output of feedforward, will try with attention at future date
 
         self.deep_embed = None
-        if deep_embed_hiddens:
+        if deep_embed:
             assert exists(deep_embed_num_tokens)
             self.deep_embed = nn.Parameter(torch.ones(deep_embed_num_tokens, dim_out))
 

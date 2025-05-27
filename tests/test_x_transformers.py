@@ -858,7 +858,7 @@ def test_ff_deep_embed():
             depth = 6,
             heads = 8,
             rotary_pos_emb = True,
-            ff_deep_embed_hiddens = True,
+            ff_deep_embed = True,
             ff_deep_embed_num_tokens = 20000,
         )
     )
