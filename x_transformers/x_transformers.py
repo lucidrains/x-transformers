@@ -1251,7 +1251,7 @@ class FeedForward(Module):
         self.deep_embed = None
         if deep_embed_hiddens:
             assert exists(deep_embed_num_tokens)
-            self.deep_embed = nn.Parameter(torch.zeros(deep_embed_num_tokens, dim_out))
+            self.deep_embed = nn.Parameter(torch.ones(deep_embed_num_tokens, dim_out))
 
         # init last linear layer to 0
 
@@ -1266,7 +1266,7 @@ class FeedForward(Module):
         out = self.ff(x)
 
         if exists(deep_embed_ids) and exists(self.deep_embed):
-            deep_embed = self.deep_embed[deep_embed_ids] + 1.
+            deep_embed = self.deep_embed[deep_embed_ids]
             out = out * deep_embed
 
         return out
