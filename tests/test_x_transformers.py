@@ -853,13 +853,12 @@ def test_ff_deep_embed():
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
+        ff_deep_embed = True,
         attn_layers = Decoder(
             dim = 512,
             depth = 6,
             heads = 8,
             rotary_pos_emb = True,
-            ff_deep_embed = True,
-            ff_deep_embed_num_tokens = 20000,
         )
     )
 

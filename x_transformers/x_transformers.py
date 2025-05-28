@@ -1208,8 +1208,6 @@ class FeedForward(Module):
         sublayer_dropout = 0.,
         no_bias = False,
         zero_init_output = False,
-        deep_embed = False,
-        deep_embed_num_tokens = None,
     ):
         super().__init__()
         inner_dim = int(dim * mult)
@@ -1242,17 +1240,6 @@ class FeedForward(Module):
             nn.Dropout(sublayer_dropout) if sublayer_dropout > 0. else None
         )
 
-        # deep embed
-
-        # credit goes to Braden Koszarsky for first devising value embeddings in nanogpt-speedrun project
-        # then Bo Peng for coming up with this alternate design in feedforward for RWKV 8
-        # improvements were clearest to me (on my toy setup) with multiplying on output of feedforward, will try with attention at future date
-
-        self.deep_embed = None
-        if deep_embed:
-            assert exists(deep_embed_num_tokens)
-            self.deep_embed = nn.Parameter(torch.ones(deep_embed_num_tokens, dim_out))
-
         # init last linear layer to 0
 
         if zero_init_output:
@@ -1261,12 +1248,11 @@ class FeedForward(Module):
     def forward(
         self,
         x,
-        deep_embed_ids = None
+        deep_embed = None
     ):
         out = self.ff(x)
 
-        if exists(deep_embed_ids) and exists(self.deep_embed):
-            deep_embed = self.deep_embed[deep_embed_ids]
+        if exists(deep_embed):
             out = out * deep_embed
 
         return out
@@ -2380,7 +2366,7 @@ class AttentionLayers(Module):
         pos = None,
         context_pos = None,
         attn_bias = None,
-        deep_embed_ids = None,
+        deep_embeds_and_ids: tuple[nn.Parameter, Tensor] | None = None,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
         layers_execute_order: tuple[int, ...] | None = None
@@ -2475,12 +2461,25 @@ class AttentionLayers(Module):
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
 
-                if exists(deep_embed_ids):
-                    deep_embed_ids = deep_embed_ids[:, -cache_age:]
+                if exists(deep_embeds_and_ids):
+                    deep_embeds, token_ids = deep_embeds_and_ids
+                    token_ids = token_ids[:, -cache_age:]
+                    deep_embeds_and_ids = (deep_embeds, token_ids)
 
             attn_cache = cache.attn_intermediates
 
         iter_attn_cache = iter(attn_cache)
+
+        # handle deep embeds if needed
+
+        deep_embeds = []
+
+        if exists(deep_embeds_and_ids):
+            deep_embeds, token_ids = deep_embeds_and_ids
+            deep_embeds_across_depth = deep_embeds[token_ids]
+            deep_embeds = rearrange(deep_embeds_across_depth, 'b n l d -> l b n d')
+
+        deep_embeds_iter = iter(deep_embeds)
 
         # setup multistreams if needed
 
@@ -2602,7 +2601,7 @@ class AttentionLayers(Module):
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
             elif layer_type == 'f':
-                out = block(x, deep_embed_ids = deep_embed_ids)
+                out = block(x, deep_embed = next(deep_embeds_iter, None))
 
             # store first self or cross attention intermediate for value residual
 
@@ -2818,11 +2817,14 @@ class TransformerWrapper(Module):
         mixture_of_softmax = False,
         mixture_of_softmax_k = 4,
         sigsoftmax_logits = False,
+        ff_deep_embed = False,
         to_logits: Module | None = None,
     ):
         super().__init__()
 
         dim = attn_layers.dim
+        depth = attn_layers.depth
+
         emb_dim = default(emb_dim, dim)
         self.emb_dim = emb_dim
         self.num_tokens = num_tokens
@@ -2854,6 +2856,16 @@ class TransformerWrapper(Module):
 
         if len(embed_num_tokens) > 0:
             self.embeds = ModuleDict({f'{name}_embed': nn.Embedding(num_tokens, emb_dim) for name, num_tokens in embed_num_tokens.items()})
+
+        # deep embed
+
+        # credit goes to Braden Koszarsky for first devising value embeddings in nanogpt-speedrun project
+        # then Bo Peng for coming up with this alternate design in feedforward for RWKV 8
+        # improvements were clearest to me (on my toy setup) with multiplying on output of feedforward, will try with attention at future date
+
+        self.ff_deep_embed = None
+        if ff_deep_embed:
+            self.ff_deep_embed = nn.Parameter(torch.ones(num_tokens, depth, dim))
 
         # fraction of the gradient that should go to the embedding, https://arxiv.org/abs/2105.13290
 
@@ -3050,6 +3062,13 @@ class TransformerWrapper(Module):
 
         x = self.project_emb(x)
 
+        # maybe deep embeds
+
+        deep_embed_and_ids = None
+
+        if exists(self.ff_deep_embed):
+            deep_embed_and_ids = (self.ff_deep_embed, token_ids)
+
         # maybe cls token
 
         if exists(self.cls_token):
@@ -3096,7 +3115,7 @@ class TransformerWrapper(Module):
 
             # regular
 
-            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embed_ids = token_ids, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embeds_and_ids = deep_embed_and_ids, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
 
         else:
             # recycling
