@@ -44,8 +44,7 @@ def masked_mean(t, mask):
 class GaussianNLL(Module):
     def forward(self, pred, target):
         mean, var = pred
-        dist = Normal(mean, var)
-        return -dist.log_prob(target)
+        return F.gaussian_nll_loss(mean, target, var, reduction = 'none')
 
 # main classes
 
@@ -271,7 +270,9 @@ class ContinuousAutoregressiveWrapper(Module):
 
             if self.probabilistic:
                 mean, var = last_output
-                last_output = torch.normal(mean, var * temperature)
+                stddev = var.clamp(min = 1e-5).sqrt()
+
+                last_output = torch.normal(mean, stddev * temperature)
 
             out = cat((out, last_output), dim = -2)
 
