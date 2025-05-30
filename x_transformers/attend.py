@@ -140,6 +140,21 @@ def sparse_topk_attn(
     soft_attn = (orig_logits / temperature).softmax(dim = -1)
     return topk_attn.detach() + soft_attn - soft_attn.detach()
 
+#Tropical Linear layer
+class TropicalLinear(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(TropicalLinear, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.W = nn.Parameter(torch.randn(output_dim, input_dim))
+    
+    def forward(self, x):
+        x_expanded = x.unsqueeze(-2)
+        W_expanded = self.W.unsqueeze(0)
+        Wx = x_expanded + W_expanded  
+        y, _ = torch.max(Wx, dim=-1)
+        return y
+
 # functions for creating causal mask
 # need a special one for onnx cpu (no support for .triu)
 
@@ -169,6 +184,7 @@ class Attend(Module):
         scale = None,
         qk_norm = False,
         l2_distance = False,
+        tropical = False,
         sigmoid = False,
         custom_attn_fn: Callable | None = None,
         flash = False,
@@ -247,6 +263,12 @@ class Attend(Module):
         # l2 distance attention
 
         self.l2_distance = l2_distance
+        self.tropical    = tropical
+        
+        if self.tropical:
+            self.trop_q_lin = self.trop_k_lin = self.trop_v_lin = None
+            self.trop_lambda = None
+
 
         # add a key / value token composed of zeros
         # in case this helps controlling outliers, proposed by https://www.evanmiller.org/attention-is-off-by-one.html
@@ -291,6 +313,25 @@ class Attend(Module):
         else:
             self.sdp_context_manager = partial(torch.backends.cuda.sdp_kernel, **sdp_kwargs)
 
+
+    def _trop_act(self, t):
+        """
+        ReLU ➜ log1p ➜ max-plus normalisation (subtract λ)
+        expects t shaped [b h n d]
+        """
+        #Another option 
+        #return torch.log1p(F.relu(t))- t.min(dim=-1, keepdim=True).values
+        return torch.log1p(F.relu(t))- self.trop_lambda
+
+    def _init_trop_params(self, dim, device, dtype):
+        if self.trop_q_lin is not None:
+            return
+        self.trop_lambda = nn.Parameter(torch.ones(1, dim[1], 1, dim[3],
+                                                   device=device, dtype=dtype))
+        self.trop_q_lin  = TropicalLinear(dim[3], dim[3]).to(device)
+        self.trop_k_lin  = TropicalLinear(dim[3], dim[3]).to(device)
+        self.trop_v_lin  = TropicalLinear(dim[3], dim[3]).to(device)
+        
     def flash_attn(
         self,
         q, k, v,
@@ -406,6 +447,57 @@ class Attend(Module):
 
         return out, Intermediates()
 
+    def _tropical_attn(
+        self,
+        q, k, v,
+        mask = None,
+        attn_bias = None
+    ):
+        """
+        Max–plus tropical attention
+
+        Shapes   q : [b h i d] ─ standard, after head-split
+                 k : [b h j d] or [b j d] (single-kv-head allowed)
+                 v : … same as k
+        """
+        # broadcast single-head kv to multi-head to match q
+        if k.ndim == 3:
+            k = repeat(k, 'b j d -> b h j d', h = q.shape[1])
+            v = repeat(v, 'b j d -> b h j d', h = q.shape[1])
+
+        # Tropical Hilbert similarity  s_{ij} = −(max_d Δ − min_d Δ),  Δ = q_i − k_j
+        diff = q.unsqueeze(-2) - k.unsqueeze(-3)          # [b h i j d]
+        trop_dist = diff.amax(-1) - diff.amin(-1)              # [b h i j]
+        sim = - trop_dist                                
+
+
+        # positional / alibi bias
+        #if exists(attn_bias):
+        #    sim = sim + attn_bias
+
+        # key-padding and/or causal masking
+        #mask_value = -torch.finfo(sim.dtype).max
+        mask_value = torch.tensor(float('-inf'), device=sim.device, dtype=sim.dtype)
+        if exists(mask):
+            sim = sim.masked_fill(~mask, mask_value)
+
+        if self.causal:
+            i, j, device = *sim.shape[-2:], sim.device
+            causal_mask = self.create_causal_mask(i, j, device = device)
+            sim = sim.masked_fill(causal_mask, mask_value)
+
+        #sim : [b h i j 1]   v : [b h 1 j d]  →  [b h i j d]
+        # max-plus aggregation   o_i = max_j (s_{ij} + v_j)
+        out = (sim.unsqueeze(-1) + v.unsqueeze(2)).amax(dim = -2)  # [b h i d]
+        #Maslow quantization map (de-tropicalize)
+        out = torch.expm1(out)
+
+        # keep API identical to other branches
+        intermediates = Intermediates(qk_similarities = sim)
+
+        return out, intermediates
+
+
     def forward(
         self,
         q, k, v,
@@ -454,6 +546,20 @@ class Attend(Module):
 
             if exists(attn_bias):
                 attn_bias = F.pad(attn_bias, (1, 0), value = 0.)
+
+        #tropical circuit
+        if self.tropical:
+            self._init_trop_params(q.shape, q.device, q.dtype)
+            # tropicalization
+            q = self._trop_act(q)
+            k = self._trop_act(k)
+            v = self._trop_act(v)
+            #tropical linear maps
+            b, h, n, d = q.shape
+            q = self.trop_q_lin(q.reshape(b*h*n, d)).reshape(b, h, n, d)
+            k = self.trop_k_lin(k.reshape(b*h*n, d)).reshape(b, h, n, d)
+            v = self.trop_v_lin(v.reshape(b*h*n, d)).reshape(b, h, n, d)
+            return self._tropical_attn(q, k, v, mask = mask, attn_bias = attn_bias)
 
         if self.flash:
             assert not exists(prev_attn), 'residual attention not compatible with flash attention'
