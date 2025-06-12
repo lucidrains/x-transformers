@@ -165,7 +165,7 @@ class Attend(Module):
         post_talking_heads = False,
         pre_scale_post_talking_heads = False,
         sparse_topk = None,
-        sparse_topk_straight_through = False,
+        sparse_topk_straight_through = False, # https://arxiv.org/abs/2505.22074
         scale = None,
         qk_norm = False,
         l2_distance = False,
