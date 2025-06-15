@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import torch
-from torch import nn, cat, stack
+from torch import nn, cat, stack, arange
 from torch.nn import Module
 import torch.nn.functional as F
 from torch.distributions import Normal
@@ -64,7 +64,7 @@ class ContinuousTransformerWrapper(Module):
         use_abs_pos_emb = True,
         scaled_sinu_pos_emb = False,
         average_pool_embed = False,
-        probabilistic = False
+        probabilistic = False,
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -138,7 +138,7 @@ class ContinuousTransformerWrapper(Module):
 
         if exists(lens):
             assert not exists(mask), 'either `mask` or `lens` passed in, but not both'
-            seq_arange = torch.arange(seq, device = device)
+            seq_arange = arange(seq, device = device)
 
             mask = einx.less('j, i -> i j', seq_arange, lens)
 
@@ -220,7 +220,8 @@ class ContinuousAutoregressiveWrapper(Module):
         self,
         net: ContinuousTransformerWrapper,
         loss_fn: Module | None = None,
-        equal_loss_weight_batch = False  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
+        equal_loss_weight_batch = False,  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
+        rollout_steps = 1                 # they used 2 rollout steps in a successful world model paper https://ai.meta.com/vjepa/
     ):
         super().__init__()
         self.net = net
@@ -233,6 +234,14 @@ class ContinuousAutoregressiveWrapper(Module):
 
         self.loss_fn = loss_fn
         self.equal_loss_weight_batch = equal_loss_weight_batch
+
+        # num rollout steps - if greater than one, recurrently feedback the output and enforce loss rollout steps - 1 ahead
+        # applied successfully in vjepa2 world model, with rollout steps of 2
+        # rollout steps of 1 would be the same as single step autoregressive
+
+        assert not (rollout_steps > 1 and probabilistic), f'rollout steps greater than 1 only supported for non-probabilistic'
+        assert 1 <= rollout_steps
+        self.rollout_steps = rollout_steps
 
     @torch.no_grad()
     def generate(
@@ -247,12 +256,13 @@ class ContinuousAutoregressiveWrapper(Module):
         device = start_tokens.device
 
         was_training = self.net.training
-        num_dims = len(start_tokens.shape)
+        num_dims = start_tokens.ndim
 
         assert num_dims >= 2, 'number of dimensions of your start tokens must be greater or equal to 2'
+        no_batch = num_dims == 2
 
-        if num_dims == 2:
-            start_tokens = start_tokens[None, :]        
+        if no_batch:
+            start_tokens = rearrange(start_tokens, 'n d -> 1 n d')
 
         b, t, _, device = *start_tokens.shape, start_tokens.device
 
@@ -281,8 +291,8 @@ class ContinuousAutoregressiveWrapper(Module):
 
         out = out[:, t:]
 
-        if num_dims == 2:
-            out = out.squeeze(0)
+        if no_batch:
+            out = rearrange(out, '1 n d -> n d')
 
         self.net.train(was_training)
         return out
@@ -292,7 +302,33 @@ class ContinuousAutoregressiveWrapper(Module):
         x,
         **kwargs
     ):
-        inp, target = x[:, :-1], x[:, 1:]
+        steps = self.rollout_steps
+        one_step_autoregress = steps == 1
+
+        # get the input
+
+        inp = x[:, :-steps]
+
+        # variables
+
+        batch, seq_len, device = *inp.shape[:2], inp.device
+
+        # get target
+
+        if one_step_autoregress:
+            target = x[:, None, 1:]
+        else:
+
+            batch_arange = arange(batch, device = device)
+            batch_arange = rearrange(batch_arange, 'b -> b 1 1')
+            seq_arange = arange(seq_len, device = device)
+            steps_arange = arange(steps, device = device) + 1
+
+            target_indices = einx.add('r, n -> r n', steps_arange, seq_arange)
+
+            target = x[batch_arange, target_indices] # rollout targets
+
+        # assert inputs
 
         assert 'prepend_embeds' not in kwargs
 
@@ -303,29 +339,54 @@ class ContinuousAutoregressiveWrapper(Module):
         if exists(lens):
             assert 'mask' not in kwargs, 'either `mask` or `lens` passed in, but not both'
             seq_len, device = inp.shape[1], inp.device
-            seq_arange = torch.arange(seq_len, device = device)
+            seq_arange = arange(seq_len, device = device)
             mask = einx.less('j, i -> i j', seq_arange, lens)
-
             kwargs['mask'] = mask
 
-        # mask
+        # handle mask manually
 
-        mask = kwargs.get('mask', None)
+        mask = kwargs.pop('mask', None)
 
-        if exists(mask) and mask.shape[1] == x.shape[1]:
-            mask = mask[:, :-1]
-            kwargs['mask'] = mask
+        has_mask = exists(mask)
 
-        out = self.net(inp, **kwargs)
+        # maybe rollout
 
-        loss = self.loss_fn(out, target)
+        outputs = []
+        masks = []
 
-        if exists(mask):
+        for step_index in range(steps):
+
+            step_mask = None
+            if has_mask:
+                step_mask = mask[:, step_index:(step_index + seq_len)]
+                masks.append(step_mask)
+
+            # forward
+
+            out = self.net(inp, mask = step_mask, **kwargs)
+
+            outputs.append(out)
+
+            inp = out
+
+        # stack masks and predictions from rollouts
+
+        masks = stack(masks, dim = 1) if exists(mask) else None
+
+        pred = stack(outputs, dim = 1)
+
+        # loss
+
+        loss = self.loss_fn(pred, target)
+
+        # adjusting loss based on mask
+
+        if has_mask:
             assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
 
             if self.equal_loss_weight_batch:
-                loss = masked_mean(loss, mask)
+                loss = masked_mean(loss, masks)
             else:
-                loss = loss[mask]
+                loss = loss[masks]
 
         return loss.mean()

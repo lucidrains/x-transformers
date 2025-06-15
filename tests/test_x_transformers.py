@@ -870,15 +870,20 @@ def test_ff_deep_embed():
 
 @pytest.mark.parametrize('probabilistic', (False, True))
 @pytest.mark.parametrize('cache_kv', (False, True))
+@pytest.mark.parametrize('rollout_steps', (1, 4))
 def test_continuous(
     probabilistic,
-    cache_kv
+    cache_kv,
+    rollout_steps
 ):
     from x_transformers import (
         ContinuousTransformerWrapper,
         Decoder,
         ContinuousAutoregressiveWrapper
     )
+
+    if probabilistic and rollout_steps > 1:
+        pytest.skip()
 
     model = ContinuousTransformerWrapper(
         dim_in = 777,
@@ -894,7 +899,10 @@ def test_continuous(
 
     # wrap it with the continuous autoregressive wrapper
 
-    model = ContinuousAutoregressiveWrapper(model)
+    model = ContinuousAutoregressiveWrapper(
+        model,
+        rollout_steps = rollout_steps
+    )
 
     # mock data
 
