@@ -876,9 +876,6 @@ def test_continuous(
     cache_kv,
     rollout_steps
 ):
-    if probabilistic and rollout_steps > 1:
-        pytest.skip()
-
     from x_transformers import (
         ContinuousTransformerWrapper,
         Decoder,

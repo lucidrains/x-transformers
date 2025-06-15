@@ -298,7 +298,6 @@ class ContinuousAutoregressiveWrapper(Module):
         **kwargs
     ):
         assert rollout_steps > 1
-        assert not self.probabilistic, 'probabilistic not supported yet'
 
         steps = rollout_steps
 
@@ -369,8 +368,14 @@ class ContinuousAutoregressiveWrapper(Module):
                 **kwargs
             )
 
-            last_pred = out[:, -1:]
-            inp = last_pred
+            last_pred = out[..., -1:, :]
+
+            if self.probabilistic:
+                mean, var = last_pred
+                std = var.clamp(min = 1e-5).sqrt()
+                inp = torch.normal(mean, std)
+            else:
+                inp = last_pred
 
             preds.append(last_pred)
 
