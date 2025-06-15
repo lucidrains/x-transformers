@@ -130,6 +130,7 @@ class ContinuousTransformerWrapper(Module):
         sum_embeds = None,
         prepend_embeds = None,
         prepend_mask = None,
+        seq_start_pos = None,
         **kwargs
     ):
         batch, seq, orig_mask, device = *x.shape[:2], mask, x.device
@@ -145,7 +146,7 @@ class ContinuousTransformerWrapper(Module):
         # project in + positional embedding
 
         x = self.project_in(x)
-        x = x + self.pos_emb(x, pos = pos)
+        x = x + self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos)
 
         if exists(sum_embeds):
             x = x + sum_embeds
@@ -315,6 +316,8 @@ class ContinuousAutoregressiveWrapper(Module):
 
         # get target
 
+        seq_start_pos = None
+
         if one_step_autoregress:
             target = x[:, None, 1:]
         else:
@@ -327,6 +330,8 @@ class ContinuousAutoregressiveWrapper(Module):
             target_indices = einx.add('r, n -> r n', steps_arange, seq_arange)
 
             target = x[batch_arange, target_indices] # rollout targets
+
+            seq_start_pos = torch.zeros(batch, device = device, dtype = torch.long)
 
         # assert inputs
 
@@ -363,11 +368,14 @@ class ContinuousAutoregressiveWrapper(Module):
 
             # forward
 
-            out = self.net(inp, mask = step_mask, **kwargs)
+            out = self.net(inp, mask = step_mask, seq_start_pos = seq_start_pos, **kwargs)
 
             outputs.append(out)
 
             inp = out
+
+            if not one_step_autoregress:
+                seq_start_pos.sub_(1)
 
         # stack masks and predictions from rollouts
 
