@@ -9,6 +9,8 @@ from torch.distributions import Normal
 import einx
 from einops import rearrange, reduce, pack, repeat, unpack
 
+from x_transformers.autoregressive_wrapper import align_right
+
 from x_transformers.x_transformers import (
     Attention,
     AttentionLayers,
@@ -222,7 +224,6 @@ class ContinuousAutoregressiveWrapper(Module):
         net: ContinuousTransformerWrapper,
         loss_fn: Module | None = None,
         equal_loss_weight_batch = False,  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
-        rollout_steps = 1                 # they used 2 rollout steps in a successful world model paper https://ai.meta.com/vjepa/
     ):
         super().__init__()
         self.net = net
@@ -235,14 +236,6 @@ class ContinuousAutoregressiveWrapper(Module):
 
         self.loss_fn = loss_fn
         self.equal_loss_weight_batch = equal_loss_weight_batch
-
-        # num rollout steps - if greater than one, recurrently feedback the output and enforce loss rollout steps - 1 ahead
-        # applied successfully in vjepa2 world model, with rollout steps of 2
-        # rollout steps of 1 would be the same as single step autoregressive
-
-        assert not (rollout_steps > 1 and probabilistic), f'rollout steps greater than 1 only supported for non-probabilistic'
-        assert 1 <= rollout_steps
-        self.rollout_steps = rollout_steps
 
     @torch.no_grad()
     def generate(
@@ -298,40 +291,18 @@ class ContinuousAutoregressiveWrapper(Module):
         self.net.train(was_training)
         return out
 
-    def forward(
+    def forward_rollout(
         self,
         x,
+        rollout_steps = 2,
         **kwargs
     ):
-        steps = self.rollout_steps
-        one_step_autoregress = steps == 1
+        assert rollout_steps > 1
+        assert not self.probabilistic, 'probabilistic not supported yet'
 
-        # get the input
+        steps = rollout_steps
 
-        inp = x[:, :-steps]
-
-        # variables
-
-        batch, seq_len, device = *inp.shape[:2], inp.device
-
-        # get target
-
-        seq_start_pos = None
-
-        if one_step_autoregress:
-            target = x[:, None, 1:]
-        else:
-
-            batch_arange = arange(batch, device = device)
-            batch_arange = rearrange(batch_arange, 'b -> b 1 1')
-            seq_arange = arange(seq_len, device = device)
-            steps_arange = arange(steps, device = device) + 1
-
-            target_indices = einx.add('r, n -> r n', steps_arange, seq_arange)
-
-            target = x[batch_arange, target_indices] # rollout targets
-
-            seq_start_pos = torch.zeros(batch, device = device, dtype = torch.long)
+        device = x.device
 
         # assert inputs
 
@@ -348,53 +319,114 @@ class ContinuousAutoregressiveWrapper(Module):
             mask = einx.less('j, i -> i j', seq_arange, lens)
             kwargs['mask'] = mask
 
+        if not exists(lens):
+            batch, seq_len = x.shape[:2]
+            lens = torch.full((batch,), seq_len, device = device)
+
         # handle mask manually
 
         mask = kwargs.pop('mask', None)
 
-        has_mask = exists(mask)
+        # pick a random range for each batch sample and aligh the sequence to the right for rollout loss
+
+        valid_tokens_for_rollout = (lens - steps).clamp(min = 0)
+        valid_sample = valid_tokens_for_rollout > 0
+
+        x = x[valid_sample] # remove invalid sequence (lens less than rollout steps)
+
+        if exists(mask):
+            mask = mask[valid_sample]
+
+        batch = x.shape[0]
+        seq_start_pos = (torch.rand((batch,), device = device) * valid_tokens_for_rollout).floor().long()
+
+        batch_arange = torch.arange(batch, device = device)
+        batch_arange = rearrange(batch_arange, 'b -> b 1')
+
+        # crop out sequence to use
+
+        seq_end_pos = seq_start_pos + steps
+        max_end_pos = seq_end_pos.amax().item()
+        x = x[:, :max_end_pos]
+
+        x = align_right(x, seq_end_pos)
+
+        # get the input
+
+        inp, targets = x[:, :-steps], x[:, -steps:]
 
         # maybe rollout
 
-        outputs = []
-        masks = []
+        cache = None
+        preds = []
 
-        for step_index in range(steps):
+        for _ in range(steps):
 
-            step_mask = None
-            if has_mask:
-                step_mask = mask[:, step_index:(step_index + seq_len)]
-                masks.append(step_mask)
+            out, cache = self.net(
+                inp,
+                seq_start_pos = seq_start_pos,
+                return_intermediates = True,
+                **kwargs
+            )
 
-            # forward
+            last_pred = out[:, -1:]
+            inp = last_pred
 
-            out = self.net(inp, mask = step_mask, seq_start_pos = seq_start_pos, **kwargs)
+            preds.append(last_pred)
 
-            outputs.append(out)
+        # stack for predictions
 
-            inp = out
-
-            if not one_step_autoregress:
-                seq_start_pos.sub_(1)
-
-        # stack masks and predictions from rollouts
-
-        masks = stack(masks, dim = 1) if exists(mask) else None
-
-        pred = stack(outputs, dim = 1)
+        preds = cat(preds, dim = 1)
 
         # loss
 
-        loss = self.loss_fn(pred, target)
+        loss = self.loss_fn(preds, targets)
 
-        # adjusting loss based on mask
+        return loss.mean()
 
-        if has_mask:
+    def forward(
+        self,
+        x,
+        rollout_steps = 1, # they used 2 rollout steps in a successful world model paper https://ai.meta.com/vjepa/
+        **kwargs
+    ):
+        if rollout_steps > 1:
+            return self.forward_rollout(x, rollout_steps = rollout_steps, **kwargs)
+
+        inp, target = x[:, :-1], x[:, 1:]
+
+        assert 'prepend_embeds' not in kwargs
+
+        # lens
+
+        lens = kwargs.pop('lens', None)
+
+        if exists(lens):
+            assert 'mask' not in kwargs, 'either `mask` or `lens` passed in, but not both'
+            seq_len, device = inp.shape[1], inp.device
+            seq_arange = torch.arange(seq_len, device = device)
+            mask = einx.less('j, i -> i j', seq_arange, lens)
+
+            kwargs['mask'] = mask
+
+        # mask
+
+        mask = kwargs.get('mask', None)
+
+        if exists(mask) and mask.shape[1] == x.shape[1]:
+            mask = mask[:, :-1]
+            kwargs['mask'] = mask
+
+        out = self.net(inp, **kwargs)
+
+        loss = self.loss_fn(out, target)
+
+        if exists(mask):
             assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
 
             if self.equal_loss_weight_batch:
-                loss = masked_mean(loss, masks)
+                loss = masked_mean(loss, mask)
             else:
-                loss = loss[masks]
+                loss = loss[mask]
 
         return loss.mean()

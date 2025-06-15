@@ -36,8 +36,16 @@ def eval_decorator(fn):
 
 # for variable lengthed prefixes
 
+def pad_at_dim(t, pad: tuple[int, int], dim = -1, value = 0.):
+    if pad == (0, 0):
+        return t
+
+    dims_from_right = (- dim - 1) if dim < 0 else (t.ndim - dim - 1)
+    zeros = ((0, 0) * dims_from_right)
+    return F.pad(t, (*zeros, *pad), value = value)
+
 def align_right(t, lens, pad_id = 0):
-    batch, seq_len, device, dtype = *t.shape, t.device, t.dtype
+    batch, seq_len, device, dtype = *t.shape[:2], t.device, t.dtype
 
     assert lens.ndim == 1 and lens.shape[0] == batch
     assert lens.amax() <= seq_len
@@ -48,10 +56,10 @@ def align_right(t, lens, pad_id = 0):
     batch_arange = torch.arange(batch, device = device, dtype = torch.long)[..., None]
     prompt_len_arange = torch.arange(seq_len, device = device, dtype = torch.long)
 
-    t = F.pad(t, (max_pad_len, 0), value = pad_id)
+    t = pad_at_dim(t, (max_pad_len, 0), value = pad_id, dim = 1)
     offset = max_pad_len - pad_lens
 
-    aligned = t[batch_arange, prompt_len_arange + offset[..., None]]
+    aligned = t[batch_arange, prompt_len_arange + offset[..., None], ...]
     return aligned
 
 # nucleus

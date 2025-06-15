@@ -876,14 +876,14 @@ def test_continuous(
     cache_kv,
     rollout_steps
 ):
+    if probabilistic and rollout_steps > 1:
+        pytest.skip()
+
     from x_transformers import (
         ContinuousTransformerWrapper,
         Decoder,
         ContinuousAutoregressiveWrapper
     )
-
-    if probabilistic and rollout_steps > 1:
-        pytest.skip()
 
     model = ContinuousTransformerWrapper(
         dim_in = 777,
@@ -899,10 +899,7 @@ def test_continuous(
 
     # wrap it with the continuous autoregressive wrapper
 
-    model = ContinuousAutoregressiveWrapper(
-        model,
-        rollout_steps = rollout_steps
-    )
+    model = ContinuousAutoregressiveWrapper(model)
 
     # mock data
 
@@ -911,7 +908,7 @@ def test_continuous(
 
     # train on a lot of data above
 
-    loss = model(x, mask = mask)
+    loss = model(x, mask = mask, rollout_steps = rollout_steps)
     loss.backward()
 
     # then generate
