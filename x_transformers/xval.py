@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from typing import Callable
 from collections import namedtuple
 
-from einops import rearrange
+from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
 from x_transformers.x_transformers import (
