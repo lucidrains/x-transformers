@@ -32,6 +32,15 @@ def default(val, d):
         return val
     return d() if not isinstance(d, Module) and callable(d) else d
 
+def sample_from_mean_variance(
+    mean,
+    variance,
+    eps = 1e-5,
+    temperature = 1.
+):
+    std = variance.clamp(min = eps).sqrt()
+    return torch.normal(mean, std * temperature)
+
 def masked_mean(t, mask):
     t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
 
@@ -274,9 +283,7 @@ class ContinuousAutoregressiveWrapper(Module):
 
             if self.probabilistic:
                 mean, var = last_output
-                stddev = var.clamp(min = 1e-5).sqrt()
-
-                last_output = torch.normal(mean, stddev * temperature)
+                last_output = sample_from_mean_variance(mean, var, temperature = temperature)
 
             out = cat((out, last_output), dim = -2)
 
@@ -372,8 +379,7 @@ class ContinuousAutoregressiveWrapper(Module):
 
             if self.probabilistic:
                 mean, var = last_pred
-                std = var.clamp(min = 1e-5).sqrt()
-                inp = torch.normal(mean, std)
+                inp = sample_from_mean_variance(mean, var)
             else:
                 inp = last_pred
 
