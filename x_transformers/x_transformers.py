@@ -1079,10 +1079,11 @@ class FoldAxially(Module):
     def forward(
         self,
         x,
+        *args,
         **kwargs
     ):
         if self.axial_dim == 1:
-            return self.fn(x, **kwargs)
+            return self.fn(x, *args, **kwargs)
 
         seq_len, axial_dim = x.shape[1], self.axial_dim
 
@@ -1091,7 +1092,7 @@ class FoldAxially(Module):
 
         x = rearrange(x, 'b (n axial_dim) ... -> (b axial_dim) n ...', axial_dim = axial_dim)
 
-        out = self.fn(x, **kwargs)
+        out = self.fn(x, *args, **kwargs)
 
         (out, *rest_out), tree_spec = tree_flatten(out)
 
@@ -1857,9 +1858,17 @@ class Attention(Module):
             if not self.causal and exists(self.hybrid_mask_kwarg):
                 hybrid_forward_kwargs = {self.hybrid_mask_kwarg: mask}
 
+            # handle maybe hybrid cache
+
+            hybrid_forward_args = ()
+
+            if exists(cache) and exists(cache.hybrid_hidden):
+                hybrid_hiddens = cache.hybrid_hidden
+                hybrid_forward_args = (hybrid_hiddens,)
+
             # hybrid forward
 
-            hybrid_outputs = self.hybrid_module(x, **hybrid_forward_kwargs)
+            hybrid_outputs = self.hybrid_module(x, *hybrid_forward_args, **hybrid_forward_kwargs)
 
             # handle hybrid out
 
@@ -1869,6 +1878,10 @@ class Attention(Module):
 
             if hybrid_out.ndim == 3:
                 hybrid_out = rearrange(hybrid_out, 'b n (h d) -> b h n d', h = h)
+
+            if len(rest_hybrid_outs) > 0:
+                hybrid_hidden = first(rest_hybrid_outs)
+                intermediates.hybrid_hidden = hybrid_hidden
 
             out_norm, hybrid_out_norm = self.hybrid_norms
 
