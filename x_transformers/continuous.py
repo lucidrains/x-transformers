@@ -141,6 +141,8 @@ class ContinuousTransformerWrapper(Module):
         sum_embeds = None,
         prepend_embeds = None,
         prepend_mask = None,
+        cache: LayerIntermediates | None = None,
+        input_not_include_cache = False,
         seq_start_pos = None,
         **kwargs
     ):
@@ -154,10 +156,17 @@ class ContinuousTransformerWrapper(Module):
 
             mask = einx.less('j, i -> i j', seq_arange, lens)
 
+        # take care of position embedding offsets in the presence of cache and sequence is less than cache length (not full sequence)
+
+        seq_pos_offset = 0
+
+        if exists(cache) and input_not_include_cache:
+            seq_pos_offset = cache.cache_length
+
         # project in + positional embedding
 
         x = self.project_in(x)
-        x = x + self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos)
+        x = x + self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos, offset = seq_pos_offset)
 
         if exists(sum_embeds):
             x = x + sum_embeds
@@ -193,7 +202,7 @@ class ContinuousTransformerWrapper(Module):
 
         # attention layers
 
-        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, return_hiddens = True, **kwargs)
+        x, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, input_not_include_cache = input_not_include_cache, seq_pos_offset = seq_pos_offset, return_hiddens = True, **kwargs)
 
         # splice out memory tokens
 
