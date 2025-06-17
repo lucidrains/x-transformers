@@ -684,6 +684,38 @@ def test_hybrid_cache():
 
     assert torch.allclose(out_parallel, out_seq, atol = 1e-5)
 
+def test_caching_when_inputs_not_include_past():
+
+    from torch.nn import GRU
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 6,
+            heads = 8,
+            attn_dim_head = 64,
+            rotary_pos_emb = True,
+            attn_hybrid_fold_axial_dim = 1,
+            attn_hybrid_module = GRU(128, 64 * 8, batch_first = True)
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 4))
+
+    out_parallel = model(x)
+
+    x1, x2, x3 = x[:, :2], x[:, 2:3], x[:, 3:4]
+
+    out1, cache = model(x1, return_intermediates = True)
+    out2, cache = model(x2, cache = cache, return_intermediates = True, input_not_include_cache = True)
+    out3, cache = model(x3, cache = cache, return_intermediates = True, input_not_include_cache = True)
+
+    out_seq = torch.cat((out1, out2, out3), dim = 1)
+
+    assert torch.allclose(out_parallel, out_seq, atol = 1e-5)
+
 def test_multi_latent_attention():
     model = TransformerWrapper(
         num_tokens = 20000,

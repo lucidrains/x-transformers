@@ -49,6 +49,7 @@ class LayerIntermediates:
     mems:               Tensor | None = None
     memory_tokens:      Tensor | None = None
     logit_entropies:    Tensor | None = None
+    cache_length:       int = 0
 
 LinearNoBias = partial(nn.Linear, bias = False)
 
@@ -282,12 +283,18 @@ class AbsolutePositionalEmbedding(Module):
         self.l2norm_embed = l2norm_embed
         self.emb = nn.Embedding(max_seq_len, dim)
 
-    def forward(self, x, pos = None, seq_start_pos = None):
+    def forward(
+        self,
+        x,
+        pos = None,
+        seq_start_pos = None,
+        offset = 0
+    ):
         seq_len, device = x.shape[1], x.device
         assert seq_len <= self.max_seq_len, f'you are passing in a sequence length of {seq_len} but your absolute positional embedding has a max sequence length of {self.max_seq_len}'
 
         if not exists(pos):
-            pos = arange(seq_len, device = device)
+            pos = arange(seq_len, device = device) + offset
 
         if exists(seq_start_pos):
             pos = (pos - seq_start_pos[..., None]).clamp(min = 0)
@@ -307,11 +314,17 @@ class ScaledSinusoidalEmbedding(Module):
         inv_freq = theta ** -freq_seq
         self.register_buffer('inv_freq', inv_freq, persistent = False)
 
-    def forward(self, x, pos = None, seq_start_pos = None):
+    def forward(
+        self,
+        x,
+        pos = None,
+        seq_start_pos = None,
+        offset = 0
+    ):
         seq_len, device = x.shape[1], x.device
 
         if not exists(pos):
-            pos = arange(seq_len, device = device)
+            pos = arange(seq_len, device = device) + offset
 
         if exists(seq_start_pos):
             pos = pos - seq_start_pos[..., None]
@@ -676,7 +689,7 @@ class RotaryEmbedding(Module):
         return self.forward(t)
 
     @autocast('cuda', enabled = False)
-    def forward(self, t):
+    def forward(self, t, offset = 0):
         max_pos = t.max() + 1
 
         if t.ndim == 1:
@@ -2373,7 +2386,9 @@ class AttentionLayers(Module):
         mems = None,
         mem_masks = None,
         seq_start_pos: Tensor | None = None,
+        seq_pos_offset: int = 0,
         cache: LayerIntermediates | None = None,
+        input_not_include_cache = False,
         cache_age = 1,
         return_hiddens = False,
         rotary_pos_emb = None,
@@ -2447,7 +2462,7 @@ class AttentionLayers(Module):
                 mem_len = maybe_mem.shape[1] if exists(maybe_mem) else 0
 
                 if not exists(pos):
-                    pos = arange(x.shape[1] + mem_len, device = x.device) - mem_len
+                    pos = arange(x.shape[1] + mem_len + seq_pos_offset, device = x.device) - mem_len
 
                 rotary_pos_emb = self.rotary_pos_emb(pos)
 
@@ -2464,10 +2479,14 @@ class AttentionLayers(Module):
 
         # assume cached key / values
 
+        prev_cache_length = 0
+
         attn_cache = []
 
         if exists(cache):
             assert self.causal and not any([*map(exists, (mask, attn_mask))])
+
+            prev_cache_length = cache.cache_length
 
             if exists(context):
                 context = context[:, :0]
@@ -2481,6 +2500,8 @@ class AttentionLayers(Module):
                     deep_embeds_and_ids = (deep_embeds, token_ids)
 
             attn_cache = cache.attn_intermediates
+
+        next_cache_length = x.shape[1]
 
         iter_attn_cache = iter(attn_cache)
 
@@ -2668,6 +2689,7 @@ class AttentionLayers(Module):
             last_hidden = x,
             attn_intermediates = intermediates,
             layer_hiddens = layer_hiddens,
+            cache_length = next_cache_length + prev_cache_length
         )
 
         return x, intermediates
@@ -3002,6 +3024,7 @@ class TransformerWrapper(Module):
         attn_z_loss_weight = 1e-4,
         seq_start_pos = None,
         cache: LayerIntermediates | None = None,
+        input_not_include_cache = False,
         token_emb_kwargs = dict(),
         to_logits_kwargs = dict(),
         **kwargs,
@@ -3020,10 +3043,17 @@ class TransformerWrapper(Module):
         return_hiddens = return_mems | return_attn | return_intermediates | return_attn_z_loss | return_embeddings_and_intermediates
         return_embeddings = return_embeddings | (not exists(self.to_logits)) | return_embeddings_and_intermediates
 
+        # take care of position embedding offsets in the presence of cache and sequence is less than cache length (not full sequence)
+
+        seq_pos_offset = 0
+
+        if exists(cache) and input_not_include_cache:
+            seq_pos_offset = cache.cache_length
+
         # absolute positional embedding
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
+        pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos, offset = seq_pos_offset) if not external_pos_emb else pos
         x = self.token_emb(x, **token_emb_kwargs) + pos_emb
 
         # add additional embeddings
@@ -3122,6 +3152,15 @@ class TransformerWrapper(Module):
             mems_l, mems_r = mems[:self.shift_mem_down], mems[self.shift_mem_down:]
             mems = [*mems_r, *mems_l]
 
+        # attn layers kwargs
+
+        kwargs = dict(
+            **kwargs,
+            seq_pos_offset = seq_pos_offset,
+            seq_start_pos = seq_start_pos,
+            input_not_include_cache = input_not_include_cache
+        )
+
         # attention layers
 
         if not self.recycling:
@@ -3129,7 +3168,7 @@ class TransformerWrapper(Module):
 
             # regular
 
-            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embeds_and_ids = deep_embed_and_ids, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+            attended, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embeds_and_ids = deep_embed_and_ids, return_hiddens = True, **kwargs)
 
         else:
             # recycling
@@ -3146,7 +3185,7 @@ class TransformerWrapper(Module):
                 with context():
                     maybe_recycled = self.recycled_proj(attended.detach()) if not first_step else 0.
 
-                    attended, intermediates = self.attn_layers(x + maybe_recycled, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, seq_start_pos = seq_start_pos, **kwargs)
+                    attended, intermediates = self.attn_layers(x + maybe_recycled, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, return_hiddens = True, **kwargs)
 
         x = attended
 
