@@ -140,7 +140,8 @@ class AutoregressiveWrapper(Module):
         ignore_index = -100,
         pad_value = 0,
         mask_prob = 0.,
-        add_attn_z_loss = False
+        add_attn_z_loss = False,
+        next_embed_loss_weight = 0.1
     ):
         super().__init__()
         self.pad_value = pad_value
@@ -155,6 +156,10 @@ class AutoregressiveWrapper(Module):
 
         # whether to add router z-loss
         self.add_attn_z_loss = add_attn_z_loss
+
+        # whether to add a continuous loss
+        self.add_continuous_pred_head = net.add_continuous_pred_head
+        self.next_embed_loss_weight = next_embed_loss_weight
 
     @torch.no_grad()
     @eval_decorator
@@ -305,9 +310,9 @@ class AutoregressiveWrapper(Module):
         return out
 
     def forward(self, x, return_outputs = False, **kwargs):
-        seq, ignore_index, add_attn_z_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss
+        seq, ignore_index, add_attn_z_loss, add_next_embed_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss, self.add_continuous_pred_head
 
-        inp, target = x[:, :-1], x[:, 1:]
+        inp, target = x, x[:, 1:]
         inp = torch.where(inp == ignore_index, self.pad_value, inp)
 
         if self.mask_prob > 0.:
@@ -318,14 +323,28 @@ class AutoregressiveWrapper(Module):
             mask = ~torch.zeros_like(inp).scatter(1, indices, 1.).bool()
             kwargs.update(self_attn_kv_mask = mask)
 
-        logits, cache = self.net(
-            inp,
+        out, cache = self.net(
+            x,
             return_intermediates = True,
             return_attn_z_loss = add_attn_z_loss,
+            return_next_embed_pred = add_next_embed_loss,
             **kwargs
         )
 
+        # destruct differently if doing continuous pred
+
+        if add_next_embed_loss:
+            logits, (next_embed_pred, init_embeds) = out
+        else:
+            logits = out
+
+        logits = logits[:, :-1]
+
+        # loss function
+
         loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+
+        # cross entropy loss
 
         loss = loss_fn(
             rearrange(logits, 'b n c -> b c n'),
@@ -335,6 +354,16 @@ class AutoregressiveWrapper(Module):
 
         if add_attn_z_loss:
             loss = loss + cache.attn_z_loss
+
+        if add_next_embed_loss:
+            mask = inp[:, :-1] != ignore_index
+            embed_pred = next_embed_pred[:, :-1]
+            cont_targets = init_embeds[:, 1:].detach()
+
+            cont_loss = F.l1_loss(embed_pred, cont_targets, reduction = 'none')
+            cont_loss = cont_loss[mask].mean()
+
+            loss = loss + cont_loss * self.next_embed_loss_weight
 
         if not return_outputs:
             return loss

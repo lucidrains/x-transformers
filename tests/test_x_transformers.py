@@ -1011,3 +1011,28 @@ def test_continuous(
     start_emb = torch.randn(1, 777)
     generated = model.generate(start_emb, 17, cache_kv = cache_kv) # (17, 777)
     assert generated.shape == (17, 777)
+
+@pytest.mark.parametrize('add_continuous_pred_head', (False, True))
+def test_autoregressive_wrapper(
+    add_continuous_pred_head
+):
+
+    from x_transformers import AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        add_continuous_pred_head = add_continuous_pred_head,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    wrapper = AutoregressiveWrapper(model)
+    loss = wrapper(x)
+
+    loss.backward()

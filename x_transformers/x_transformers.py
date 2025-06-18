@@ -2855,6 +2855,7 @@ class TransformerWrapper(Module):
         sigsoftmax_logits = False,
         ff_deep_embed = False,
         to_logits: Module | None = None,
+        add_continuous_pred_head = False
     ):
         super().__init__()
 
@@ -2975,6 +2976,18 @@ class TransformerWrapper(Module):
         else:
             self.to_logits = LinearNoBias(dim, logits_dim) if not exists(to_logits) else to_logits
 
+        # add a head that predicts the embedding of the next step
+
+        self.add_continuous_pred_head = add_continuous_pred_head
+
+        if add_continuous_pred_head:
+
+            self.to_next_embed_pred = nn.Sequential(
+                LinearNoBias(dim, dim),
+                nn.SiLU(),
+                LinearNoBias(dim, dim)
+            )
+
         # memory tokens (like [cls]) from Memory Transformers paper
 
         num_memory_tokens = default(num_memory_tokens, 0)
@@ -3009,6 +3022,7 @@ class TransformerWrapper(Module):
         return_intermediates = False,
         return_embeddings_and_intermediates = False,
         return_logit_entropies = False,
+        return_next_embed_pred = False,
         mask = None,
         return_mems = False,
         return_attn = False,
@@ -3099,6 +3113,10 @@ class TransformerWrapper(Module):
         if emb_frac_gradient < 1:
             assert emb_frac_gradient > 0
             x = x * emb_frac_gradient + x.detach() * (1 - emb_frac_gradient)
+
+        # init embed
+
+        init_embed = x
 
         # embedding dropout
 
@@ -3260,6 +3278,14 @@ class TransformerWrapper(Module):
             out = x
         else:
             out = logits
+
+        # maybe next embed pred
+
+        if return_next_embed_pred:
+            assert self.add_continuous_pred_head
+            next_embed_out = self.to_next_embed_pred(x)
+
+            out = (out, (next_embed_out, init_embed))
 
         # logit entropies
 
