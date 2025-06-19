@@ -276,21 +276,22 @@ class Attend(Module):
 
         # torch 2.3 uses new backend and context manager
 
-        if torch_version >= version.parse('2.3'):
-            from torch.nn.attention import SDPBackend
+        if self.flash:
+            if torch_version >= version.parse('2.3'):
+                from torch.nn.attention import SDPBackend
 
-            str_to_backend = dict(
-                enable_flash = SDPBackend.FLASH_ATTENTION,
-                enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION,
-                enable_math = SDPBackend.MATH,
-                enable_cudnn = SDPBackend.CUDNN_ATTENTION
-            )
+                str_to_backend = dict(
+                    enable_flash = SDPBackend.FLASH_ATTENTION,
+                    enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION,
+                    enable_math = SDPBackend.MATH,
+                    enable_cudnn = SDPBackend.CUDNN_ATTENTION
+                )
 
-            sdpa_backends = [str_to_backend[enable_str] for enable_str, enable in sdp_kwargs.items() if enable]
+                sdpa_backends = [str_to_backend[enable_str] for enable_str, enable in sdp_kwargs.items() if enable]
 
-            self.sdp_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
-        else:
-            self.sdp_context_manager = partial(torch.backends.cuda.sdp_kernel, **sdp_kwargs)
+                self.sdp_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
+            else:
+                self.sdp_context_manager = partial(torch.backends.cuda.sdp_kernel, **sdp_kwargs)
 
     def flash_attn(
         self,
