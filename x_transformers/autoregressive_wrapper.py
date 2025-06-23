@@ -324,7 +324,7 @@ class AutoregressiveWrapper(Module):
             kwargs.update(self_attn_kv_mask = mask)
 
         out, cache = self.net(
-            x,
+            inp,
             return_intermediates = True,
             return_attn_z_loss = add_attn_z_loss,
             return_next_embed_pred = add_next_embed_loss,
