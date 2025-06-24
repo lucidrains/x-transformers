@@ -356,7 +356,7 @@ class AutoregressiveWrapper(Module):
             loss = loss + cache.attn_z_loss
 
         if add_next_embed_loss:
-            mask = inp[:, :-1] != ignore_index
+            mask = target != ignore_index
             embed_pred = next_embed_pred[:, :-1]
             cont_targets = init_embeds[:, 1:].detach()
 
