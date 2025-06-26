@@ -1926,7 +1926,7 @@ class Attention(Module):
 
         out = maybe(self.sublayer_dropout)(out)
 
-        if exists(mask):
+        if exists(mask) and not exists(cache):
             out = einx.where('b n, b n d, -> b n d', mask, out, 0.)
 
         if not return_intermediates:
@@ -2484,7 +2484,7 @@ class AttentionLayers(Module):
         attn_cache = []
 
         if exists(cache):
-            assert self.causal and not any([*map(exists, (mask, attn_mask))])
+            assert self.causal and not exists(attn_mask)
 
             prev_cache_length = cache.cache_length
 

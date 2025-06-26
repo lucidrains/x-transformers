@@ -1055,8 +1055,9 @@ def test_prepend_embed():
 
     x = torch.randint(0, 256, (2, 10))
     prepend_embeds = torch.randn(2, 3, 512)
+    prepend_mask = torch.randint(0, 2, (2, 3)).bool()
 
-    loss = model(x, prepend_embeds = prepend_embeds)
+    loss = model(x, prepend_mask = prepend_mask, prepend_embeds = prepend_embeds)
     loss.backward()
 
     sample = model.generate(
@@ -1064,6 +1065,7 @@ def test_prepend_embed():
         seq_len = 100,
         temperature = 0.,
         prepend_embeds = prepend_embeds,
+        prepend_mask = prepend_mask,
         cache_kv = True,
     )
 
@@ -1072,6 +1074,7 @@ def test_prepend_embed():
         seq_len = 100,
         temperature = 0.,
         prepend_embeds = prepend_embeds,
+        prepend_mask = prepend_mask,
         cache_kv = False,
     )
 
