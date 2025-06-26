@@ -1036,3 +1036,43 @@ def test_autoregressive_wrapper(
     loss = wrapper(x)
 
     loss.backward()
+
+def test_prepend_embed():
+
+    from x_transformers import AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8
+        )
+    )
+
+    model = AutoregressiveWrapper(model)
+
+    x = torch.randint(0, 256, (2, 10))
+    prepend_embeds = torch.randn(2, 3, 512)
+
+    loss = model(x, prepend_embeds = prepend_embeds)
+    loss.backward()
+
+    sample = model.generate(
+        prompts = x[:, :1],
+        seq_len = 100,
+        temperature = 0.,
+        prepend_embeds = prepend_embeds,
+        cache_kv = True,
+    )
+
+    sample_no_cache = model.generate(
+        prompts = x[:, :1],
+        seq_len = 100,
+        temperature = 0.,
+        prepend_embeds = prepend_embeds,
+        cache_kv = False,
+    )
+
+    assert torch.allclose(sample, sample_no_cache)

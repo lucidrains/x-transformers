@@ -309,7 +309,13 @@ class AutoregressiveWrapper(Module):
 
         return out
 
-    def forward(self, x, return_outputs = False, **kwargs):
+    def forward(
+        self,
+        x,
+        return_outputs = False,
+        prepend_embeds = None,
+        **kwargs
+    ):
         seq, ignore_index, add_attn_z_loss, add_next_embed_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss, self.add_continuous_pred_head
 
         inp, target = x, x[:, 1:]
@@ -328,6 +334,7 @@ class AutoregressiveWrapper(Module):
             return_intermediates = True,
             return_attn_z_loss = add_attn_z_loss,
             return_next_embed_pred = add_next_embed_loss,
+            prepend_embeds = prepend_embeds,
             **kwargs
         )
 
@@ -337,6 +344,14 @@ class AutoregressiveWrapper(Module):
             logits, (next_embed_pred, init_embeds) = out
         else:
             logits = out
+
+        # if there are prepended embeds, excise it out
+
+        if exists(prepend_embeds):
+            prepend_len = prepend_embeds.shape[1]
+            logits = logits[:, prepend_len:]
+
+        # take all tokens but the last
 
         logits = logits[:, :-1]
 
