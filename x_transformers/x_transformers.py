@@ -3263,7 +3263,7 @@ class TransformerWrapper(Module):
 
         # attention pool
 
-        if exists(self.attn_pool):
+        if exists(self.attn_pool) and return_intermediates:
             queries = repeat(self.attn_pool_queries, 'n d -> b n d', b = x.shape[0])
 
             attn_pooled_tokens = self.attn_pool(queries, context = x, context_mask = mask)
