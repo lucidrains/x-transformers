@@ -1079,3 +1079,23 @@ def test_prepend_embed():
     )
 
     assert torch.allclose(sample, sample_no_cache)
+
+def add_attn_pool():
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_pool = True,
+        num_attn_pool_queries =  3,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8
+        ),
+    )
+
+    x = torch.randint(0, 256, (1, 10))
+
+    logits, intermediates = model(x, return_intermediates = True)
+
+    assert intermediates.attn_pooled_tokens.shape[1] == 3

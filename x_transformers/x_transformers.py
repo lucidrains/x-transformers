@@ -47,6 +47,8 @@ class LayerIntermediates:
     layer_hiddens:      list[Tensor] | None = None
     attn_z_loss:        Tensor | None = None
     mems:               Tensor | None = None
+    last_layer_hiddens: Tensor | None = None
+    attn_pooled_tokens: Tensor | None = None
     memory_tokens:      Tensor | None = None
     logit_entropies:    Tensor | None = None
     cache_length:       int = 0
@@ -2848,6 +2850,9 @@ class TransformerWrapper(Module):
         average_pool_embed = False,
         use_cls_token = False,
         num_cls_tokens = 1,
+        attn_pool = False,
+        num_attn_pool_queries = 1,
+        dim_attn_pool_query = None,
         squeeze_out_last_dim = False,
         token_emb: TokenEmbedding | None = None,
         mixture_of_softmax = False,
@@ -2927,6 +2932,10 @@ class TransformerWrapper(Module):
 
         self.train_max_recycle_steps = train_max_recycle_steps
 
+        # either cls token or attn pool, but not both
+
+        assert not (use_cls_token and attn_pool)
+
         # classic cls token from the bert days
 
         self.cls_token = None
@@ -2934,6 +2943,16 @@ class TransformerWrapper(Module):
         if use_cls_token:
             self.cls_token = nn.Parameter(torch.zeros(num_cls_tokens, dim))
             nn.init.normal_(self.cls_token, std = 0.02)
+
+        # attn pool
+
+        self.attn_pool = None
+
+        if attn_pool:
+            self.attn_pool = Attention(dim = default(dim_attn_pool_query, dim), dim_context = dim)
+
+            self.attn_pool_queries = nn.Parameter(torch.zeros(num_attn_pool_queries, dim))
+            nn.init.normal_(self.attn_pool_queries, std = 0.02)
 
         # whether to average pool the embed (`global average pool`)
 
@@ -3222,14 +3241,37 @@ class TransformerWrapper(Module):
 
             x = x[:, :mem_seq]
 
+        # store last layer hiddens, for access in case of cls token or attention pooling
+
+        intermediates.last_layer_hiddens = x
+
         # global average pool
 
         if self.average_pool_embed:
             x = masked_mean(x, mask = orig_mask, dim = 1)
 
+
+        # cls token(s)
+
         if exists(self.cls_token):
-            x, _ = unpack(x, cls_packed_shape, 'b * d')
-            x = x.squeeze(1)  # Remove sequence dimension if num_cls_tokens=1 to keep previous behavior
+            x, last_layer_hiddens = unpack(x, cls_packed_shape, 'b * d')
+
+            intermediates.last_layer_hiddens = last_layer_hiddens
+
+            if x.shape[1] == 1:
+                x = rearrange(x, 'b 1 d -> b d')  # Remove sequence dimension if num_cls_tokens=1 to keep previous behavior
+
+        # attention pool
+
+        if exists(self.attn_pool):
+            queries = repeat(self.attn_pool_queries, 'n d -> b n d', b = x.shape[0])
+
+            attn_pooled_tokens = self.attn_pool(queries, context = x, context_mask = mask)
+
+            if attn_pooled_tokens.shape[1] == 1:
+                attn_pooled_tokens = rearrange(attn_pooled_tokens, 'b 1 d -> b d')
+
+            intermediates.attn_pooled_tokens = attn_pooled_tokens
 
         # handle expansion to mixture if needed (for mixture of softmax)
 
