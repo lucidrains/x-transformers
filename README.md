@@ -2447,4 +2447,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{bloem2025universalpretrainingiteratedrandom,
+    title   = {Universal pre-training by iterated random computation}, 
+    author  = {Peter Bloem},
+    year    = {2025},
+    eprint  = {2506.20057},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2506.20057}, 
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
