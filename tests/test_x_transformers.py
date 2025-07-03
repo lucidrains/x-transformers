@@ -1100,7 +1100,10 @@ def add_attn_pool():
 
     assert intermediates.attn_pooled_tokens.shape[1] == 3
 
-def test_up():
+@pytest.mark.parametrize('keep_buffer_on_cpu', (False, True))
+def test_up(
+    keep_buffer_on_cpu
+):
     from x_transformers.up_wrapper import UniversalPretrainWrapper
 
     model = TransformerWrapper(
@@ -1115,7 +1118,11 @@ def test_up():
         ),
     )
 
-    up_wrapper = UniversalPretrainWrapper(model, seq_len = 16)
+    up_wrapper = UniversalPretrainWrapper(
+        model,
+        seq_len = 16,
+        keep_buffer_on_cpu = keep_buffer_on_cpu
+    )
 
     loss = up_wrapper()
     loss.backward()

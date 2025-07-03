@@ -146,7 +146,8 @@ class UniversalPretrainWrapper(Module):
         batch_size = 32,
         seq_len = 512,
         seed_length = 8,
-        reset_turing_machine_every = 0
+        reset_turing_machine_every = 0,
+        keep_buffer_on_cpu = False
     ):
         super().__init__()
 
@@ -185,12 +186,16 @@ class UniversalPretrainWrapper(Module):
 
         init_data_buffer = self.random_sequences_fn(buffer_size // 2, buffer_size // 2)
 
-        self.register_buffer('synth_data_buffer', init_data_buffer)
+        if keep_buffer_on_cpu:
+            self.synth_data_buffer = init_data_buffer
+        else:
+            self.register_buffer('synth_data_buffer', init_data_buffer)
+
         self.register_buffer('step', tensor(0))
 
     @property
     def device(self):
-        return self.synth_data_buffer.device
+        return self.step.device
 
     def get_rand_sequences_from_buffer(self, size = None):
         size = default(size, self.batch_size)
@@ -217,8 +222,8 @@ class UniversalPretrainWrapper(Module):
 
         generated = self.data_generator.generate(
             self.seq_len,
-            condition = conditions,
-            seed = seeds
+            condition = conditions.to(self.device),
+            seed = seeds.to(self.device)
         )
 
         self.step.add_(1)
@@ -244,6 +249,6 @@ class UniversalPretrainWrapper(Module):
 
         # sample yet again according to pseudocode
 
-        data = self.get_rand_sequences_from_buffer()
+        data = self.get_rand_sequences_from_buffer().to(self.device)
 
         return self.ar_wrapped(data)
