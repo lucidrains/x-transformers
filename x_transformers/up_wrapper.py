@@ -6,7 +6,7 @@ from functools import partial
 from random import randrange, uniform
 
 import torch
-from torch import nn, cat, randperm
+from torch import nn, cat, tensor, randperm
 from torch.nn import LSTM, Module
 
 from x_transformers.x_transformers import (
@@ -76,6 +76,13 @@ class SyntheticDataGenerator(Module):
 
         self.apply(self.init_)
 
+    def reset_(self):
+        for m in self.modules():
+            if hasattr(m, 'reset_parameters'):
+                m.reset_parameters()
+
+        self.apply(self.init_)
+
     @torch.no_grad()
     def init_(self, m):
         if isinstance(m, nn.Linear):
@@ -138,7 +145,8 @@ class UniversalPretrainWrapper(Module):
         num_reset = 20,
         batch_size = 32,
         seq_len = 512,
-        seed_length = 8
+        seed_length = 8,
+        reset_turing_machine_every = 0
     ):
         super().__init__()
 
@@ -156,6 +164,8 @@ class UniversalPretrainWrapper(Module):
                 dim = dim,
                 max_seq_len = seq_len
             )
+
+        self.reset_turing_machine_every = reset_turing_machine_every
 
         self.seq_len = seq_len
         self.data_generator = data_generator
@@ -176,6 +186,7 @@ class UniversalPretrainWrapper(Module):
         init_data_buffer = self.random_sequences_fn(buffer_size // 2, buffer_size // 2)
 
         self.register_buffer('synth_data_buffer', init_data_buffer)
+        self.register_buffer('step', tensor(0))
 
     @property
     def device(self):
@@ -209,6 +220,13 @@ class UniversalPretrainWrapper(Module):
             condition = conditions,
             seed = seeds
         )
+
+        self.step.add_(1)
+
+        # maybe reset turing machine
+
+        if self.reset_turing_machine_every > 0 and divisible_by(self.step.item(), self.reset_turing_machine_every):
+            self.data_generator.reset_()
 
         # reset
 
