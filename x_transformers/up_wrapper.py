@@ -50,7 +50,7 @@ def random_sequences(
 
     # shuffle with randperm
 
-    rand_indices = randperm(all_seq.shape[0])
+    rand_indices = randperm(all_seq.shape[0], device = all_seq.device)
     return all_seq[rand_indices]
 
 # synthetic data generator
