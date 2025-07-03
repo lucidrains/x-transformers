@@ -37,6 +37,7 @@ class SyntheticDataGenerator(Module):
         self.to_logits = nn.Linear(dim, num_tokens, bias = False)
 
     @torch.inference_mode()
+    @torch.compile
     def generate(
         self,
         length,
@@ -49,16 +50,20 @@ class SyntheticDataGenerator(Module):
         seq_len = self.max_seq_len
 
         seq = torch.cat(prefix, dim = -1)
+
+        net_input = seq
         hiddens = None
 
         for _ in range(length):
-            inp = seq[:, -seq_len:]
-            logits, hiddens = self.forward(inp, hiddens)
+
+            logits, hiddens = self.forward(net_input, hiddens)
 
             last_logit = logits[:, -1]
             prob = (last_logit / temperature).softmax(dim = -1)
 
             sampled = torch.multinomial(prob, 1)
+            net_input = sampled
+
             seq = torch.cat((seq, sampled), dim = -1)
 
         return seq[:, -seq_len:]
