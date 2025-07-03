@@ -153,7 +153,8 @@ class UniversalPretrainWrapper(Module):
         if not exists(data_generator):
             data_generator = SyntheticDataGenerator(
                 num_tokens = num_tokens,
-                dim = dim
+                dim = dim,
+                max_seq_len = seq_len
             )
 
         self.seq_len = seq_len
@@ -203,7 +204,7 @@ class UniversalPretrainWrapper(Module):
 
         # seed, condition to turing machine
 
-        synthetic_data = self.data_generator.generate(
+        generated = self.data_generator.generate(
             self.seq_len,
             condition = conditions,
             seed = seeds
@@ -217,6 +218,12 @@ class UniversalPretrainWrapper(Module):
             with torch.no_grad():
                 reset_sequences = self.random_sequences_fn(self.num_reset // 2, self.num_reset // 2, device = self.device)
                 buffer_to_reset.copy_(reset_sequences)
+
+        # place "enriched" random generated sequences back
+
+        with torch.no_grad():
+            print(conditions.shape, generated.shape)
+            conditions.copy_(generated)
 
         # sample yet again according to pseudocode
 
