@@ -1,7 +1,12 @@
+# https://arxiv.org/abs/2506.20057
+# Peter Bloem
+
 from __future__ import annotations
+from functools import partial
+from random import randrange, uniform
 
 import torch
-from torch import nn
+from torch import nn, cat, randperm
 from torch.nn import LSTM, Module
 
 from x_transformers.x_transformers import (
@@ -16,6 +21,37 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+def divisible_by(num, den):
+    return (num % den) == 0
+
+# random sequences, mixture of random and constant (unsure why constant is needed)
+
+def random_sequences(
+    num_tokens,
+    seq_len,
+    num_samples_random,
+    num_samples_constant,
+    shuffle = True,
+    device = None
+):
+    assert num_samples_random > 0 or num_samples_constant > 0
+
+    rand_seq = torch.randint(0, num_tokens, (num_samples_random, seq_len))
+    const_seq = torch.full((num_samples_constant, seq_len), randrange(num_tokens))
+
+    all_seq = cat((rand_seq, const_seq))
+
+    if exists(device):
+        all_seq = all_seq.to(device)
+
+    if not shuffle:
+        return all_seq
+
+    # shuffle with randperm
+
+    rand_indices = randperm(all_seq.shape[0])
+    return all_seq[rand_indices]
 
 # synthetic data generator
 
@@ -37,6 +73,13 @@ class SyntheticDataGenerator(Module):
         self.lstm = LSTM(dim, hidden_size, batch_first = True)
 
         self.to_logits = nn.Linear(dim, num_tokens, bias = False)
+
+        self.apply(self.init_)
+
+    @torch.no_grad()
+    def init_(self, m):
+        if isinstance(m, nn.Linear):
+            m.weight *= uniform(0., 1.1) # he scales the lstm weights from 0 to 1.1
 
     @torch.inference_mode()
     @torch.compile
@@ -92,6 +135,7 @@ class UniversalPretrainWrapper(Module):
         model: TransformerWrapper,
         data_generator: SyntheticDataGenerator | None = None,
         buffer_size = None,
+        num_reset = 20,
         batch_size = 32,
         seq_len = 512,
         seed_length = 8
@@ -103,10 +147,13 @@ class UniversalPretrainWrapper(Module):
 
         assert model.attn_layers.causal
 
+        num_tokens = model.num_tokens
+        dim = model.attn_layers.dim
+
         if not exists(data_generator):
             data_generator = SyntheticDataGenerator(
-                num_tokens = model.num_tokens,
-                dim = model.attn_layers.dim
+                num_tokens = num_tokens,
+                dim = dim
             )
 
         self.seq_len = seq_len
@@ -114,24 +161,65 @@ class UniversalPretrainWrapper(Module):
 
         self.seed_length = seed_length
         self.batch_size = batch_size
+
         buffer_size = default(buffer_size, batch_size * 20)
         assert buffer_size > batch_size, f'data buffer size must be greater than batch size'
 
-        init_data_buffer = torch.randint(0, model.num_tokens, (buffer_size, seq_len))
+        assert divisible_by(num_reset, 2)
+        self.num_reset = num_reset
+
+        self.buffer_size = buffer_size
+
+        self.random_sequences_fn = partial(random_sequences, num_tokens, seq_len)
+
+        init_data_buffer = self.random_sequences_fn(buffer_size // 2, buffer_size // 2)
+
         self.register_buffer('synth_data_buffer', init_data_buffer)
 
     @property
     def device(self):
         return self.synth_data_buffer.device
 
-    def forward(
-        self
-    ):
+    def get_rand_sequences_from_buffer(self, size = None):
+        size = default(size, self.batch_size)
+        rand_indices = randperm(self.buffer_size, device = self.device)[:size]
+        return self.synth_data_buffer[rand_indices]
 
-        randperm = torch.randperm(self.batch_size, device = self.device)
+    def forward(self):
+        # following algorithm 1.
 
-        seeds = self.synth_data_buffer[randperm][:self.seed_length]
+        conditions = self.get_rand_sequences_from_buffer()
 
-        synthetic_data = self.data_generator.generate(self.seq_len, seed = seeds)
+        # get seeds, which appears to be random sequences with random crops of seed length
 
-        return self.ar_wrapped(synthetic_data)
+        seeds = self.get_rand_sequences_from_buffer()
+
+        seq_arange = torch.arange(self.seed_length)
+        rand_offset = torch.randint(0, self.seq_len - self.seed_length, (self.batch_size,))
+        seq_start_pos = rand_offset[:, None] + seq_arange
+
+        batch_arange = torch.arange(self.batch_size, device = self.device)[:, None]
+        seeds = seeds[batch_arange, seq_start_pos]
+
+        # seed, condition to turing machine
+
+        synthetic_data = self.data_generator.generate(
+            self.seq_len,
+            condition = conditions,
+            seed = seeds
+        )
+
+        # reset
+
+        if self.num_reset > 0:
+            buffer_to_reset = self.get_rand_sequences_from_buffer(self.num_reset)
+
+            with torch.no_grad():
+                reset_sequences = self.random_sequences_fn(self.num_reset // 2, self.num_reset // 2, device = self.device)
+                buffer_to_reset.copy_(reset_sequences)
+
+        # sample yet again according to pseudocode
+
+        data = self.get_rand_sequences_from_buffer()
+
+        return self.ar_wrapped(data)
