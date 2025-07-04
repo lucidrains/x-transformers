@@ -7,7 +7,7 @@ from random import randrange, uniform
 
 import torch
 from torch import nn, cat, tensor, randperm
-from torch.nn import LSTM, Module
+from torch.nn import LSTM, GRU, Module
 
 from x_transformers.x_transformers import (
     TransformerWrapper,
@@ -61,7 +61,9 @@ class SyntheticDataGenerator(Module):
         dim,
         num_tokens,
         max_seq_len = 512,
-        hidden_size = None
+        hidden_size = None,
+        use_gru = False,
+        network_klass = None
     ):
         super().__init__()
 
@@ -70,7 +72,11 @@ class SyntheticDataGenerator(Module):
         self.embed = nn.Embedding(num_tokens, dim)
 
         hidden_size = default(hidden_size, dim)
-        self.lstm = LSTM(dim, hidden_size, batch_first = True)
+
+        default_network_klass = partial(LSTM if not use_gru else GRU, batch_first = True)
+        network_klass = default(network_klass, default_network_klass)
+
+        self.net = network_klass(dim, hidden_size)
 
         self.to_logits = nn.Linear(dim, num_tokens, bias = False)
 
@@ -128,7 +134,7 @@ class SyntheticDataGenerator(Module):
 
         tokens = self.embed(input)
 
-        embed, hidden = self.lstm(tokens, hiddens)
+        embed, hidden = self.net(tokens, hiddens)
 
         logits = self.to_logits(embed)
 
