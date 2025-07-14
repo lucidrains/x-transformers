@@ -8,7 +8,7 @@ from torch import nn, Tensor
 from torch.nn import Module
 import torch.nn.functional as F
 
-from einops import rearrange, pack, unpack
+from einops import rearrange, repeat, pack, unpack
 
 def exists(val):
     return val is not None
@@ -33,6 +33,21 @@ def eval_decorator(fn):
         self.train(was_training)
         return out
     return inner
+
+# gumbel topk
+
+def log(t, eps = 1e-20):
+    return t.clamp(min = eps).log()
+
+def gumbel_noise(t):
+    return -log(-log(torch.rand_like(t)))
+
+# function for modifying all the cached key / values
+
+def modify_cached_kv(cache, fn):
+    for inter in cache.attn_intermediates:
+        if inter.layer_type == 'a':
+            inter.cached_kv = [fn(t) for t in inter.cached_kv]
 
 # for variable lengthed prefixes
 
@@ -160,6 +175,167 @@ class AutoregressiveWrapper(Module):
         # whether to add a continuous loss
         self.add_continuous_pred_head = net.add_continuous_pred_head
         self.next_embed_loss_weight = next_embed_loss_weight
+
+    @torch.no_grad()
+    @eval_decorator
+    def beam_search(
+        self,
+        prompts,
+        seq_len,
+        beams = 4,
+        eos_token = None,
+        temperature = 1.,
+        stochastic = False,
+        prompt_lens: Tensor | None = None,
+        filter_logits_fn: str | Callable = top_k,
+        restrict_to_max_seq_len = True,
+        filter_kwargs: dict = dict(),
+        cache_kv = True,
+        **kwargs
+    ):
+        assert not exists(eos_token), 'eos token not supported yet'
+
+        max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
+
+        prompts, packed_shape = pack([prompts], '* n')
+
+        batch, orig_seq_len = prompts.shape
+
+        # handle filter logits fn given as string
+
+        if isinstance(filter_logits_fn, str):
+            assert filter_logits_fn in FILTER_LOGITS_FN, f"only {join(FILTER_LOGITS_FN.keys())} are available"
+
+            filter_logits_fn = FILTER_LOGITS_FN[filter_logits_fn]
+
+        # handle variable lengthed prompts (prefixes)
+
+        seq_start_pos = None
+        if exists(prompt_lens):
+            prompts = align_right(prompts, prompt_lens, pad_id = self.pad_value)
+            seq_start_pos = orig_seq_len - prompt_lens
+
+        # output from which sampled tokens appended to
+
+        out = prompts
+
+        # kv caches
+
+        cache = None
+
+        should_cache = cache_kv and self.net.can_cache_kv
+
+        # scores for the beams
+
+        scores = torch.zeros((batch,), device = device)
+
+        batch_arange = torch.arange(batch, device = device)
+
+        # sampling up to seq_len
+
+        for i in range(seq_len):
+            is_first = i == 0
+
+            if restrict_to_max_seq_len:
+                max_len_exceeded = out.shape[-1] > max_seq_len
+
+                assert not (cache_kv and max_len_exceeded and not self.net.can_cache_kv_outside_max_seq_len), 'the network cannot use cached key values when decoding outside the max sequence length. most likely because you are using absolute positional embedding. you can switch to rotary embeddings to resolve this issue'
+
+                x = out[:, -max_seq_len:]
+
+                if exists(cache):
+                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :])
+
+            logits, new_cache = self.net(
+                x,
+                return_intermediates = True,
+                cache = cache,
+                seq_start_pos = seq_start_pos,
+                **kwargs
+            )
+
+            if should_cache:
+                cache = new_cache
+
+            logits = logits[:, -1]
+
+            # to add to the scores
+
+            log_probs = logits.log_softmax(dim = -1)
+
+            # maybe filter by top_k, top_p (nucleus) for stochastic beam search
+
+            if stochastic and not greedy:
+                logits = filter_logits_fn(logits, **filter_kwargs)
+                logits = (logits / temperature) + gumbel_noise(logits)
+
+            # (gumbel) topk
+
+            samples = logits.topk(beams, dim = -1).indices
+
+            # get the scores for keeping track of beams
+
+            next_scores = log_probs.gather(-1, samples)
+
+            # expand beam times
+
+            scores = repeat(scores, 'b -> b beams', beams = beams)
+            scores = scores + next_scores
+
+            out = repeat(out, 'b ... -> (b beams) ...', beams = beams)
+            samples = rearrange(samples, 'b beams -> (b beams) 1')
+
+            if should_cache:
+                modify_cached_kv(cache, lambda t: repeat(t, 'b ... -> (b beams) ...', beams = beams))
+
+            # concat sample
+
+            out = torch.cat((out, samples), dim=-1)
+
+            # sort by score and excise
+            # excise out the beams
+
+            scores = rearrange(scores, '(b prev_beams) next_beams -> b (prev_beams next_beams)', b = batch)
+            curr_num_beams = scores.shape[-1]
+
+            if curr_num_beams > beams:
+                scores, sort_indices = scores.sort(dim = -1, descending = True)
+
+                scores = scores[:, :beams]
+                top_beams_indices = sort_indices[:, :beams]
+                top_beams_indices = beams * batch_arange[:, None] + top_beams_indices
+
+                flattened_beam_indices = rearrange(top_beams_indices, 'b beams -> (b beams)')
+
+                out = out[flattened_beam_indices]
+
+                modify_cached_kv(cache, lambda t: t[flattened_beam_indices])
+
+            scores = rearrange(scores, 'b beams -> (b beams)')
+
+            if not exists(eos_token):
+                continue
+
+            is_eos_tokens = (out == eos_token)
+
+            if is_eos_tokens.any(dim = -1).all():
+                break
+
+        if exists(eos_token):
+            # mask out everything after the eos tokens
+            shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
+            mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
+            out = out.masked_fill(mask, self.pad_value)
+
+        # select out the top beam
+
+        out = rearrange(out, '(b beams) seq -> b beams seq', b = batch)
+
+        out = out[:, 0, orig_seq_len:]
+
+        out, = unpack(out, packed_shape, '* n')
+
+        return out
 
     @torch.no_grad()
     @eval_decorator

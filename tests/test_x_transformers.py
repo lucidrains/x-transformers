@@ -1126,3 +1126,25 @@ def test_up(
 
     loss = up_wrapper()
     loss.backward()
+
+@pytest.mark.parametrize('stochastic', (False, True))
+def test_beam_search(stochastic):
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8
+        ),
+    )
+
+    x = torch.randint(0, 256, (2, 10))
+
+    wrapper = AutoregressiveWrapper(model)
+
+    generated = wrapper.beam_search(x[:, :1], 10, beams = 4, stochastic = stochastic)
+
+    assert generated.shape == (2, 10)
