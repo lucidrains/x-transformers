@@ -183,6 +183,7 @@ class AutoregressiveWrapper(Module):
         prompts,
         seq_len,
         beams = 4,
+        return_beams_and_scores = False,
         eos_token = None,
         temperature = 1.,
         stochastic = False,
@@ -285,7 +286,7 @@ class AutoregressiveWrapper(Module):
             out = repeat(out, 'b ... -> (b beams) ...', beams = beams)
             samples = rearrange(samples, 'b beams -> (b beams) 1')
 
-            if should_cache:
+            if should_cache and is_first:
                 modify_cached_kv(cache, lambda t: repeat(t, 'b ... -> (b beams) ...', beams = beams))
 
             # concat sample
@@ -303,13 +304,12 @@ class AutoregressiveWrapper(Module):
 
                 scores = scores[:, :beams]
                 top_beams_indices = sort_indices[:, :beams]
-                top_beams_indices = beams * batch_arange[:, None] + top_beams_indices
+
+                top_beams_indices = curr_num_beams * batch_arange[:, None] + top_beams_indices
 
                 flattened_beam_indices = rearrange(top_beams_indices, 'b beams -> (b beams)')
 
                 out = out[flattened_beam_indices]
-
-                modify_cached_kv(cache, lambda t: t[flattened_beam_indices])
 
             scores = rearrange(scores, 'b beams -> (b beams)')
 
@@ -331,11 +331,17 @@ class AutoregressiveWrapper(Module):
 
         out = rearrange(out, '(b beams) seq -> b beams seq', b = batch)
 
-        out = out[:, 0, orig_seq_len:]
+        out = out[..., orig_seq_len:]
 
-        out, = unpack(out, packed_shape, '* n')
+        out, = unpack(out, packed_shape, '* beams n') # prompt may have no batch dimension
 
-        return out
+        if not return_beams_and_scores:
+            return out[..., 0, :]
+
+        scores = rearrange(scores, '(b beams) -> beams b', b = batch)
+        out = rearrange(out, 'b beams n -> beams b n')
+
+        return out, scores
 
     @torch.no_grad()
     @eval_decorator

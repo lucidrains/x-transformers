@@ -1148,3 +1148,8 @@ def test_beam_search(stochastic):
     generated = wrapper.beam_search(x[:, :1], 10, beams = 4, stochastic = stochastic)
 
     assert generated.shape == (2, 10)
+
+    beams, scores = wrapper.beam_search(x[:, :1], 10, beams = 4, return_beams_and_scores = True, stochastic = stochastic)
+
+    assert beams.shape == (4, 2, 10)
+    assert scores.shape == (4, 2)
