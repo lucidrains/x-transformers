@@ -188,7 +188,7 @@ class AutoregressiveWrapper(Module):
         temperature = 1.,
         stochastic = False,
         prompt_lens: Tensor | None = None,
-        filter_logits_fn: str | Callable = top_k,
+        filter_logits_fn: str | Callable = identity,
         restrict_to_max_seq_len = True,
         filter_kwargs: dict = dict(),
         cache_kv = True,
