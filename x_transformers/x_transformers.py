@@ -1304,6 +1304,7 @@ class Attention(Module):
         qk_norm_groups = 1,
         qk_norm_scale = 10,
         qk_norm_dim_scale = False,
+        value_rmsnorm = False,      # used in alphagenome and bytedance's GR3 for further stability
         l2_distance = False,
         sigmoid = False,
         selective = False,
@@ -1457,6 +1458,10 @@ class Attention(Module):
 
         assert (not qk_norm) or divisible_by(dim_head, qk_norm_groups), 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
+
+        # value rms norm
+
+        self.value_rmsnorm = MultiheadRMSNorm(dim_head, heads = heads) if value_rmsnorm else None
 
         # contextual positional encoding
         # https://arxiv.org/html/2405.18719v2
@@ -1696,6 +1701,10 @@ class Attention(Module):
 
             q = q * self.qk_norm_q_scale
             k = k * self.qk_norm_k_scale
+
+        # maybe value rmsnorm
+
+        v = maybe(self.value_rmsnorm)(v)
 
         # take care of caching
 
