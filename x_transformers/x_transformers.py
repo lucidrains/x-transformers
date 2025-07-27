@@ -2787,6 +2787,7 @@ class AttentionPool(Module):
             self.pooler = Attention(dim = dim, dim_context = dim_context, heads = heads, dim_head = dim_head, **attn_kwargs)
 
         self.add_residual = add_residual
+        self.squeeze_output = squeeze_output
 
     def forward(self, context, mask = None):
         batch = context.shape[0]
@@ -2797,6 +2798,9 @@ class AttentionPool(Module):
 
         if self.add_residual:
             pooled = pooled + queries
+
+        if self.squeeze_output:
+            pooled = rearrange(pooled, 'b 1 d -> b d')
 
         return pooled
 
