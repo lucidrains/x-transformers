@@ -2038,6 +2038,9 @@ class AttentionLayers(Module):
         self.causal = causal
         self.layers = ModuleList([])
 
+        self.attn_heads = heads
+        self.attn_dim_head = dim_head
+
         # routing related
         # 1. greater than one residual stream, proposed in Hyper-Connections paper https://arxiv.org/abs/2409.19606
         # 2. integrating more than one past layer, from LIMe paper https://arxiv.org/abs/2502.09245
@@ -2758,6 +2761,8 @@ class AttentionPool(Module):
         dim_context = None,
         add_residual = False,
         depth = 1,
+        heads = 8,
+        dim_head = 64,
         squeeze_output = None,
         attn_kwargs: dict = dict()
     ):
@@ -2771,9 +2776,11 @@ class AttentionPool(Module):
 
         if depth > 1:
             assert not add_residual, 'residual already in effect when doing a full cross attention based transformer for pooling'
-            self.pooler = CrossAttender(dim = dim, cross_attn_dim_context = dim_context, depth = depth, **attn_kwargs)
+            attn_kwargs = {f'attn_{k}': v for k, v in attn_kwargs.items()}
+
+            self.pooler = CrossAttender(dim = dim, cross_attn_dim_context = dim_context, depth = depth, heads = heads, attn_dim_head = dim_head, )
         else:
-            self.pooler = Attention(dim = dim, dim_context = dim_context, **attn_kwargs)
+            self.pooler = Attention(dim = dim, dim_context = dim_context, heads = heads, dim_head = dim_head, **attn_kwargs)
 
         self.add_residual = add_residual
 
@@ -2999,7 +3006,7 @@ class TransformerWrapper(Module):
         self.attn_pool = None
 
         if attn_pool:
-            self.attn_pool = AttentionPool(dim = default(dim_pooled_tokens, dim), dim_context = dim, num_pooled_tokens = num_pooled_tokens, depth = attn_pool_depth)
+            self.attn_pool = AttentionPool(dim = default(dim_pooled_tokens, dim), dim_context = dim, num_pooled_tokens = num_pooled_tokens, depth = attn_pool_depth, heads = self.attn_layers.attn_heads, dim_head = self.attn_layers.attn_dim_head)
 
         # whether to average pool the embed (`global average pool`)
 
