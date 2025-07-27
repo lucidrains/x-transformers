@@ -2763,6 +2763,7 @@ class AttentionPool(Module):
         depth = 1,
         heads = 8,
         dim_head = 64,
+        use_transformer_blocks = None,
         squeeze_output = None,
         attn_kwargs: dict = dict()
     ):
@@ -2772,9 +2773,12 @@ class AttentionPool(Module):
         squeeze_output = default(squeeze_output, False)
         assert not (squeeze_output and num_pooled_tokens > 1)
 
+        use_transformer_blocks = default(use_transformer_blocks, depth > 1)
+        assert use_transformer_blocks or depth == 1
+
         self.queries = nn.Parameter(torch.randn(num_pooled_tokens, dim) * 1e-2)
 
-        if depth > 1:
+        if use_transformer_blocks:
             assert not add_residual, 'residual already in effect when doing a full cross attention based transformer for pooling'
             attn_kwargs = {f'attn_{k}': v for k, v in attn_kwargs.items()}
 
