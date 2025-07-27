@@ -51,6 +51,7 @@ class LayerIntermediates:
     attn_pooled_tokens: Tensor | None = None
     memory_tokens:      Tensor | None = None
     logit_entropies:    Tensor | None = None
+    logits:             Tensor | None = None
     cache_length:       int = 0
 
 LinearNoBias = partial(nn.Linear, bias = False)
@@ -2749,6 +2750,45 @@ class CrossAttender(AttentionLayers):
     def __init__(self, **kwargs):
         super().__init__(cross_attend = True, only_cross = True, **kwargs)
 
+class AttentionPool(Module):
+    def __init__(
+        self,
+        dim,
+        num_pooled_tokens = 1,
+        dim_context = None,
+        add_residual = False,
+        depth = 1,
+        squeeze_output = None,
+        attn_kwargs: dict = dict()
+    ):
+        super().__init__()
+        dim_context = default(dim_context, dim)
+
+        squeeze_output = default(squeeze_output, False)
+        assert not (squeeze_output and num_pooled_tokens > 1)
+
+        self.queries = nn.Parameter(torch.randn(num_pooled_tokens, dim) * 1e-2)
+
+        if depth > 1:
+            assert not add_residual, 'residual already in effect when doing a full cross attention based transformer for pooling'
+            self.pooler = CrossAttender(dim = dim, cross_attn_dim_context = dim_context, depth = depth, **attn_kwargs)
+        else:
+            self.pooler = Attention(dim = dim, dim_context = dim_context, **attn_kwargs)
+
+        self.add_residual = add_residual
+
+    def forward(self, context, mask = None):
+        batch = context.shape[0]
+
+        queries = repeat(self.queries, 'n d -> b n d', b = batch)
+
+        pooled = self.pooler(queries, context, context_mask = mask)
+
+        if self.add_residual:
+            pooled = pooled + queries
+
+        return pooled
+
 class ViTransformerWrapper(Module):
     def __init__(
         self,
@@ -2860,8 +2900,9 @@ class TransformerWrapper(Module):
         use_cls_token = False,
         num_cls_tokens = 1,
         attn_pool = False,
-        num_attn_pool_queries = 1,
-        dim_attn_pool_query = None,
+        num_pooled_tokens = 1,
+        attn_pool_depth = 1,
+        dim_pooled_tokens = None,
         squeeze_out_last_dim = False,
         token_emb: TokenEmbedding | None = None,
         mixture_of_softmax = False,
@@ -2958,10 +2999,7 @@ class TransformerWrapper(Module):
         self.attn_pool = None
 
         if attn_pool:
-            self.attn_pool = Attention(dim = default(dim_attn_pool_query, dim), dim_context = dim)
-
-            self.attn_pool_queries = nn.Parameter(torch.zeros(num_attn_pool_queries, dim))
-            nn.init.normal_(self.attn_pool_queries, std = 0.02)
+            self.attn_pool = AttentionPool(dim = default(dim_pooled_tokens, dim), dim_context = dim, num_pooled_tokens = num_pooled_tokens, depth = attn_pool_depth)
 
         # whether to average pool the embed (`global average pool`)
 
@@ -3259,7 +3297,6 @@ class TransformerWrapper(Module):
         if self.average_pool_embed:
             x = masked_mean(x, mask = orig_mask, dim = 1)
 
-
         # cls token(s)
 
         if exists(self.cls_token):
@@ -3272,13 +3309,15 @@ class TransformerWrapper(Module):
 
         # attention pool
 
-        if exists(self.attn_pool) and return_intermediates:
-            queries = repeat(self.attn_pool_queries, 'n d -> b n d', b = x.shape[0])
+        is_encoder = not self.attn_layers.causal
+        return_pooled_tokens = exists(self.attn_pool) and is_encoder
 
-            attn_pooled_tokens = self.attn_pool(queries, context = x, context_mask = mask)
+        if (
+            exists(self.attn_pool) and
+            (return_intermediates or is_encoder) # in a new paper, they use attention pooling on decoder - so we'll default to returning pooled tokens if encoder, but for decoder, they must set `return_intermediates`
+        ):
 
-            if attn_pooled_tokens.shape[1] == 1:
-                attn_pooled_tokens = rearrange(attn_pooled_tokens, 'b 1 d -> b d')
+            attn_pooled_tokens = self.attn_pool(x, mask = mask)
 
             intermediates.attn_pooled_tokens = attn_pooled_tokens
 
@@ -3327,6 +3366,9 @@ class TransformerWrapper(Module):
             out = (x, intermediates)
         elif return_embeddings:
             out = x
+        elif return_pooled_tokens:
+            intermediates.logits = logits
+            out = attn_pooled_tokens
         else:
             out = logits
 

@@ -4,12 +4,13 @@ from x_transformers.x_transformers import (
     Decoder,
     PrefixDecoder,
     CrossAttender,
+    AttentionPool,
     Attention,
     FeedForward,
     RMSNorm,
     AdaptiveRMSNorm,
     TransformerWrapper,
-    ViTransformerWrapper
+    ViTransformerWrapper,
 )
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper

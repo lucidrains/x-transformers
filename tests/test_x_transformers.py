@@ -1086,7 +1086,7 @@ def add_attn_pool():
         num_tokens = 256,
         max_seq_len = 1024,
         attn_pool = True,
-        num_attn_pool_queries =  3,
+        num_pooled_tokens =  3,
         attn_layers = Decoder(
             dim = 512,
             depth = 12,
@@ -1110,7 +1110,6 @@ def test_up(
         num_tokens = 256,
         max_seq_len = 1024,
         attn_pool = True,
-        num_attn_pool_queries =  3,
         attn_layers = Decoder(
             dim = 512,
             depth = 12,
@@ -1153,3 +1152,32 @@ def test_beam_search(stochastic):
 
     assert beams.shape == (4, 2, 10)
     assert scores.shape == (4, 2)
+
+
+@pytest.mark.parametrize('num_pooled_tokens', (1, 3))
+@pytest.mark.parametrize('attn_pool_depth', (1, 3))
+def test_attn_pooler(
+    num_pooled_tokens,
+    attn_pool_depth
+):
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_pool = True,
+        num_pooled_tokens =  num_pooled_tokens,
+        attn_pool_depth = attn_pool_depth,
+        dim_pooled_tokens = 77,
+        attn_layers = Encoder(
+            dim = 512,
+            depth = 12,
+            heads = 8,
+            attn_value_rmsnorm = True
+        ),
+    )
+
+    x = torch.randint(0, 256, (2, 10))
+
+    out = model(x)
+
+    assert out.shape == (2, num_pooled_tokens, 77)
