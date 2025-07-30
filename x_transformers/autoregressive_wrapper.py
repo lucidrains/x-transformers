@@ -4,9 +4,10 @@ from math import ceil, log
 from typing import Tuple, Callable
 
 import torch
-from torch import nn, Tensor
+from torch import nn, tensor, Tensor
 from torch.nn import Module
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 from einops import rearrange, repeat, pack, unpack
 
@@ -347,7 +348,7 @@ class AutoregressiveWrapper(Module):
     @eval_decorator
     def generate(
         self,
-        prompts,
+        prompts: list[Tensor] | Tensor,
         seq_len,
         eos_token = None,
         temperature = 1.,
@@ -363,11 +364,23 @@ class AutoregressiveWrapper(Module):
         cache_kv = True,
         **kwargs
     ):
-        max_seq_len, greedy, device = self.max_seq_len, temperature == 0., prompts.device
+        max_seq_len, greedy = self.max_seq_len, temperature == 0.
+
+        # handle prompts given as list of variable lengthed token ids
+
+        if isinstance(prompts, list):
+            assert len(prompts) > 0, 'prompts cannot be empty list'
+            assert not exists(prompt_lens), '`prompt_len` will be auto derived if prompts are passed in as list of Tensors'
+
+            prompt_lens = tensor([t.shape[0] for t in prompts], device = prompts[0].device)
+
+            prompts = pad_sequence(prompts, batch_first = True)
+
+        # pack maybe no batch
 
         prompts, ps = pack([prompts], '* n')
 
-        b, t = prompts.shape
+        b, t, device = *prompts.shape, prompts.device
 
         # handle filter logits fn given as string
 
