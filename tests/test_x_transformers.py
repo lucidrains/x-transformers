@@ -1181,3 +1181,32 @@ def test_attn_pooler(
     out = model(x)
 
     assert out.shape == (2, num_pooled_tokens, 77)
+
+def test_prompts_given_as_list_tensor():
+    from x_transformers import AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8
+        )
+    )
+
+    wrapped = AutoregressiveWrapper(model)
+
+    seq = torch.randint(0, 20000, (3, 1024))
+
+    loss = wrapped(seq)
+    loss.backward()
+
+    sampled = wrapped.generate([
+        torch.randint(0, 20000, (3,)),
+        torch.randint(0, 20000, (5,)),
+        torch.randint(0, 20000, (2,)),
+        torch.randint(0, 20000, (7,)),
+    ], 256)
+
+    assert sampled.shape == (4, 256)
