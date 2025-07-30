@@ -2267,7 +2267,7 @@ class AttentionLayers(Module):
 
         # whether it has post norm
 
-        self.final_norm = norm_fn() if pre_norm else nn.Identity()
+        self.final_norm = norm_fn() if pre_norm and pre_norm_has_final_norm else nn.Identity()
 
         # whether unet or not
 
