@@ -1232,4 +1232,6 @@ def test_external_key_values():
         (torch.randn(3, 8, 32, 16), torch.randn(3, 8, 32, 16)),
     ]
 
-    logits = model(seq, self_attn_additional_kv = key_values)
+    additional_kv_mask = torch.randint(0, 2, (3, 32)).bool()
+
+    logits = model(seq, self_attn_additional_kv = key_values, additional_kv_mask = additional_kv_mask)

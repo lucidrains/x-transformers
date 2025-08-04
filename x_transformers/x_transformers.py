@@ -1618,7 +1618,8 @@ class Attention(Module):
         return_intermediates = False,
         cache: Intermediates | None = None,
         value_residual = None,
-        additional_key_values: tuple[Tensor, Tensor] | None = None
+        additional_key_values: tuple[Tensor, Tensor] | None = None,
+        additional_key_value_mask = None,
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context, qkv_receive_diff_residuals, is_multi_latent_attn = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context), self.qkv_receive_diff_residuals, self.use_latent_kv
 
@@ -1791,15 +1792,22 @@ class Attention(Module):
         # maybe append additional key / values
 
         if exists(additional_key_values):
+            seq_len = k.shape[-2]
 
             added_k, added_v = additional_key_values
-            added_kv_len = added_k.shape[-2]
 
             k = cat((added_k, k), dim = -2)
             v = cat((added_v, v), dim = -2)
 
-            if exists(input_mask):
-                input_mask = pad_at_dim(input_mask, (added_kv_len, 0), dim = -1, value = True)
+            if (exists(input_mask) or exists(additional_key_value_mask)):
+
+                if not exists(additional_key_value_mask):
+                    added_kv_len = added_k.shape[-2]
+                    input_mask = pad_at_dim(input_mask, (added_kv_len, 0), dim = -1, value = True)
+                elif not exists(input_mask):
+                    input_mask = pad_at_dim(additional_key_value_mask, (0, seq_len), dim = -1, value = True)
+                else:
+                    input_mask = cat((additional_key_value_mask, input_mask), dim = -1)
 
         # determine masking
 
@@ -2426,6 +2434,7 @@ class AttentionLayers(Module):
         attn_bias = None,
         deep_embeds_and_ids: tuple[nn.Parameter, Tensor] | None = None,
         self_attn_additional_kv: list[tuple[Tensor, Tensor]] | None = None,
+        additional_kv_mask = None,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
         layers_execute_order: tuple[int, ...] | None = None
@@ -2666,7 +2675,7 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, additional_key_values = next(iter_self_attn_kv, None), prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
             elif layer_type == 'f':
