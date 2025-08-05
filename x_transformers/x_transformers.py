@@ -2435,6 +2435,7 @@ class AttentionLayers(Module):
         deep_embeds_and_ids: tuple[nn.Parameter, Tensor] | None = None,
         self_attn_additional_kv: list[tuple[Tensor, Tensor]] | None = None,
         additional_kv_mask = None,
+        route_additional_kv_to_top = True,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
         layers_execute_order: tuple[int, ...] | None = None
@@ -2544,10 +2545,6 @@ class AttentionLayers(Module):
 
         iter_attn_cache = iter(attn_cache)
 
-        # additional self attn key / values
-
-        iter_self_attn_kv = iter(default(self_attn_additional_kv, ()))
-
         # handle deep embeds if needed
 
         deep_embeds = []
@@ -2581,6 +2578,16 @@ class AttentionLayers(Module):
 
         layers_execute_order = default(layers_execute_order, self.layers_execute_order)
         layer_variables = tuple(tuple(layer_variable[i] for i in layers_execute_order) for layer_variable in layer_variables)
+
+        # additional self attn key / values - say coming from vlm
+
+        if exists(self_attn_additional_kv) and route_additional_kv_to_top:
+            num_self_attns = sum([layer_type == 'a' for layer_type in first(layer_variables)])
+
+            self_attn_additional_kv = self_attn_additional_kv[-num_self_attns:]
+            self_attn_additional_kv = [None] * (num_self_attns - len(self_attn_additional_kv)) + self_attn_additional_kv
+
+        iter_self_attn_kv = iter(default(self_attn_additional_kv, ()))
 
         # derived input for reinjection if needed
 

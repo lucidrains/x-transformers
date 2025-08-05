@@ -1219,7 +1219,7 @@ def test_external_key_values():
         max_seq_len = 1024,
         attn_layers = Decoder(
             dim = 512,
-            depth = 2,
+            depth = 3,
             heads = 8,
             attn_dim_head = 16
         )
