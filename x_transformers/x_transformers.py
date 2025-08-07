@@ -1795,6 +1795,13 @@ class Attention(Module):
             seq_len = k.shape[-2]
 
             added_k, added_v = additional_key_values
+            added_kv_heads, added_kv_len = added_k.shape[1], added_k.shape[-2]
+
+            # take care of expanding to query heads if mismatch between key / value heads with the ones coming from vlm
+
+            if added_kv_heads != kv_h:
+                assert divisible_by(h, added_kv_heads)
+                k, v, added_k, added_v = tuple(repeat(t, 'b h ... -> b (r h) ...', r = h // t.shape[1]) for t in (k, v, added_k, added_v))
 
             k = cat((added_k, k), dim = -2)
             v = cat((added_v, v), dim = -2)
@@ -1802,7 +1809,6 @@ class Attention(Module):
             if (exists(input_mask) or exists(additional_key_value_mask)):
 
                 if not exists(additional_key_value_mask):
-                    added_kv_len = added_k.shape[-2]
                     input_mask = pad_at_dim(input_mask, (added_kv_len, 0), dim = -1, value = True)
                 elif not exists(input_mask):
                     input_mask = pad_at_dim(additional_key_value_mask, (0, seq_len), dim = -1, value = True)

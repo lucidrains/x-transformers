@@ -1228,8 +1228,8 @@ def test_external_key_values():
     seq = torch.randint(0, 20000, (3, 1024))
 
     key_values = [
-        (torch.randn(3, 8, 32, 16), torch.randn(3, 8, 32, 16)),
-        (torch.randn(3, 8, 32, 16), torch.randn(3, 8, 32, 16)),
+        (torch.randn(3, 2, 32, 16), torch.randn(3, 2, 32, 16)),
+        (torch.randn(3, 2, 32, 16), torch.randn(3, 2, 32, 16)),
     ]
 
     additional_kv_mask = torch.randint(0, 2, (3, 32)).bool()
