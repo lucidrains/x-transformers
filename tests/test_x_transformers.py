@@ -1235,3 +1235,20 @@ def test_external_key_values():
     additional_kv_mask = torch.randint(0, 2, (3, 32)).bool()
 
     logits = model(seq, self_attn_additional_kv = key_values, additional_kv_mask = additional_kv_mask)
+
+def test_learned_head_attn_sink():
+
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8,
+            attn_head_learned_sink = True
+        )
+    )
+
+    seq = torch.randint(0, 20000, (3, 1024))
+
+    logits = model(seq)
