@@ -4,8 +4,8 @@ from functools import partial
 from typing import Tuple, Callable
 
 import torch
-from torch.nn import Module
-from torch import nn, einsum, Tensor
+from torch.nn import Module, Parameter
+from torch import cat, nn, einsum, Tensor
 import torch.nn.functional as F
 
 from collections import namedtuple
@@ -176,6 +176,7 @@ class Attend(Module):
         softclamp_logits = False,
         logit_softclamp_value = 50.,
         add_zero_kv = False,
+        head_learned_sink = False,
         selective = False,
         hard = False,
         cope = None,
@@ -254,6 +255,13 @@ class Attend(Module):
 
         self.add_zero_kv = add_zero_kv
 
+        # learned sink concatted pre-softmax, working solution from gpt-oss
+
+        assert not (head_learned_sink and flash), f'not supported for flash attention yet'
+
+        self.head_learned_sink = head_learned_sink
+        self.head_attn_sink = Parameter(torch.zeros(heads)) if head_learned_sink else None
+
         # soft clamp attention logit value
 
         if softclamp_logits:
@@ -315,10 +323,10 @@ class Attend(Module):
         if self.l2_distance:
             k_norm_sq = k.norm(dim = -1, keepdim = True) ** 2
             k = F.pad(k, (0, 1), value = -1.)
-            k = torch.cat((k, k_norm_sq), dim = -1)
+            k = cat((k, k_norm_sq), dim = -1)
 
             q_norm_sq = q.norm(dim = -1, keepdim = True) ** 2
-            q = torch.cat((2 * q, q_norm_sq), dim = -1)
+            q = cat((2 * q, q_norm_sq), dim = -1)
             q = F.pad(q, (0, 1), value = -1.)
 
         # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
@@ -509,6 +517,11 @@ class Attend(Module):
         if self.selective:
             sim = selective_attn(sim)
 
+        if self.head_learned_sink:
+            # add learned attention sink
+            attn_sink = repeat(self.head_attn_sink, 'h -> b h i 1', b = sim.shape[0], i = sim.shape[2])
+            sim = cat((attn_sink, sim), dim = -1)
+
         pre_softmax_attn = sim
 
         attn = self.attn_fn(sim)
@@ -516,6 +529,10 @@ class Attend(Module):
         attn = attn.type(dtype)
 
         post_softmax_attn = attn
+
+        if self.head_learned_sink:
+            # remove attention sink
+            attn = attn[..., 1:]
 
         attn = self.attn_dropout(attn)
 

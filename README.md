@@ -2459,4 +2459,14 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{openai_gpt_oss,
+  author       = {OpenAI},
+  title        = {Introducing gpt-oss},
+  howpublished = {https://openai.com/index/introducing-gpt-oss},
+  month        = {August},
+  year         = {2025}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
