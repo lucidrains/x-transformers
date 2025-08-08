@@ -176,7 +176,7 @@ class Attend(Module):
         softclamp_logits = False,
         logit_softclamp_value = 50.,
         add_zero_kv = False,
-        head_learned_sink = False,
+        head_learned_sinks = 0,
         selective = False,
         hard = False,
         cope = None,
@@ -257,10 +257,10 @@ class Attend(Module):
 
         # learned sink concatted pre-softmax, working solution from gpt-oss
 
-        assert not (head_learned_sink and flash), f'not supported for flash attention yet'
+        self.has_head_learned_sinks = head_learned_sinks > 0
+        assert not (self.has_head_learned_sinks and flash), f'not supported for flash attention yet'
 
-        self.head_learned_sink = head_learned_sink
-        self.head_attn_sink = Parameter(torch.zeros(heads)) if head_learned_sink else None
+        self.head_attn_sinks = Parameter(torch.zeros(heads, head_learned_sinks)) if self.has_head_learned_sinks else None
 
         # soft clamp attention logit value
 
@@ -517,9 +517,10 @@ class Attend(Module):
         if self.selective:
             sim = selective_attn(sim)
 
-        if self.head_learned_sink:
+        if self.has_head_learned_sinks:
             # add learned attention sink
-            attn_sink = repeat(self.head_attn_sink, 'h -> b h i 1', b = sim.shape[0], i = sim.shape[2])
+            num_sinks = self.head_attn_sinks.shape[-1]
+            attn_sink = repeat(self.head_attn_sinks, 'h sinks -> b h i sinks', b = sim.shape[0], i = sim.shape[2])
             sim = cat((attn_sink, sim), dim = -1)
 
         pre_softmax_attn = sim
@@ -530,9 +531,9 @@ class Attend(Module):
 
         post_softmax_attn = attn
 
-        if self.head_learned_sink:
+        if self.has_head_learned_sinks:
             # remove attention sink
-            attn = attn[..., 1:]
+            attn = attn[..., num_sinks:]
 
         attn = self.attn_dropout(attn)
 

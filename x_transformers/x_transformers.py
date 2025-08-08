@@ -1319,7 +1319,7 @@ class Attention(Module):
         value_dim_head = None,
         dim_out = None,
         add_zero_kv = False,         # same as add_zero_attn in pytorch
-        head_learned_sink = False,
+        head_learned_sinks = 0,
         rotate_num_heads = None,
         data_dependent_alibi = False,
         data_dependent_alibi_per_row = False,
@@ -1516,7 +1516,7 @@ class Attention(Module):
             selective = selective,
             custom_attn_fn = custom_attn_fn,
             add_zero_kv = add_zero_kv,
-            head_learned_sink = head_learned_sink,
+            head_learned_sinks = head_learned_sinks,
             flash = flash,
             softclamp_logits = softclamp_logits,
             logit_softclamp_value = logit_softclamp_value,

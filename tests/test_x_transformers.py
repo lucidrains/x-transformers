@@ -1245,7 +1245,7 @@ def test_learned_head_attn_sink():
             dim = 512,
             depth = 12,
             heads = 8,
-            attn_head_learned_sink = True
+            attn_head_learned_sinks = 4
         )
     )
 
