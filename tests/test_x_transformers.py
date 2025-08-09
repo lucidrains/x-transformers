@@ -1252,3 +1252,38 @@ def test_learned_head_attn_sink():
     seq = torch.randint(0, 20000, (3, 1024))
 
     logits = model(seq)
+
+def test_accept_layer_intermediates():
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    vlm = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 3,
+            heads = 4,
+        )
+    )
+
+    seq = torch.randint(0, 20000, (3, 1024))
+    mask = torch.randint(0, 2, (3, 1024)).bool()
+
+    _, intermediates = vlm(seq, return_intermediates = True)
+
+    action_model = Decoder(
+        dim = 512,
+        depth = 6,
+        heads = 8,
+    )
+
+    seq = torch.randn(3, 32, 512)
+
+    embeds = action_model(
+        seq,
+        self_attn_additional_kv = intermediates,
+        detach_additional_kv = True,
+        additional_kv_mask = mask
+    )
+
+    assert embeds.shape == (3, 32, 512)

@@ -23,7 +23,7 @@ class Intermediates:
     pre_softmax_attn:   Tensor | None = None
     post_softmax_attn:  Tensor | None = None
     values:             Tensor | None = None
-    cached_kv:          Tuple[Tensor, Tensor] | None = None
+    cached_kv:          tuple[Tensor, Tensor] | None = None
     layer_type:         str | None = None
     hybrid_hidden:      Tensor | None = None
 

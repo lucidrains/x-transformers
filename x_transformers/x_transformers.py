@@ -10,7 +10,7 @@ import torch
 from torch.amp import autocast
 import torch.nn.functional as F
 from torch import nn, einsum, tensor, Tensor, cat, stack, arange, is_tensor
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from torch.nn import Module, ModuleList, ModuleDict
 
 from functools import partial, wraps
@@ -80,6 +80,9 @@ def cast_tuple(val, depth = 1):
 
 def divisible_by(num, den):
     return (num % den) == 0
+
+def detach_all(obj):
+    return tree_map(lambda t: t.detach() if is_tensor(t) and t.requires_grad else t, obj)
 
 def maybe(fn = None):
     if not exists(fn):
@@ -156,6 +159,19 @@ def or_reduce(masks):
     for rest in body:
         head = head | rest
     return head
+
+# cache helpers
+
+def get_cached_kvs(
+    cache: LayerIntermediates
+) -> list[tuple[Tensor, Tensor]]:
+
+    cached_kvs = []
+
+    for attn_intermediate in cache.attn_intermediates:
+        cached_kvs.append(attn_intermediate.cached_kv)
+
+    return cached_kvs
 
 # entropy
 
@@ -2441,8 +2457,13 @@ class AttentionLayers(Module):
         context_pos = None,
         attn_bias = None,
         deep_embeds_and_ids: tuple[nn.Parameter, Tensor] | None = None,
-        self_attn_additional_kv: list[tuple[Tensor, Tensor]] | None = None,
+        self_attn_additional_kv: (
+            LayerIntermediates |
+            list[tuple[Tensor, Tensor]]
+            | None
+        ) = None,
         additional_kv_mask = None,
+        detach_additional_kv = False,
         route_additional_kv_to_top = True,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
@@ -2590,6 +2611,13 @@ class AttentionLayers(Module):
         # additional self attn key / values - say coming from vlm
 
         if exists(self_attn_additional_kv) and route_additional_kv_to_top:
+
+            if isinstance(self_attn_additional_kv, LayerIntermediates):
+                self_attn_additional_kv = get_cached_kvs(self_attn_additional_kv)
+
+            if detach_additional_kv:
+                self_attn_additional_kv = detach_all(self_attn_additional_kv)
+
             num_self_attns = sum([layer_type == 'a' for layer_type in first(layer_variables)])
 
             self_attn_additional_kv = self_attn_additional_kv[-num_self_attns:]
