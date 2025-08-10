@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 import math
 from random import random
 from contextlib import nullcontext
 from collections import namedtuple
 
 import torch
+from torch import nn, pi
+from torch.nn import Module
+from torch.func import grad_and_value, vmap
 import torch.nn.functional as F
-from torch import nn
 
+import einx
 from einops import rearrange, repeat, pack, unpack
 
 from x_transformers.x_transformers import TransformerWrapper
-from typing import Optional
 
 # constants
 
@@ -75,12 +79,12 @@ def linear_schedule(t):
 
 def cosine_schedule(t):
     """ https://arxiv.org/abs/2202.04200 """
-    return torch.cos(t * math.pi / 2)
+    return torch.cos(t * pi / 2)
 
 # self token critic
 # inspired by Nijkamp et al. - https://aclanthology.org/2021.naacl-main.409/
 
-class SelfCritic(nn.Module):
+class SelfCritic(Module):
     def __init__(self, net):
         super().__init__()
         self.net = net
@@ -92,7 +96,7 @@ class SelfCritic(nn.Module):
         embed = self.net(x, return_embeddings = True)
         return self.to_logits(embed)
 
-class NonAutoregressiveWrapper(nn.Module):
+class NonAutoregressiveWrapper(Module):
     """
     https://arxiv.org/abs/1904.09324
     https://arxiv.org/abs/2202.04200
@@ -110,9 +114,10 @@ class NonAutoregressiveWrapper(nn.Module):
         random_token_prob = 0.1,         # which percentage of tokens to be replaced with random token, done in original MLM paper
         schedule = 'linear',
         can_mask_prev_unmasked = False,  # when unmasking, whether it can remask previously unmasked
-        token_critic: Optional[TransformerWrapper] = None,
+        token_critic: TransformerWrapper | None = None,
         self_token_critic = False,
-        critic_loss_weight = 1.
+        critic_loss_weight = 1.,
+        use_simple_mdlm_loss_weight = True # Sahoo et al. https://arxiv.org/abs/2406.07524
     ):
         super().__init__()
         assert not (self_token_critic and exists(token_critic))
@@ -142,6 +147,23 @@ class NonAutoregressiveWrapper(nn.Module):
             self.schedule_fn = cosine_schedule
         else:
             raise ValueError(f'invalid schedule {schedule}')
+
+        # whether to use the loss weighting proposed in simple diffusion lm paper
+
+        self.loss_weight_fn = None
+
+        if use_simple_mdlm_loss_weight:
+            grad_and_value_schedule_fn = vmap(grad_and_value(self.schedule_fn))
+
+            # eq (10)
+
+            def loss_weight_fn(times):
+                grad, value = grad_and_value_schedule_fn(times)
+                return grad / (1. - value)
+
+            self.loss_weight_fn = loss_weight_fn
+
+        # whether to mask previous - in the simple mdlm paper, they chose not to
 
         self.can_mask_prev_unmasked = can_mask_prev_unmasked
 
@@ -311,12 +333,27 @@ class NonAutoregressiveWrapper(nn.Module):
 
         loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
 
-        # cross entropy loss
+        # loss
 
-        loss = loss_fn(
-            logits[mask],
-            orig_seq[mask]
-        )
+        if exists(self.loss_weight_fn):
+            # using simple mdlm loss weighting
+
+            loss = loss_fn(
+                rearrange(logits, 'b n l -> b l n'),
+                orig_seq,
+                reduction = 'none'
+            )
+
+            loss_weights = self.loss_weight_fn(rand_times)     # calculate loss weight
+            loss = einx.multiply('b n, b', loss, loss_weights) # apply loss weights
+
+            loss = loss[mask].mean()
+
+        else:
+            loss = loss_fn(
+                logits[mask],
+                orig_seq[mask],
+            )
 
         if not exists(self.token_critic) or only_train_generator:
             return Losses(loss, loss, None)

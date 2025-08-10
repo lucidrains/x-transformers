@@ -1287,3 +1287,30 @@ def test_accept_layer_intermediates():
     )
 
     assert embeds.shape == (3, 32, 512)
+
+@pytest.mark.parametrize('use_loss_weight', (False, True))
+def test_simple_mdlm(
+    use_loss_weight
+):
+    from x_transformers.nonautoregressive_wrapper import NonAutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256 + 1,
+        max_seq_len = 1024,
+        attn_layers = Encoder(
+            dim = 512,
+            depth = 4,
+            rotary_pos_emb = True
+        )
+    )
+
+    nar = NonAutoregressiveWrapper(
+        model,
+        mask_id = 256,
+        use_simple_mdlm_loss_weight = use_loss_weight
+    )
+
+    seq = torch.randint(0, 256, (1, 1024))
+
+    loss = nar(seq)
+    loss.loss.backward()

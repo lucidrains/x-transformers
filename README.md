@@ -2461,11 +2461,22 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{openai_gpt_oss,
-  author       = {OpenAI},
-  title        = {Introducing gpt-oss},
-  howpublished = {https://openai.com/index/introducing-gpt-oss},
-  month        = {August},
-  year         = {2025}
+    author       = {OpenAI},
+    title        = {Introducing gpt-oss},
+    howpublished = {https://openai.com/index/introducing-gpt-oss},
+    month        = {August},
+    year         = {2025}
+}
+```
+
+```bibtex
+@article{Sahoo2024SimpleAE,
+    title   = {Simple and Effective Masked Diffusion Language Models},
+    author  = {Subham Sekhar Sahoo and Marianne Arriola and Yair Schiff and Aaron Gokaslan and Edgar Marroquin and Justin T Chiu and Alexander Rush and Volodymyr Kuleshov},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2406.07524},
+    url     = {https://api.semanticscholar.org/CorpusID:270380319}
 }
 ```
 
