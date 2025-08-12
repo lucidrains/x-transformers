@@ -241,6 +241,7 @@ class ContinuousAutoregressiveWrapper(Module):
         self,
         net: ContinuousTransformerWrapper,
         loss_fn: Module | None = None,
+        use_l1_loss = False,
         equal_loss_weight_batch = False,  # setting this to True, if the mask is passed in and sequences are variable in length, each sequence will be weighted the same (as opposed to each token)
     ):
         super().__init__()
@@ -250,7 +251,15 @@ class ContinuousAutoregressiveWrapper(Module):
         probabilistic = net.probabilistic
         self.probabilistic = probabilistic
 
-        loss_fn = default(loss_fn, nn.MSELoss(reduction = 'none') if not probabilistic else GaussianNLL())
+        # default loss function
+
+        if not exists(loss_fn):
+            if probabilistic:
+                loss_fn = GaussianNLL()
+            elif use_l1_loss:
+                loss_fn = nn.L1Loss(reduction = 'none')
+            else:
+                loss_fn = nn.MSELoss(reduction = 'none')
 
         self.loss_fn = loss_fn
         self.equal_loss_weight_batch = equal_loss_weight_batch
