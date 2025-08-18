@@ -48,6 +48,7 @@ class LayerIntermediates:
     attn_z_loss:        Tensor | None = None
     mems:               Tensor | None = None
     last_layer_hiddens: Tensor | None = None
+    initial_embeds:     Tensor | None = None
     attn_pooled_tokens: Tensor | None = None
     memory_tokens:      Tensor | None = None
     logit_entropies:    Tensor | None = None
@@ -3377,6 +3378,10 @@ class TransformerWrapper(Module):
         # store last layer hiddens, for access in case of cls token or attention pooling
 
         intermediates.last_layer_hiddens = x
+
+        # store initial embed
+
+        intermediates.initial_embed = init_embed
 
         # global average pool
 
