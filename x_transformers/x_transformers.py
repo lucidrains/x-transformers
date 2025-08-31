@@ -1619,6 +1619,29 @@ class Attention(Module):
         if zero_init_output:
             init_zero_(self.to_out)
 
+    @torch.no_grad()
+    def qk_clip_(
+        self,
+        pre_softmax_attn: Tensor | Intermediates,
+        tau = 100 # this hyperparameter controls how large the attention logits can be
+    ):
+        """ proposed by the Moonshot AI team as a solution for Muon training instability """
+
+        if not is_tensor(pre_softmax_attn):
+            pre_softmax_attn = pre_softmax_attn.pre_softmax_attn
+
+        attn_logit_maxes = reduce(pre_softmax_attn, 'b h i j -> h', 'max')
+
+        qk_weight_scale = (tau / attn_logit_maxes).clamp(max = 1.).sqrt()
+
+        q_weight = self.to_q.weight
+        k_weight = self.to_k.weight
+
+        q_dim, k_dim, heads = q_weight.shape[0], k_weight.shape[0], qk_weight_scale.numel()
+
+        q_weight.mul_(repeat(qk_weight_scale, 'h -> (h expand)', expand = q_dim // heads))
+        k_weight.mul_(repeat(qk_weight_scale, 'h -> (h expand)', expand = k_dim // heads))
+
     def forward(
         self,
         x,
