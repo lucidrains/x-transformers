@@ -2462,6 +2462,20 @@ class AttentionLayers(Module):
 
         self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
 
+    def attn_qk_clip_(
+        self,
+        intermediates: LayerIntermediates,
+        tau = 100.
+    ):
+        # pairs up the attention intermediates with each attention module and does qk clip proposed by kimi team
+
+        for (_, layer, _), layer_type, attn_inter in zip(self.layers, self.layer_types, intermediates.attn_intermediates):
+
+            if layer_type not in ('a', 'c'):
+                continue
+
+            layer.qk_clip_(attn_inter, tau = tau)
+
     def forward(
         self,
         x,
@@ -3191,6 +3205,13 @@ class TransformerWrapper(Module):
         if self.l2norm_embed:
             if not isinstance(self.pos_emb, always):
                 nn.init.normal_(self.pos_emb.emb.weight, std = 1e-5)
+
+    def attn_qk_clip_(
+        self,
+        intermediates: LayerIntermediates,
+        tau = 100.
+    ):
+        self.attn_layers.attn_qk_clip_(intermediates, tau = tau)
 
     def forward(
         self,

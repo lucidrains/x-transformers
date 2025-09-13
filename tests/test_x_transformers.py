@@ -1315,7 +1315,7 @@ def test_simple_mdlm(
     loss = nar(seq)
     loss.loss.backward()
 
-def test_qk_clip():
+def test_qk_clip_attn():
     from x_transformers import Attention
 
     x = torch.randn(1, 1024, 512)
@@ -1325,3 +1325,18 @@ def test_qk_clip():
     out, intermediates = attn(x, return_intermediates = True)
 
     attn.qk_clip_(intermediates, tau = 100)
+
+def test_qk_clip_attn_layers():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(dim = 512, depth = 2)
+    )
+
+    seq = torch.randint(0, 256, (1, 1024))
+
+    out, intermediates = model(seq, return_intermediates = True)
+
+    model.attn_qk_clip_(intermediates)
