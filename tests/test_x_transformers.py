@@ -1340,3 +1340,23 @@ def test_qk_clip_attn_layers():
     out, intermediates = model(seq, return_intermediates = True)
 
     model.attn_qk_clip_(intermediates)
+
+def test_vae():
+    from x_transformers.gpt_vae import GPTVAE
+
+    model = GPTVAE(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        dim = 512,
+        depth = 4,
+        enc_depth = 2
+    )
+
+    seq = torch.randint(0, 256, (1, 1024))
+
+    loss = model(seq)
+    loss.backward()
+
+    style = torch.randint(0, 256, (1, 1024))
+
+    out = model.generate(seq[:, :512], 512, seq_for_latents = style)

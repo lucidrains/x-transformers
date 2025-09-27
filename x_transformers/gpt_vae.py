@@ -68,10 +68,13 @@ class GPTVAE(Module):
 
         self.to_latent_mean_log_variance = nn.Sequential(
             nn.Linear(dim, dim_latent * 2),
-            Rearrange('b (two d) -> two b 1 d', two = 2)
+            Rearrange('b (two d) -> two b d', two = 2)
         )
 
-        self.from_latent_to_prepend_token = nn.Linear(dim_latent, dim)
+        self.from_latent_to_prepend_token = nn.Sequential(
+            nn.Linear(dim_latent, dim),
+            Rearrange('b d -> b 1 d')
+        )
 
         self.decoder = TransformerWrapper(
             num_tokens = num_tokens,
@@ -126,10 +129,18 @@ class GPTVAE(Module):
         prompts,
         seq_len,
         latents = None,
+        seq_for_latents = None,
         **generate_kwargs
     ):
         assert prompts.ndim in {1, 2}
         batch = prompts.shape[0] if prompts.ndim == 2 else 1
+
+        # if seq_for_latents passed in, derive latents from it
+
+        if exists(seq_for_latents):
+            assert not exists(latents), 'latents should not be passed in if given the seq from which to derive them'
+
+            latents = self.encode_to_latents(seq_for_latents)
 
         # prepend embeds
 
@@ -142,9 +153,6 @@ class GPTVAE(Module):
                 latents = repeat(latents, 'd -> b d', b = batch)
 
             prepend_embeds = self.from_latent_to_prepend_token(latents)
-
-        if exists(prepend_embeds):
-            prepend_embeds = rearrange(prepend_embeds, 'b d -> b 1 d')
 
         # generated
 
