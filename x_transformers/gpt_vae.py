@@ -46,25 +46,29 @@ class GPTVAE(Module):
         vae_kl_loss_weight = 1.,
         latents_dropout_prob = 0.5, # what percentage of the time to dropout the latents completely
         pad_id = -1,
+        encoder: Module | None = None,
         **kwargs
     ):
         super().__init__()
         dim_latent = default(dim_latent, dim)
 
-        self.encoder = TransformerWrapper(
-            num_tokens = num_tokens,
-            max_seq_len = max_seq_len + 1,
-            return_only_embed = True,
-            average_pool_embed = True,
-            attn_layers = Encoder(
-                dim = dim,
-                depth = enc_depth,
-                attn_dim_head = attn_dim_head,
-                heads = heads,
-                **kwargs,
-                **enc_kwargs
-            ),
-        )
+        if not exists(encoder):
+            encoder = TransformerWrapper(
+                num_tokens = num_tokens,
+                max_seq_len = max_seq_len + 1,
+                return_only_embed = True,
+                average_pool_embed = True,
+                attn_layers = Encoder(
+                    dim = dim,
+                    depth = enc_depth,
+                    attn_dim_head = attn_dim_head,
+                    heads = heads,
+                    **kwargs,
+                    **enc_kwargs
+                ),
+            )
+
+        self.encoder = encoder
 
         self.to_latent_mean_log_variance = nn.Sequential(
             nn.Linear(dim, dim_latent * 2),
