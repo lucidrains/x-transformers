@@ -2504,4 +2504,25 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{jordan2024muon,
+  author    = {Keller Jordan and Yuchen Jin and Vlado Boza and Jiacheng You and Franz Cesista and Laker Newhouse and Jeremy Bernstein},
+  title     = {Muon: An optimizer for hidden layers in neural networks},
+  year      = {2024},
+  url       = {https://kellerjordan.github.io/posts/muon/}
+}
+```
+
+```bibtex
+@misc{wang2025muonoutperformsadamtailend,
+    title   = {Muon Outperforms Adam in Tail-End Associative Memory Learning}, 
+    author  = {Shuche Wang and Fengzhuo Zhang and Jiaxiang Li and Cunxiao Du and Chao Du and Tianyu Pang and Zhuoran Yang and Mingyi Hong and Vincent Y. F. Tan},
+    year    = {2025},
+    eprint  = {2509.26030},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2509.26030}, 
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

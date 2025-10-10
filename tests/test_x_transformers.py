@@ -1360,3 +1360,13 @@ def test_vae():
     style = torch.randint(0, 256, (1, 1024))
 
     out = model.generate(seq[:, :512], 512, seq_for_latents = style)
+
+def test_muon_params():
+    from x_transformers import Attention, FeedForward
+
+    attn = Attention(dim = 512, dim_out = 384)
+    assert len(list(attn.muon_parameters())) == 2
+
+    ff = FeedForward(dim = 512)
+
+    assert len(list(ff.muon_parameters())) == 2

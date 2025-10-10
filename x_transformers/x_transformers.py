@@ -4,6 +4,11 @@ from typing import Callable
 import math
 from copy import deepcopy
 from random import random, randrange
+from functools import partial, wraps
+from itertools import chain
+from collections import namedtuple
+from contextlib import nullcontext
+from dataclasses import dataclass
 from packaging import version
 
 import torch
@@ -12,11 +17,6 @@ import torch.nn.functional as F
 from torch import nn, einsum, tensor, Tensor, cat, stack, arange, is_tensor
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from torch.nn import Module, ModuleList, ModuleDict
-
-from functools import partial, wraps
-from collections import namedtuple
-from contextlib import nullcontext
-from dataclasses import dataclass
 
 from loguru import logger
 
@@ -1279,6 +1279,17 @@ class FeedForward(Module):
         if zero_init_output:
             init_zero_(proj_out)
 
+    def muon_parameters(self):
+        weights = []
+
+        for m in self.modules():
+            if not isinstance(m, nn.Linear):
+                continue
+
+            weights.append(m.weight)
+
+        return weights
+
     def forward(
         self,
         x,
@@ -1643,6 +1654,9 @@ class Attention(Module):
 
         q_weight.mul_(qk_weight_scale)
         k_weight.mul_(qk_weight_scale)
+
+    def muon_parameters(self):
+        return chain(self.to_v.parameters(), self.to_out.parameters())
 
     def forward(
         self,
