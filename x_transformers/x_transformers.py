@@ -2493,6 +2493,17 @@ class AttentionLayers(Module):
         for attn_layer, attn_inter in zip(attn_layers, attn_intermeds):
             attn_layer.qk_clip_(attn_inter, tau = tau)
 
+    def muon_parameters(self):
+        params = []
+
+        for m in self.modules():
+            if not isinstance(m, (Attention, FeedForward)):
+                continue
+
+            params.extend(list(m.muon_parameters()))
+
+        return params
+
     def forward(
         self,
         x,
@@ -3229,6 +3240,9 @@ class TransformerWrapper(Module):
         tau = 100.
     ):
         self.attn_layers.attn_qk_clip_(intermediates, tau = tau)
+
+    def muon_parameters(self):
+        return self.attn_layers.muon_parameters()
 
     def forward(
         self,

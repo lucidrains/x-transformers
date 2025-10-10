@@ -1362,7 +1362,7 @@ def test_vae():
     out = model.generate(seq[:, :512], 512, seq_for_latents = style)
 
 def test_muon_params():
-    from x_transformers import Attention, FeedForward
+    from x_transformers import Attention, FeedForward, Encoder
 
     attn = Attention(dim = 512, dim_out = 384)
     assert len(list(attn.muon_parameters())) == 2
@@ -1370,3 +1370,6 @@ def test_muon_params():
     ff = FeedForward(dim = 512)
 
     assert len(list(ff.muon_parameters())) == 2
+
+    enc = Encoder(dim = 512, depth = 2)
+    assert len(enc.muon_parameters()) > 0
