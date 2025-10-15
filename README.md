@@ -2525,4 +2525,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{yan2017hierarchicalmultiscaleattentionnetworks,
+    title   = {Hierarchical Multi-scale Attention Networks for Action Recognition}, 
+    author  = {Shiyang Yan and Jeremy S. Smith and Wenjin Lu and Bailing Zhang},
+    year    = {2017},
+    eprint  = {1708.07590},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV},
+    url     = {https://arxiv.org/abs/1708.07590}, 
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

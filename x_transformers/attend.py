@@ -171,6 +171,9 @@ class Attend(Module):
         qk_norm = False,
         l2_distance = False,
         sigmoid = False,
+        gumbel_softmax = False,
+        gumbel_softmax_temp = 1.,
+        gumbel_softmax_hard = True,
         custom_attn_fn: Callable | None = None,
         flash = False,
         softclamp_logits = False,
@@ -203,7 +206,7 @@ class Attend(Module):
         assert not (flash and hard), 'hard attention not available for flash'
         assert not (flash and is_sparse_topk_attn), 'topk attention not available for flash'
 
-        assert at_most_one_of(sigmoid, hard, l2_distance, is_sparse_topk_attn)
+        assert at_most_one_of(sigmoid, hard, l2_distance, gumbel_softmax, is_sparse_topk_attn)
 
         if exists(custom_attn_fn):
             self.attn_fn = custom_attn_fn
@@ -213,6 +216,8 @@ class Attend(Module):
             self.attn_fn = one_hot_straight_through
         elif is_sparse_topk_attn:
             self.attn_fn = partial(sparse_topk_attn, sparse_topk = sparse_topk, straight_through = sparse_topk_straight_through)
+        elif gumbel_softmax:
+            self.attn_fn = partial(F.gumbel_softmax, dim = -1, tau = gumbel_softmax_temp, hard = gumbel_softmax_hard)
         else:
             softmax_fn = partial(F.softmax, dim = -1)
             self.attn_fn = partial(softmax_fn, dtype = torch.float32) if not qk_norm else softmax_fn

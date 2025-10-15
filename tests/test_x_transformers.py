@@ -1373,3 +1373,11 @@ def test_muon_params():
 
     enc = Encoder(dim = 512, depth = 2)
     assert len(enc.muon_parameters()) > 0
+
+def test_stochastic_attn():
+    from x_transformers import Attention
+
+    attn = Attention(dim = 512, gumbel_softmax = True)
+    out = attn(torch.randn(1, 1024, 512))
+
+    assert out.shape == (1, 1024, 512)
