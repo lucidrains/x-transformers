@@ -67,6 +67,15 @@ def once(fn):
 
 print_once = once(print)
 
+# gumbel softmax attention related
+
+def log_prob_from_hard_attend(intermeds: Intermediates):
+    log_probs = intermeds.pre_softmax_attn.log_softmax(dim = -1)
+
+    one_hot = intermeds.post_softmax_attn.argmax(dim = -1, keepdim = True)
+    log_prob = log_probs.gather(-1, one_hot)
+    return rearrange(log_prob, 'b h i 1 -> b h i')
+
 # selective attention
 # https://arxiv.org/abs/2410.02703 - section 3.3
 # it is a technique to allow each token to prevent itself from being attended to by future tokens

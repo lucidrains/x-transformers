@@ -1378,6 +1378,10 @@ def test_stochastic_attn():
     from x_transformers import Attention
 
     attn = Attention(dim = 512, gumbel_softmax = True)
-    out = attn(torch.randn(1, 1024, 512))
+    out, intermediate = attn(torch.randn(1, 1024, 512), return_intermediates = True)
 
     assert out.shape == (1, 1024, 512)
+
+    from x_transformers.attend import log_prob_from_hard_attend
+    log_probs = log_prob_from_hard_attend(intermediate)
+    assert log_probs.shape == (1, 8, 1024)
