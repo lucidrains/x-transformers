@@ -1,7 +1,7 @@
 # /// script
 # dependencies = [
 #   "x-transformers",
-#   "adam-atan2-pytorch>=0.2.2",
+#   "adam-atan2-pytorch>=0.2.4",
 # ]
 # ///
 
@@ -25,7 +25,6 @@ NUM_BATCHES = int(1e5)
 BATCH_SIZE = 4
 GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 1e-4
-MUON_LEARNING_RATE = 1e-3
 VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
 GENERATE_LENGTH = 1024
@@ -92,8 +91,7 @@ optim = MuonAdamAtan2(
     muon_params = model.muon_parameters(),
     params = model.parameters(),
     remove_muon_params_from_params = True,
-    lr = LEARNING_RATE,
-    muon_lr = MUON_LEARNING_RATE,
+    lr = LEARNING_RATE
 )
 
 # training
