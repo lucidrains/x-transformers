@@ -183,6 +183,7 @@ class Attend(Module):
         gumbel_softmax = False,
         gumbel_softmax_temp = 1.,
         gumbel_softmax_hard = True,
+        cog_signed = False,
         custom_attn_fn: Callable | None = None,
         flash = False,
         softclamp_logits = False,
@@ -259,6 +260,12 @@ class Attend(Module):
         assert not (flash and selective), 'selective attention cannot work on flash attention'
         assert not (selective and not causal), 'selective attention is designed for autoregressive'
         self.selective = selective
+
+        # cog attention - negative weights for expressiveness
+        # https://openreview.net/forum?id=ezRrwwbxd0
+
+        assert not (flash and cog_signed), 'cog attention not available for flash'
+        self.cog_signed = cog_signed
 
         # l2 distance attention
 
@@ -509,6 +516,13 @@ class Attend(Module):
         if self.softclamp_logits:
             sim = softclamp(sim, self.logit_softclamp_value)
 
+        # pre-masking - handle cog by storing sign
+
+        if self.cog_signed:
+            sim_sign = sim.sign()
+
+        # masking
+
         i, j, dtype = *sim.shape[-2:], sim.dtype
 
         mask_value = -torch.finfo(sim.dtype).max
@@ -538,9 +552,17 @@ class Attend(Module):
 
         pre_softmax_attn = sim
 
+        if self.cog_signed:
+            sim = sim.abs()
+
         attn = self.attn_fn(sim)
 
         attn = attn.type(dtype)
+
+        # add back the sign
+
+        if self.cog_signed:
+            attn = attn * sim_sign
 
         post_softmax_attn = attn
 

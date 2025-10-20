@@ -2537,4 +2537,15 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{anonymous2025more,
+    title   = {More Expressive Attention with Negative Weights},
+    author  = {Anonymous},
+    booktitle = {Submitted to The Fourteenth International Conference on Learning Representations},
+    year    = {2025},
+    url     = {https://openreview.net/forum?id=ezRrwwbxd0},
+    note    = {under review}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
