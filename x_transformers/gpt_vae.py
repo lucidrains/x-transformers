@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # applying the cvae + detr design from ACT (Zhou et al.) to GPT
 # for steering, diversity rlvr, map-elites in epo, and other possibilities
+# todo - integrate https://openreview.net/forum?id=RV43b2B1SC method + their stabilization technique
 
 import torch
 from torch import nn, Tensor, is_tensor, tensor
