@@ -2537,4 +2537,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{lv2025expressiveattentionnegativeweights,
+    title   = {More Expressive Attention with Negative Weights}, 
+    author  = {Ang Lv and Ruobing Xie and Shuaipeng Li and Jiayi Liao and Xingwu Sun and Zhanhui Kang and Di Wang and Rui Yan},
+    year    = {2025},
+    eprint  = {2411.07176},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL},
+    url     = {https://arxiv.org/abs/2411.07176}, 
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

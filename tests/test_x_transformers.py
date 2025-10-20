@@ -1385,3 +1385,21 @@ def test_stochastic_attn():
     from x_transformers.attend import log_prob_from_hard_attend
     log_probs = log_prob_from_hard_attend(intermediate)
     assert log_probs.shape == (1, 8, 1024)
+
+def test_attn_negative_weights():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 12,
+            heads = 8,
+            attn_cog_signed = True
+        ),
+    )
+
+    x = torch.randint(0, 256, (1, 10))
+
+    logits = model(x)
