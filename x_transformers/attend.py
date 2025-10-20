@@ -549,6 +549,11 @@ class Attend(Module):
         if self.head_learned_sink:
             # add learned attention sink
             attn_sink = repeat(self.head_attn_sink, 'h -> b h i 1', b = sim.shape[0], i = sim.shape[2])
+
+            if self.cog_signed:
+                attn_sink, attn_sink_sign = attn_sink.abs(), attn_sink.sign()
+                sim_sign = cat((attn_sink_sign, sim_sign), dim = -1)
+
             sim = cat((attn_sink, sim), dim = -1)
 
         pre_softmax_attn = sim
