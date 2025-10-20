@@ -1,4 +1,5 @@
 import pytest
+param = pytest.mark.parametrize
 
 import torch
 from torch import nn
@@ -186,7 +187,7 @@ def test_average_pool_embed():
 
     assert logits.shape == (2, 20000)
 
-@pytest.mark.parametrize('num_cls_tokens', (1, 2))
+@param('num_cls_tokens', (1, 2))
 def test_cls_token(num_cls_tokens):
     model = TransformerWrapper(
         num_tokens = 20000,
@@ -234,7 +235,7 @@ def test_squeeze_logit_dim_one():
 
     assert logits.shape == (2,)
 
-@pytest.mark.parametrize('depth', (4, 5))
+@param('depth', (4, 5))
 def test_unet_skip(depth):
 
     model = TransformerWrapper(
@@ -294,7 +295,7 @@ def test_mos():
 
     eval_logits = model(x)
 
-@pytest.mark.parametrize('attn_one_kv_head', (True, False))
+@param('attn_one_kv_head', (True, False))
 def test_l2_distance(attn_one_kv_head):
 
     model = TransformerWrapper(
@@ -331,7 +332,7 @@ def test_reinject_input():
 
     model(x) # (1, 1024, 20000)
 
-@pytest.mark.parametrize('learned_value_residual_mix', (False, True))
+@param('learned_value_residual_mix', (False, True))
 def test_value_residual(
     learned_value_residual_mix: bool
 ):
@@ -352,7 +353,7 @@ def test_value_residual(
 
     model(x)
 
-@pytest.mark.parametrize('has_num_mem_kv', (False, True))
+@param('has_num_mem_kv', (False, True))
 def test_forgetting_transformer(
     has_num_mem_kv: bool
 ):
@@ -388,7 +389,7 @@ def test_neo_mlp():
     out = mlp(x)
     assert out.shape == (3, 7)
 
-@pytest.mark.parametrize('flash', (True, False))
+@param('flash', (True, False))
 def test_custom_alibi(flash: bool):
 
     model = TransformerWrapper(
@@ -409,7 +410,7 @@ def test_custom_alibi(flash: bool):
 
     logits = model(x, pos = pos)
 
-@pytest.mark.parametrize('rotary_xpos', (True, False))
+@param('rotary_xpos', (True, False))
 def test_custom_rotary_pos_emb(rotary_xpos):
     from einops import repeat
 
@@ -433,7 +434,7 @@ def test_custom_rotary_pos_emb(rotary_xpos):
     logits2 = model(x)
     assert torch.allclose(logits1, logits2)
 
-@pytest.mark.parametrize('flash', (True, False))
+@param('flash', (True, False))
 def test_custom_alibi_across_heads(flash: bool):
     model = Decoder(
         dim = 512,
@@ -455,7 +456,7 @@ def test_custom_alibi_across_heads(flash: bool):
 
     embed = model(x, pos = pos)
 
-@pytest.mark.parametrize('embedder_type', ('embedding', 'none', 'custom'))
+@param('embedder_type', ('embedding', 'none', 'custom'))
 def test_embedder(embedder_type):
     num_tokens = 20000
     dim = 128
@@ -502,7 +503,7 @@ def test_embedder(embedder_type):
     assert output.shape == (2, 1024, 20000)
 
 
-@pytest.mark.parametrize("to_logits", ('linear', 'none', 'pointer'))
+@param("to_logits", ('linear', 'none', 'pointer'))
 def test_to_logits(to_logits):
     num_tokens = 20000
     dim = 128
@@ -560,8 +561,8 @@ def test_laser():
 
     model(x)
 
-@pytest.mark.parametrize('self_attn_custom_pos', (True, False))
-@pytest.mark.parametrize('cross_attn_rotary', (True, False))
+@param('self_attn_custom_pos', (True, False))
+@param('cross_attn_rotary', (True, False))
 def test_cross_attn_rotary(
     self_attn_custom_pos: bool,
     cross_attn_rotary: bool
@@ -593,7 +594,7 @@ def test_cross_attn_rotary(
       context_mask = context_mask
     )
 
-@pytest.mark.parametrize('tanh', (True, False))
+@param('tanh', (True, False))
 def test_hyper_connections(tanh):
 
     model = TransformerWrapper(
@@ -614,7 +615,7 @@ def test_hyper_connections(tanh):
 
     model(x)
 
-@pytest.mark.parametrize('hybrid_axial_dim', (1, 4))
+@param('hybrid_axial_dim', (1, 4))
 def test_hybrid(hybrid_axial_dim):
     from torch.nn import GRU
 
@@ -770,8 +771,8 @@ def test_multi_latent_attention():
 
     model(x)
 
-@pytest.mark.parametrize('num_residual_streams', (1, 4))
-@pytest.mark.parametrize('integrate_layers', (False, True))
+@param('num_residual_streams', (1, 4))
+@param('integrate_layers', (False, True))
 def test_lime(
     num_residual_streams,
     integrate_layers
@@ -792,10 +793,10 @@ def test_lime(
 
     model(x)
 
-@pytest.mark.parametrize('backward_ar_loss_weight', (1., 0.5))
-@pytest.mark.parametrize('goal_suffix', (False, True))
-@pytest.mark.parametrize('pred_distance', (False, True))
-@pytest.mark.parametrize('variable_len', (False, True))
+@param('backward_ar_loss_weight', (1., 0.5))
+@param('goal_suffix', (False, True))
+@param('pred_distance', (False, True))
+@param('variable_len', (False, True))
 def test_belief_state_wrapper(
     backward_ar_loss_weight,
     goal_suffix,
@@ -867,7 +868,7 @@ def test_dynamic_tanh():
 
     model(x)
 
-@pytest.mark.parametrize('var_length', (False, True))
+@param('var_length', (False, True))
 def test_entropy_based_tokenizer(
     var_length
 ):
@@ -966,9 +967,9 @@ def test_ff_deep_embed():
 
     assert logits.shape == (2, 1024, 20000)
 
-@pytest.mark.parametrize('probabilistic', (False, True))
-@pytest.mark.parametrize('cache_kv', (False, True))
-@pytest.mark.parametrize('rollout_steps', (1, 4))
+@param('probabilistic', (False, True))
+@param('cache_kv', (False, True))
+@param('rollout_steps', (1, 4))
 def test_continuous(
     probabilistic,
     cache_kv,
@@ -1012,7 +1013,7 @@ def test_continuous(
     generated = model.generate(start_emb, 17, cache_kv = cache_kv) # (17, 777)
     assert generated.shape == (17, 777)
 
-@pytest.mark.parametrize('add_continuous_pred_head', (False, True))
+@param('add_continuous_pred_head', (False, True))
 def test_autoregressive_wrapper(
     add_continuous_pred_head
 ):
@@ -1100,7 +1101,7 @@ def add_attn_pool():
 
     assert intermediates.attn_pooled_tokens.shape[1] == 3
 
-@pytest.mark.parametrize('keep_buffer_on_cpu', (False, True))
+@param('keep_buffer_on_cpu', (False, True))
 def test_up(
     keep_buffer_on_cpu
 ):
@@ -1126,7 +1127,7 @@ def test_up(
     loss = up_wrapper()
     loss.backward()
 
-@pytest.mark.parametrize('stochastic', (False, True))
+@param('stochastic', (False, True))
 def test_beam_search(stochastic):
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
 
@@ -1154,8 +1155,8 @@ def test_beam_search(stochastic):
     assert scores.shape == (4, 2)
 
 
-@pytest.mark.parametrize('num_pooled_tokens', (1, 3))
-@pytest.mark.parametrize('attn_pool_depth', (1, 3))
+@param('num_pooled_tokens', (1, 3))
+@param('attn_pool_depth', (1, 3))
 def test_attn_pooler(
     num_pooled_tokens,
     attn_pool_depth
@@ -1288,7 +1289,7 @@ def test_accept_layer_intermediates():
 
     assert embeds.shape == (3, 32, 512)
 
-@pytest.mark.parametrize('use_loss_weight', (False, True))
+@param('use_loss_weight', (False, True))
 def test_simple_mdlm(
     use_loss_weight
 ):
@@ -1386,7 +1387,10 @@ def test_stochastic_attn():
     log_probs = log_prob_from_hard_attend(intermediate)
     assert log_probs.shape == (1, 8, 1024)
 
-def test_attn_negative_weights():
+@param('head_learned_sink', (True, False))
+def test_attn_negative_weights(
+    head_learned_sink
+):
     from x_transformers import TransformerWrapper, Decoder
 
     model = TransformerWrapper(
@@ -1396,7 +1400,8 @@ def test_attn_negative_weights():
             dim = 512,
             depth = 12,
             heads = 8,
-            attn_cog_signed = True
+            attn_cog_signed = True,
+            attn_head_learned_sink = True
         ),
     )
 

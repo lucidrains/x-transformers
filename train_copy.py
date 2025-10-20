@@ -17,27 +17,29 @@ DEC_SEQ_LEN = 64 + 1
 
 def cycle():
     while True:
-        prefix = torch.ones((BATCH_SIZE, 1)).long().cuda()
-        src = torch.randint(2, NUM_TOKENS, (BATCH_SIZE, ENC_SEQ_LEN)).long().cuda()
+        prefix = torch.ones((BATCH_SIZE, 1)).long()
+        src = torch.randint(2, NUM_TOKENS, (BATCH_SIZE, ENC_SEQ_LEN)).long()
         tgt = torch.cat((prefix, src, src), 1)
-        src_mask = torch.ones(BATCH_SIZE, src.shape[1]).bool().cuda()
+        src_mask = torch.ones(BATCH_SIZE, src.shape[1]).bool()
         yield (src, tgt, src_mask)
 
 # instantiate model
 
 model = XTransformer(
-    dim = 512,
+    dim = 128,
     tie_token_emb = True,
     return_tgt_loss = True,
     enc_num_tokens=NUM_TOKENS,
     enc_depth = 3,
     enc_heads = 8,
     enc_max_seq_len = ENC_SEQ_LEN,
+    enc_attn_cog_signed = True,
     dec_num_tokens = NUM_TOKENS,
     dec_depth = 3,
     dec_heads = 8,
-    dec_max_seq_len = DEC_SEQ_LEN
-).cuda()
+    dec_max_seq_len = DEC_SEQ_LEN,
+    dec_attn_cog_signed = True
+)
 
 # optimizer
 
@@ -61,10 +63,10 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         model.eval()
         src, _, src_mask = next(cycle())
         src, src_mask = src[:1], src_mask[:1]
-        start_tokens = (torch.ones((1, 1)) * 1).long().cuda()
+        start_tokens = (torch.ones((1, 1)) * 1).long()
 
         sample = model.generate(src, start_tokens, ENC_SEQ_LEN, mask = src_mask)
-        incorrects = (src != sample).abs().sum()
+        incorrects = (src != sample).long().abs().sum()
 
         print(f"input:  ", src)
         print(f"predicted output:  ", sample)
