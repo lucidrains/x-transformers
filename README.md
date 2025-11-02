@@ -2549,4 +2549,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{Fleuret2025TheFT,
+    title   = {The Free Transformer},
+    author  = {Franccois Fleuret},
+    year    = {2025},
+    url     = {https://api.semanticscholar.org/CorpusID:282210283}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

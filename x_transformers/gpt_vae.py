@@ -2,7 +2,9 @@ from __future__ import annotations
 
 # applying the cvae + detr design from ACT (Zhou et al.) to GPT
 # for steering, diversity rlvr, map-elites in epo, and other possibilities
-# todo - integrate https://openreview.net/forum?id=RV43b2B1SC method + their stabilization technique
+
+# turns out professor Fleuret was thinking about this too. - add https://arxiv.org/abs/2510.17558 + their stabilization technique
+# https://www.youtube.com/watch?v=Nao16-6l6dQ
 
 import torch
 from torch import nn, Tensor, is_tensor, tensor
