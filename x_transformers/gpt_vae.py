@@ -44,6 +44,7 @@ class GPTVAE(Module):
         enc_kwargs: dict = dict(),
         dec_kwargs: dict = dict(),
         vae_kl_loss_weight = 1.,
+        vae_kl_div_floor = 0.,      # what was done in free transformer, which in turn came from Kingma 2016
         latents_dropout_prob = 0.5, # what percentage of the time to dropout the latents completely
         pad_id = -1,
         encoder: Module | None = None,
@@ -99,6 +100,7 @@ class GPTVAE(Module):
 
         # loss weights - vae kl loss
 
+        self.vae_kl_div_floor = vae_kl_div_floor
         self.vae_kl_loss_weight = vae_kl_loss_weight
 
         self.latents_dropout = nn.Dropout(latents_dropout_prob)
@@ -190,12 +192,16 @@ class GPTVAE(Module):
 
         # vae kl loss
 
-        vae_kl_loss = (
+        vae_kl_loss = 0.5 * (
             latents_log_var.exp()
             + latents_mean.square()
             - latents_log_var
             - 1.
-        ).sum(dim = -1).mean()
+        )
+
+        vae_kl_loss = F.relu(vae_kl_loss - self.vae_kl_div_floor)
+
+        vae_kl_loss = vae_kl_loss.sum(dim = -1).mean()
 
         # return losses
 
