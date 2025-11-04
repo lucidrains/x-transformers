@@ -133,9 +133,12 @@ class FreeTransformer(Module):
         dim_latent = None,
         attn_dim_head = 64,
         heads = 8,
+        latent_bits = 16,
+        kl_loss_threshold = NAT,
+        binary_mapper_kwargs: dict = dict(),
         enc_kwargs: dict = dict(),
         dec_kwargs: dict = dict(),
-        vae_kl_loss_weight = 1.,
+        kl_loss_weight = 1.,
         pad_id = -1,
         encoder: Module | None = None,
         **kwargs
@@ -159,14 +162,19 @@ class FreeTransformer(Module):
 
         self.encoder = encoder
 
-        self.to_latent_mean_log_variance = nn.Sequential(
+        self.to_latent_bit_logits = nn.Sequential(
             Reduce('b n d -> b d', 'mean'),
-            nn.Linear(dim, dim_latent * 2),
-            Rearrange('b ... (two d) -> two b ... d', two = 2)
+            nn.Linear(dim, latent_bits, bias = False),
+        )
+
+        self.binary_mapper = BinaryMapper(
+            latent_bits,
+            kl_loss_threshold,
+            **binary_mapper_kwargs
         )
 
         self.from_latent_to_condition = nn.Sequential(
-            nn.Linear(dim_latent, dim),
+            nn.Linear(2 ** latent_bits, dim, bias = False),
             Rearrange('b d -> b 1 d')
         )
 
@@ -192,9 +200,7 @@ class FreeTransformer(Module):
 
         self.pad_id = pad_id
 
-        # loss weights - vae kl loss
-
-        self.vae_kl_loss_weight = vae_kl_loss_weight
+        self.kl_loss_weight = kl_loss_weight
 
     @property
     def device(self):
@@ -204,21 +210,18 @@ class FreeTransformer(Module):
         self,
         seq,
         mask = None,
-        return_mean_log_var = False
+        return_kl_loss = False
     ):
         pooled = self.encoder(seq, mask = mask)
 
-        latents_mean, latents_log_var = self.to_latent_mean_log_variance(pooled)
-        latents_std = (0.5 * latents_log_var).exp()
+        bit_logits = self.to_latent_bit_logits(pooled)
 
-        # reparam trick
+        one_hot_latents, kl_loss = self.binary_mapper(bit_logits, straight_through = True)
 
-        latents = latents_mean + latents_std * torch.randn_like(latents_mean)
+        if not return_kl_loss:
+            return one_hot_latents
 
-        if not return_mean_log_var:
-            return latents
-
-        return latents, (latents_mean, latents_log_var)
+        return one_hot_latents, kl_loss
 
     @torch.no_grad()
     def generate(
@@ -226,20 +229,12 @@ class FreeTransformer(Module):
         prompts,
         seq_len,
         latents = None,
-        seq_for_latents = None,
         filter_logits_fn = top_p,
         logit_filter_kwargs: dict = dict(thres = 0.9)
     ):
         prompts, inverse_pack = pack_with_inverse(prompts, '* n')
 
         batch = prompts.shape[0]
-
-        # if seq_for_latents passed in, derive latents from it
-
-        if exists(seq_for_latents):
-            assert not exists(latents), 'latents should not be passed in if given the seq from which to derive them'
-
-            latents = self.encode_to_latents(seq_for_latents)
 
         # prepend embeds
 
@@ -302,7 +297,7 @@ class FreeTransformer(Module):
 
         # get latent Z
 
-        latents, (latents_mean, latents_log_var) = self.encode_to_latents(tokens, mask = encoder_mask, return_mean_log_var = True)
+        latents, kl_loss = self.encode_to_latents(tokens, mask = encoder_mask, return_kl_loss = True)
 
         condition = self.from_latent_to_condition(latents)
 
@@ -320,25 +315,16 @@ class FreeTransformer(Module):
             ignore_index = self.pad_id
         )
 
-        # vae kl loss
-
-        vae_kl_loss = (
-            latents_log_var.exp()
-            + latents_mean.square()
-            - latents_log_var
-            - 1.
-        ).sum(dim = -1).mean()
-
         # return losses
 
         total_loss = (
             ar_loss +
-            vae_kl_loss * self.vae_kl_loss_weight
+            kl_loss * self.kl_loss_weight
         )
 
         if not return_all_losses:
             return total_loss
 
-        losses = (ar_loss, vae_kl_loss)
+        losses = (ar_loss, kl_loss)
 
         return total_loss, losses

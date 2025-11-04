@@ -1,6 +1,7 @@
 
 from x_transformers.free_transformer import FreeTransformer
 
+from math import log
 import random
 import tqdm
 import gzip
@@ -23,6 +24,8 @@ GENERATE_EVERY  = 250
 GENERATE_LENGTH = 512
 PRIME_LENGTH = 32
 SEQ_LEN = 512
+LATENT_BITS = 8
+NAT = log(2)
 
 # helpers
 
@@ -48,11 +51,13 @@ model = FreeTransformer(
     dec_head_depth = 4,
     dec_tail_depth = 4,
     enc_depth = 3,
-    vae_kl_loss_weight = 1.,
-    dim_latent = 1 # compress to 1 as an example
+    kl_loss_weight = 1.,
+    kl_loss_threshold = NAT,
+    latent_bits = LATENT_BITS
 ).cuda()
 
-latents = tensor([1.]).cuda()
+rand_index = torch.randint(0, 2 ** LATENT_BITS, ())
+latents = F.one_hot(rand_index, 2 ** LATENT_BITS).float().cuda()
 
 # prepare enwik8 data
 
@@ -119,14 +124,4 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
 
         output_str = decode_tokens(sample)
 
-        print(f'\n\nlatent {latents.tolist()} - ', output_str)
-
-        sample_other_direction = model.generate(
-            prompts = inp,
-            seq_len = GENERATE_LENGTH,
-            latents = -latents
-        )
-
-        output_str = decode_tokens(sample_other_direction)
-        print(f'\n\nlatent {(-latents).tolist()} - ', output_str)
-        print('\n\n')
+        print(f'\n\nlatent {rand_index.tolist()} - ', output_str)
