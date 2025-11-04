@@ -303,7 +303,7 @@ class FreeTransformer(Module):
 
         # decoder tail
 
-        tokens = self.decoder_tail(tokens)
+        tokens = self.decoder_tail(tokens + condition)
 
         # cross entropy loss
 
