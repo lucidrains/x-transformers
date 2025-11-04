@@ -19,8 +19,9 @@ BATCH_SIZE = 4
 GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 1e-4
 VALIDATE_EVERY  = 100
-GENERATE_EVERY  = 500
+GENERATE_EVERY  = 250
 GENERATE_LENGTH = 512
+PRIME_LENGTH = 32
 SEQ_LEN = 512
 
 # helpers
@@ -42,9 +43,10 @@ model = FreeTransformer(
     num_tokens = 256,
     max_seq_len = SEQ_LEN,
     dim = 512,
-    depth = 6,
     heads = 8,
     rotary_pos_emb = True,
+    dec_head_depth = 4,
+    dec_tail_depth = 4,
     enc_depth = 3,
     vae_kl_loss_weight = 1.,
     dim_latent = 1 # compress to 1 as an example
@@ -105,14 +107,13 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
 
     if i % GENERATE_EVERY == 0:
         model.eval()
-        inp = random.choice(val_dataset)[:-1]
+        inp = random.choice(val_dataset)[:PRIME_LENGTH]
         prime = decode_tokens(inp)
         print(f'%s \n\n %s', (prime, '*' * 100))
 
         sample = model.generate(
             prompts = inp,
             seq_len = GENERATE_LENGTH,
-            cache_kv = True,
             latents = latents
         )
 
@@ -123,9 +124,9 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         sample_other_direction = model.generate(
             prompts = inp,
             seq_len = GENERATE_LENGTH,
-            cache_kv = True,
             latents = -latents
         )
 
         output_str = decode_tokens(sample_other_direction)
         print(f'\n\nlatent {(-latents).tolist()} - ', output_str)
+        print('\n\n')
