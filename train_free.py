@@ -1,3 +1,9 @@
+# /// script
+# dependencies = [
+#   "tqdm",
+#   "x-transformers>=2.11.0",
+# ]
+# ///
 
 from x_transformers.free_transformer import FreeTransformer
 
@@ -24,6 +30,7 @@ GENERATE_EVERY  = 250
 GENERATE_LENGTH = 512
 PRIME_LENGTH = 32
 SEQ_LEN = 512
+
 LATENT_BITS = 8
 NAT = log(2)
 
