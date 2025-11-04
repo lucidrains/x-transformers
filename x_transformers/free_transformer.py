@@ -4,8 +4,10 @@ from __future__ import annotations
 # François Fleuret
 # https://www.youtube.com/watch?v=Nao16-6l6dQ
 
+import math
+
 import torch
-from torch import nn, Tensor, is_tensor, tensor
+from torch import nn, Tensor, is_tensor, tensor, arange
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
 
@@ -22,7 +24,7 @@ from x_transformers.autoregressive_wrapper import (
 )
 
 from einops.layers.torch import Rearrange, Reduce
-from einops import rearrange, reduce, repeat, pack, unpack
+from einops import rearrange, reduce, repeat, einsum, pack, unpack
 
 # helper functions
 
@@ -31,6 +33,9 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+def log(t, eps = 1e-20):
+    return t.clamp_min(eps).log()
 
 def pack_with_inverse(t, pattern):
     packed, ps = pack([t], pattern)
@@ -41,6 +46,77 @@ def pack_with_inverse(t, pattern):
         return unpacked
 
     return packed, inverse
+
+# binary mapper
+
+NAT = math.log(2)
+
+def binary_entropy(logits):
+    prob = logits.sigmoid()
+    not_prob = 1. - prob
+    return -(prob * F.logsigmoid(logits) + not_prob * F.logsigmoid(-logits)).sum(dim = -1)
+
+class BinaryMapper(Module):
+    def __init__(
+        self,
+        bits = 1,
+        kl_loss_threshold = NAT # 1 bit
+    ):
+        super().__init__()
+
+        self.bits = bits
+        self.num_codes = 2 ** bits
+        self.kl_loss_threshold = kl_loss_threshold
+
+        power_two = 2 ** arange(bits)
+        codes = (arange(self.num_codes)[:, None].bitwise_and(power_two) != 0).byte().bool()
+
+        self.register_buffer('power_two', power_two, persistent = False)
+        self.register_buffer('codes', codes, persistent = False)
+
+    def forward(
+        self,
+        logits,
+        temperature = 1.,
+        straight_through = None
+    ):
+        straight_through = default(straight_through, self.training)
+
+        assert logits.shape[-1] == self.bits, f'logits must have a last dimension of {self.bits}'
+
+        # temperature and prob for sampling
+
+        prob_for_sample = (logits / temperature).sigmoid()
+
+        # sampling
+
+        sampled_bits = (torch.rand_like(logits) <= prob_for_sample).long()
+        indices = (self.power_two * sampled_bits).sum(dim = -1)
+
+        one_hot = F.one_hot(indices, self.num_codes).float()
+
+        # return hard one hot if not training or overridden
+
+        if not straight_through:
+            return one_hot
+
+        # calculate negative entropy
+
+        kl_div = self.bits * NAT - binary_entropy(logits)
+        aux_kl_loss = F.relu(kl_div - self.kl_loss_threshold).mean()
+
+        # get the soft G for the gradients and do a straight through
+
+        soft_G = (
+            einsum(F.logsigmoid(logits), self.codes.float(), '... bits, codes bits -> ... codes') +
+            einsum(F.logsigmoid(-logits), (~self.codes).float(), '... bits, codes bits -> ... codes')
+        ).exp()
+
+        # straight through
+
+        one_hot = one_hot + soft_G - soft_G.detach()
+
+        return one_hot, aux_kl_loss
 
 # classes
 
