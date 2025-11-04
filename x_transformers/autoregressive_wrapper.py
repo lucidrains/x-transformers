@@ -43,6 +43,10 @@ def log(t, eps = 1e-20):
 def gumbel_noise(t):
     return -log(-log(torch.rand_like(t)))
 
+def gumbel_sample(logits, temperature = 1., eps = 1e-6):
+    noise = gumbel_noise(logits)
+    return ((logits / max(temperature, eps)) + noise).argmax(dim = -1)
+
 # function for modifying all the cached key / values
 
 def modify_cached_kv(cache, fn):
