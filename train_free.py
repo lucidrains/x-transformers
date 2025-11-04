@@ -1,5 +1,5 @@
 
-from x_transformers.free_transformer import GPTVAE
+from x_transformers.free_transformer import FreeTransformer
 
 import random
 import tqdm
@@ -38,7 +38,7 @@ def decode_tokens(tokens):
 
 # instantiate GPT-like decoder model
 
-model = GPTVAE(
+model = FreeTransformer(
     num_tokens = 256,
     max_seq_len = SEQ_LEN,
     dim = 512,
