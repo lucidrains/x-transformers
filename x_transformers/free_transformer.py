@@ -197,7 +197,9 @@ class FreeTransformer(Module):
             pre_norm_has_final_norm = False,
             **kwargs,
             **dec_kwargs
-        )
+        ) if dec_head_depth > 0 else nn.Identity()
+
+        assert dec_tail_depth > 0
 
         self.decoder_tail = Decoder(
             dim = dim,

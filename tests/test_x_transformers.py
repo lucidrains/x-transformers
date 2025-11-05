@@ -1410,7 +1410,9 @@ def test_attn_negative_weights(
     logits = model(x)
 
 @param('per_token_latents', (False, True))
+@param('dec_head_depth', (0, 4))
 def test_free(
+    dec_head_depth,
     per_token_latents
 ):
     from x_transformers.free_transformer import FreeTransformer
@@ -1420,9 +1422,9 @@ def test_free(
         max_seq_len = 1024,
         dim = 512,
         heads = 8,
-        dec_head_depth = 4,
+        dec_head_depth = dec_head_depth,
         dec_tail_depth = 4,
-        enc_depth = 3,
+        enc_depth = 2,
         kl_loss_weight = 1.,
         per_token_latents = per_token_latents,
         latent_bits = 8
