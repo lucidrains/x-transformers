@@ -3438,6 +3438,7 @@ class TransformerWrapper(Module):
 
         kwargs = dict(
             **kwargs,
+            pos = pos,
             seq_pos_offset = seq_pos_offset,
             seq_start_pos = seq_start_pos,
             input_not_include_cache = input_not_include_cache
