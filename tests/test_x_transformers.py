@@ -586,12 +586,12 @@ def test_cross_attn_rotary(
     context_pos = torch.arange(128) if cross_attn_rotary else None
 
     embed = model(
-      x = x,
-      mask = mask,
-      context = context,
-      pos = pos,
-      context_pos = context_pos,
-      context_mask = context_mask
+        x = x,
+        mask = mask,
+        context = context,
+        pos = pos,
+        context_pos = context_pos,
+        context_mask = context_mask
     )
 
 @param('tanh', (True, False))
@@ -1408,3 +1408,29 @@ def test_attn_negative_weights(
     x = torch.randint(0, 256, (1, 10))
 
     logits = model(x)
+
+@param('per_token_latents', (False, True))
+def test_free(
+    per_token_latents
+):
+    from x_transformers.free_transformer import FreeTransformer
+
+    model = FreeTransformer(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        dim = 512,
+        heads = 8,
+        dec_head_depth = 4,
+        dec_tail_depth = 4,
+        enc_depth = 3,
+        kl_loss_weight = 1.,
+        per_token_latents = per_token_latents,
+        latent_bits = 8
+    )
+
+    seq = torch.randint(0, 256, (1, 1024))
+
+    loss, (ar_loss, aux_loss) = model(seq, return_all_losses = True)
+    loss.backward()
+
+    assert aux_loss.numel() == 1

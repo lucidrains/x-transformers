@@ -128,19 +128,19 @@ class FreeTransformer(Module):
         dim,
         dec_head_depth,
         dec_tail_depth,
-        enc_depth,
         max_seq_len,
+        enc_depth = 1,
         dim_latent = None,
         attn_dim_head = 64,
         heads = 8,
         latent_bits = 16,
+        per_token_latents = True,  # they use a latent per token in the sequence, instead of one for entire sequence, iiuc
         kl_loss_threshold = NAT,
         binary_mapper_kwargs: dict = dict(),
         enc_kwargs: dict = dict(),
         dec_kwargs: dict = dict(),
         kl_loss_weight = 1.,
         pad_id = -1,
-        encoder: Module | None = None,
         **kwargs
     ):
         super().__init__()
@@ -150,22 +150,22 @@ class FreeTransformer(Module):
 
         self.token_unembed = nn.Linear(dim, num_tokens, bias = False)
 
-        if not exists(encoder):
-            encoder = Encoder(
-                dim = dim,
-                depth = enc_depth,
-                attn_dim_head = attn_dim_head,
-                heads = heads,
-                **kwargs,
-                **enc_kwargs
-            )
+        self.query_token_for_latents = nn.Parameter(torch.randn(dim) * 1e-2)
 
-        self.encoder = encoder
+        self.per_token_latents = per_token_latents
 
-        self.to_latent_bit_logits = nn.Sequential(
-            Reduce('b n d -> b d', 'mean'),
-            nn.Linear(dim, latent_bits, bias = False),
+        self.encoder = Encoder(
+            dim = dim,
+            depth = enc_depth,
+            attn_dim_head = attn_dim_head,
+            heads = heads,
+            only_cross = True,
+            cross_attend = True,
+            **kwargs,
+            **enc_kwargs
         )
+
+        self.to_latent_bit_logits = nn.Linear(dim, latent_bits, bias = False)
 
         self.binary_mapper = BinaryMapper(
             latent_bits,
@@ -173,10 +173,7 @@ class FreeTransformer(Module):
             **binary_mapper_kwargs
         )
 
-        self.from_latent_to_condition = nn.Sequential(
-            nn.Linear(2 ** latent_bits, dim, bias = False),
-            Rearrange('b d -> b 1 d')
-        )
+        self.from_latent_to_condition = nn.Linear(self.binary_mapper.num_codes, dim, bias = False)
 
         self.decoder_head = Decoder(
             dim = dim,
@@ -208,11 +205,34 @@ class FreeTransformer(Module):
 
     def encode_to_latents(
         self,
-        seq,
+        decoder_head_embeds,
         mask = None,
         return_kl_loss = False
     ):
-        pooled = self.encoder(seq, mask = mask)
+        batch, seq_len, device = *decoder_head_embeds.shape[:2], decoder_head_embeds.device
+
+        query_tokens = repeat(self.query_token_for_latents, 'd -> b 1 d', b = batch)
+
+        encoder_kwargs = dict()
+
+        # handle the interesting per query token latents, as in the paper
+
+        if self.per_token_latents:
+            query_tokens = repeat(query_tokens, 'b 1 d -> b n d', n = seq_len)
+
+            rotary_pos = torch.arange(seq_len, device = device)
+
+            encoder_kwargs.update(
+                pos = rotary_pos,
+                context_pos = rotary_pos
+            )
+
+        pooled = self.encoder(
+            query_tokens,
+            context = decoder_head_embeds,
+            context_mask = mask,
+            **encoder_kwargs
+        )
 
         bit_logits = self.to_latent_bit_logits(pooled)
 

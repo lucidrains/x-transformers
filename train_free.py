@@ -54,11 +54,11 @@ model = FreeTransformer(
     max_seq_len = SEQ_LEN,
     dim = 512,
     heads = 8,
-    rotary_pos_emb = True,
     dec_head_depth = 4,
     dec_tail_depth = 4,
     enc_depth = 3,
     kl_loss_weight = 1.,
+    per_token_latents = True,
     kl_loss_threshold = NAT,
     latent_bits = LATENT_BITS
 ).cuda()
