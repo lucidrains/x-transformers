@@ -161,6 +161,8 @@ class FreeTransformer(Module):
             heads = heads,
             only_cross = True,
             cross_attend = True,
+            use_rmsnorm = True,
+            rotary_pos_emb = True,
             **kwargs,
             **enc_kwargs
         )
@@ -180,6 +182,8 @@ class FreeTransformer(Module):
             depth = dec_head_depth,
             attn_dim_head = attn_dim_head,
             heads = heads,
+            rotary_pos_emb = True,
+            use_rmsnorm = True,
             pre_norm_has_final_norm = False,
             **kwargs,
             **dec_kwargs
@@ -190,6 +194,8 @@ class FreeTransformer(Module):
             depth = dec_tail_depth,
             attn_dim_head = attn_dim_head,
             heads = heads,
+            rotary_pos_emb = True,
+            use_rmsnorm = True,
             pre_norm_has_final_norm = True,
             **kwargs,
             **dec_kwargs
