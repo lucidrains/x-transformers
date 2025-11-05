@@ -197,7 +197,7 @@ class FreeTransformer(Module):
             pre_norm_has_final_norm = False,
             **kwargs,
             **dec_kwargs
-        ) if dec_head_depth > 0 else nn.Identity()
+        ) if dec_head_depth > 0 else None
 
         assert dec_tail_depth > 0
 
@@ -268,7 +268,8 @@ class FreeTransformer(Module):
         seq_len,
         latents = None,
         filter_logits_fn = top_p,
-        logit_filter_kwargs: dict = dict(thres = 0.9)
+        logit_filter_kwargs: dict = dict(thres = 0.9),
+        use_kv_cache = True
     ):
         prompts, inverse_pack = pack_with_inverse(prompts, '* n')
 
@@ -282,9 +283,15 @@ class FreeTransformer(Module):
                 latents = tensor(latents, device = self.device)
 
             if latents.ndim == 1: # repeat latents
-                latents = repeat(latents, 'd -> b d', b = batch)
+                latents = repeat(latents, 'd -> b 1 d', b = batch)
+            elif latents.ndim == 2:
+                latents = rearrange(latents, 'b d -> b 1 d')
 
             condition = self.from_latent_to_condition(latents)
+
+        # kv cache
+
+        head_cache = tail_cache = None
 
         # generated
 
@@ -296,9 +303,20 @@ class FreeTransformer(Module):
 
         for _ in range(max(0, seq_len - prompt_len)):
 
-            head_embed = self.decoder_head(tokens)
+            # head, which may not exist
 
-            tail_embed = self.decoder_tail(head_embed, self_attn_kv_residuals = condition)
+            if exists(self.decoder_head):
+                head_embed, next_head_cache = self.decoder_head(tokens, cache = head_cache, return_hiddens = True)
+            else:
+                head_embed, next_head_cache = tokens, None
+
+            # handle one token being given to the decoder tail when doing kv caching - rotary embedding needs to know the seq position offset
+
+            seq_pos_offset = head_cache.cache_length if exists(head_cache) else 0
+
+            # tail
+
+            tail_embed, next_tail_cache = self.decoder_tail(head_embed, cache = tail_cache, seq_pos_offset = seq_pos_offset, self_attn_kv_residuals = condition, return_hiddens = True)
 
             tail_embed = tail_embed[:, -1]
 
@@ -310,6 +328,10 @@ class FreeTransformer(Module):
 
             generated, _ = pack((generated, sampled), 'b *')
             tokens, _ = pack((tokens, self.token_emb(sampled)), 'b * d')
+
+            if use_kv_cache:
+                head_cache = next_head_cache
+                tail_cache = next_tail_cache
 
         return inverse_pack(generated)
 
@@ -328,7 +350,8 @@ class FreeTransformer(Module):
 
         # decoder head
 
-        tokens = self.decoder_head(tokens)
+        if exists(self.decoder_head):
+            tokens = self.decoder_head(tokens)
 
         # get latent Z
 
