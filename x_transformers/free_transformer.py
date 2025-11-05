@@ -296,10 +296,7 @@ class FreeTransformer(Module):
 
             head_embed = self.decoder_head(tokens)
 
-            if exists(condition):
-                head_embed = head_embed + condition
-
-            tail_embed = self.decoder_tail(head_embed)
+            tail_embed = self.decoder_tail(head_embed, self_attn_kv_residuals = condition)
 
             tail_embed = tail_embed[:, -1]
 
@@ -339,7 +336,7 @@ class FreeTransformer(Module):
 
         # decoder tail
 
-        tokens = self.decoder_tail(tokens + condition)
+        tokens = self.decoder_tail(tokens, self_attn_kv_residuals = condition)
 
         # cross entropy loss
 
