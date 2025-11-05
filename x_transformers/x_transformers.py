@@ -1686,6 +1686,7 @@ class Attention(Module):
         value_residual = None,
         additional_key_values: tuple[Tensor, Tensor] | None = None,
         additional_key_value_mask = None,
+        kv_input_residual = None,
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context, qkv_receive_diff_residuals, is_multi_latent_attn = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context), self.qkv_receive_diff_residuals, self.use_latent_kv
 
@@ -1701,6 +1702,12 @@ class Attention(Module):
         else:
             kv_input = default(context, x)
             q_input, k_input, v_input = x, kv_input, kv_input
+
+        # done for free transformer
+
+        if exists(kv_input_residual):
+            k_input = k_input + kv_input_residual
+            v_input = v_input + kv_input_residual
 
         if exists(mem):
             k_input, mem_packed_shape = pack([mem, k_input], 'b * d')
@@ -2543,7 +2550,9 @@ class AttentionLayers(Module):
         route_additional_kv_to_top = True,
         condition = None,
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
-        layers_execute_order: tuple[int, ...] | None = None
+        layers_execute_order: tuple[int, ...] | None = None,
+        self_attn_kv_residuals: Tensor | None = None,
+        cross_attn_kv_residuals: Tensor | None = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
@@ -2721,6 +2730,23 @@ class AttentionLayers(Module):
 
         skip_hiddens = []
 
+        # for residuals to key value inputs for self and cross attention
+
+        self_attn_kv_residuals_iter = iter((None,))
+        cross_attn_kv_residuals_iter = iter((None,))
+
+        if exists(self_attn_kv_residuals):
+            if self_attn_kv_residuals.ndim == 3:
+                self_attn_kv_residuals = rearrange(self_attn_kv_residuals, '... ->  1 ...')
+
+            self_attn_kv_residuals_iter = iter(self_attn_kv_residuals)
+
+        if exists(cross_attn_kv_residuals):
+            if cross_attn_kv_residuals.ndim == 3:
+                cross_attn_kv_residuals = rearrange(cross_attn_kv_residuals, '... ->  1 ...')
+
+            cross_attn_kv_residuals_iter = iter(cross_attn_kv_residuals)
+
         # for value residuals
 
         first_self_attn_inter = None
@@ -2794,9 +2820,9 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, value_residual = maybe_self_attn_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, return_intermediates = True)
             elif layer_type == 'c':
-                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
+                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
             elif layer_type == 'f':
                 out = block(x, deep_embed = next(deep_embeds_iter, None))
 

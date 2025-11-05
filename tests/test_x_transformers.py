@@ -1434,3 +1434,20 @@ def test_free(
     loss.backward()
 
     assert aux_loss.numel() == 1
+
+def test_kv_input_residual():
+    attn = Decoder(
+        dim = 256,
+        depth = 2,
+        heads = 4,
+        cross_attend = True
+    )
+
+    tokens = torch.randn(3, 32, 256)
+    context = torch.randn(3, 64, 256)
+
+    condition = torch.randn(2, 3, 64, 256)
+
+    out = attn(tokens, context = context, cross_attn_kv_residuals = condition)
+
+    assert tokens.shape == out.shape
