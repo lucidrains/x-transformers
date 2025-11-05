@@ -1437,6 +1437,11 @@ def test_free(
 
     assert aux_loss.numel() == 1
 
+    rand_indices = torch.randint(0, 2 ** 8, ())
+    generated = model.generate(seq[:, :1], 32, latents = rand_indices)
+
+    assert generated.shape == (1, 32)
+
 def test_kv_input_residual():
     attn = Decoder(
         dim = 256,

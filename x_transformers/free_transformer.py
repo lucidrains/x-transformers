@@ -282,6 +282,10 @@ class FreeTransformer(Module):
             if not is_tensor(latents):
                 latents = tensor(latents, device = self.device)
 
+            if latents.dtype in (torch.int, torch.long):
+                # if given as indices
+                latents = F.one_hot(latents, self.binary_mapper.num_codes).float()
+
             if latents.ndim == 1: # repeat latents
                 latents = repeat(latents, 'd -> b 1 d', b = batch)
             elif latents.ndim == 2:

@@ -63,8 +63,7 @@ model = FreeTransformer(
     latent_bits = LATENT_BITS
 ).cuda()
 
-rand_index = torch.randint(0, 2 ** LATENT_BITS, ())
-latents = F.one_hot(rand_index, 2 ** LATENT_BITS).float().cuda()
+one_hot_indices = torch.randint(0, 2 ** LATENT_BITS, ())
 
 # prepare enwik8 data
 
@@ -126,9 +125,9 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         sample = model.generate(
             prompts = inp,
             seq_len = GENERATE_LENGTH,
-            latents = latents
+            latents = one_hot_indices
         )
 
         output_str = decode_tokens(sample)
 
-        print(f'\n\nlatent {rand_index.tolist()} - ', output_str)
+        print(f'\n\nlatent {one_hot_indices.tolist()} - ', output_str)
