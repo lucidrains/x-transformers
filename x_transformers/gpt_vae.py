@@ -174,11 +174,14 @@ class GPTVAE(Module):
     def forward(
         self,
         seq,
+        seq_for_latents = None,
         return_all_losses = False
     ):
         batch, device = seq.shape[0], seq.device
 
-        latents, (latents_mean, latents_log_var) = self.encode_to_latents(seq, return_mean_log_var = True)
+        seq_for_latents = default(seq_for_latents, seq)
+
+        latents, (latents_mean, latents_log_var) = self.encode_to_latents(seq_for_latents, return_mean_log_var = True)
 
         dropped_latents = ~self.latents_dropout(torch.ones((batch,), device = device)).bool()
 
