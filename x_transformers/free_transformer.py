@@ -66,7 +66,6 @@ class BinaryMapper(Module):
 
         self.bits = bits
         self.num_codes = 2 ** bits
-        self.kl_loss_threshold = kl_loss_threshold
 
         power_two = 2 ** arange(bits)
         codes = (arange(self.num_codes)[:, None].bitwise_and(power_two) != 0).byte().bool()
@@ -74,13 +73,20 @@ class BinaryMapper(Module):
         self.register_buffer('power_two', power_two, persistent = False)
         self.register_buffer('codes', codes, persistent = False)
 
+        # aux loss
+
+        self.kl_loss_threshold = kl_loss_threshold
+        self.register_buffer('zero', tensor(0.), persistent = False)
+
     def forward(
         self,
         logits,
         temperature = 1.,
-        straight_through = None
+        straight_through = None,
+        calc_aux_loss = None
     ):
         straight_through = default(straight_through, self.training)
+        calc_aux_loss = default(calc_aux_loss, self.training)
 
         assert logits.shape[-1] == self.bits, f'logits must have a last dimension of {self.bits}'
 
@@ -95,26 +101,29 @@ class BinaryMapper(Module):
 
         one_hot = F.one_hot(indices, self.num_codes).float()
 
-        # return hard one hot if not training or overridden
+        # maybe calculate aux loss
 
-        if not straight_through:
-            return one_hot
+        aux_kl_loss = self.zero
 
-        # calculate negative entropy
+        if calc_aux_loss:
+            # calculate negative entropy
 
-        kl_div = self.bits * NAT - binary_entropy(logits)
-        aux_kl_loss = F.relu(kl_div - self.kl_loss_threshold).mean()
+            kl_div = self.bits * NAT - binary_entropy(logits)
+            aux_kl_loss = F.relu(kl_div - self.kl_loss_threshold).mean()
 
-        # get the soft G for the gradients and do a straight through
+        # maybe straight through
 
-        soft_G = (
-            einsum(F.logsigmoid(logits), self.codes.float(), '... bits, codes bits -> ... codes') +
-            einsum(F.logsigmoid(-logits), (~self.codes).float(), '... bits, codes bits -> ... codes')
-        ).exp()
+        if straight_through:
+            # get the soft G for the gradients and do a straight through
 
-        # straight through
+            soft_G = (
+                einsum(F.logsigmoid(logits), self.codes.float(), '... bits, codes bits -> ... codes') +
+                einsum(F.logsigmoid(-logits), (~self.codes).float(), '... bits, codes bits -> ... codes')
+            ).exp()
 
-        one_hot = one_hot + soft_G - soft_G.detach()
+            # straight through
+
+            one_hot = one_hot + soft_G - soft_G.detach()
 
         return one_hot, aux_kl_loss
 
@@ -163,6 +172,7 @@ class FreeTransformer(Module):
             cross_attend = True,
             use_rmsnorm = True,
             rotary_pos_emb = True,
+            pre_norm_has_final_norm = True,
             **kwargs,
             **enc_kwargs
         )
@@ -242,7 +252,7 @@ class FreeTransformer(Module):
 
         bit_logits = self.to_latent_bit_logits(pooled)
 
-        one_hot_latents, kl_loss = self.binary_mapper(bit_logits, straight_through = True)
+        one_hot_latents, kl_loss = self.binary_mapper(bit_logits, calc_aux_loss = return_kl_loss)
 
         if not return_kl_loss:
             return one_hot_latents
