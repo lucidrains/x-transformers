@@ -740,10 +740,13 @@ def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
 
     freqs = freqs[:, -seq_len:, :]
-    scale = scale[:, -seq_len:, :] if isinstance(scale, torch.Tensor) else scale
+    scale = scale[:, -seq_len:, :] if is_tensor(scale) else scale
 
     if t.ndim == 4 and freqs.ndim == 3:
         freqs = rearrange(freqs, 'b n d -> b 1 n d')
+
+        if is_tensor(scale):
+            scale = rearrange(scale, 'b n d -> b 1 n d')
 
     # partial rotary embeddings, Wang et al. GPT-J
     t, t_unrotated = t[..., :rot_dim], t[..., rot_dim:]
