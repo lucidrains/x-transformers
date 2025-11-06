@@ -1462,3 +1462,14 @@ def test_kv_input_residual():
     out = attn(tokens, context = context, cross_attn_kv_residuals = condition)
 
     assert tokens.shape == out.shape
+
+def test_solu():
+    attn = Decoder(
+        dim = 256,
+        depth = 2,
+        heads = 4,
+        ff_solu = True
+    )
+
+    tokens = torch.randn(3, 32, 256)
+    attn(tokens)
