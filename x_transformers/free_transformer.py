@@ -149,6 +149,7 @@ class FreeTransformer(Module):
         enc_kwargs: dict = dict(),
         dec_kwargs: dict = dict(),
         kl_loss_weight = 1.,
+        latent_dropout_prob = 0.,
         pad_id = -1,
         **kwargs
     ):
@@ -186,6 +187,8 @@ class FreeTransformer(Module):
         )
 
         self.from_latent_to_condition = nn.Linear(self.binary_mapper.num_codes, dim, bias = False)
+
+        self.latent_dropout = nn.Dropout(latent_dropout_prob)
 
         self.decoder_head = Decoder(
             dim = dim,
@@ -379,6 +382,8 @@ class FreeTransformer(Module):
         # get latent Z
 
         latents, kl_loss = self.encode_to_latents(tokens_for_latents, mask = encoder_mask, per_token_latents = per_token_latents, return_kl_loss = True)
+
+        latents = self.latent_dropout(latents)
 
         condition = self.from_latent_to_condition(latents)
 
