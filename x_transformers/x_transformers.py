@@ -275,6 +275,15 @@ class ReluSquared(Module):
     def forward(self, x):
         return F.relu(x) ** 2
 
+class SoLU(Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.norm = LayerNorm(dim)
+
+    def forward(self, x):
+        activated = x.softmax(dim = -1) * x
+        return self.norm(activated)
+
 # embedding
 
 class TokenEmbedding(Module):
@@ -1239,6 +1248,7 @@ class FeedForward(Module):
         glu_mult_bias = False,
         swish = False,
         relu_squared = False,
+        solu = False,
         custom_activation = None,
         post_act_ln = False,
         dropout = 0.,
@@ -1250,10 +1260,14 @@ class FeedForward(Module):
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
 
+        assert at_most_one_of(relu_squared, solu)
+
         if exists(custom_activation):
             activation = deepcopy(custom_activation)
         elif relu_squared:
             activation = ReluSquared()
+        elif solu:
+            activation = SoLU(inner_dim)
         elif swish:
             activation = nn.SiLU()
         else:
