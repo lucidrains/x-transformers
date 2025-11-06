@@ -1411,9 +1411,11 @@ def test_attn_negative_weights(
 
 @param('per_token_latents', (False, True))
 @param('dec_head_depth', (0, 4))
+@param('separate_seq_for_latents', (False, True))
 def test_free(
     dec_head_depth,
-    per_token_latents
+    per_token_latents,
+    separate_seq_for_latents
 ):
     from x_transformers.free_transformer import FreeTransformer
 
@@ -1432,7 +1434,9 @@ def test_free(
 
     seq = torch.randint(0, 256, (1, 1024))
 
-    loss, (ar_loss, aux_loss) = model(seq, return_all_losses = True)
+    separate_seq_for_latents = torch.randint(0, 256, (1, 32)) if separate_seq_for_latents else None
+
+    loss, (ar_loss, aux_loss) = model(seq, separate_seq_for_latents, return_all_losses = True)
     loss.backward()
 
     assert aux_loss.numel() == 1

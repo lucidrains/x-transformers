@@ -225,8 +225,11 @@ class FreeTransformer(Module):
         self,
         decoder_head_embeds,
         mask = None,
-        return_kl_loss = False
+        return_kl_loss = False,
+        per_token_latents = None
     ):
+        per_token_latents = default(per_token_latents, self.per_token_latents)
+
         batch, seq_len, device = *decoder_head_embeds.shape[:2], decoder_head_embeds.device
 
         query_tokens = repeat(self.query_token_for_latents, 'd -> b 1 d', b = batch)
@@ -235,7 +238,7 @@ class FreeTransformer(Module):
 
         # handle the interesting per query token latents, as in the paper
 
-        if self.per_token_latents:
+        if per_token_latents:
             query_tokens = repeat(query_tokens, 'b 1 d -> b n d', n = seq_len)
 
             rotary_pos = torch.arange(seq_len, device = device)
@@ -342,13 +345,13 @@ class FreeTransformer(Module):
     def forward(
         self,
         seq,
+        seq_for_latents = None,
         return_all_losses = False
     ):
         batch, device = seq.shape[0], seq.device
 
         seq, labels = seq[:, :-1], seq[:, 1:]
 
-        encoder_mask = seq != self.pad_id
 
         tokens = self.token_emb(seq)
 
@@ -357,9 +360,25 @@ class FreeTransformer(Module):
         if exists(self.decoder_head):
             tokens = self.decoder_head(tokens)
 
+        # determine whether to use a separate sequence for encoding latents
+
+        if exists(seq_for_latents):
+            tokens_for_latents = self.token_emb(seq_for_latents)
+
+            if exists(self.decoder_head):
+                tokens_for_latents = self.decoder_head(tokens_for_latents)
+
+            encoder_mask = seq_for_latents != self.pad_id
+            per_token_latents = False
+        else:
+
+            tokens_for_latents = tokens
+            encoder_mask = seq != self.pad_id
+            per_token_latents = None
+
         # get latent Z
 
-        latents, kl_loss = self.encode_to_latents(tokens, mask = encoder_mask, return_kl_loss = True)
+        latents, kl_loss = self.encode_to_latents(tokens_for_latents, mask = encoder_mask, per_token_latents = per_token_latents, return_kl_loss = True)
 
         condition = self.from_latent_to_condition(latents)
 
