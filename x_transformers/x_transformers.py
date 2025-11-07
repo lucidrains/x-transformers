@@ -1431,6 +1431,7 @@ class Attention(Module):
         assert divisible_by(heads, kv_heads)
 
         self.kv_heads = kv_heads
+        self.groups = heads // kv_heads
 
         q_dim = dim_head * heads
         k_dim = dim_head * kv_heads
@@ -2077,7 +2078,7 @@ class Attention(Module):
 
         if self.orthog_projected_values or self.orthog_projected_values_per_head:
             orthog_projected = []
-            v_for_proj = self.merge_heads(orig_values)
+            v_for_proj = repeat(orig_values, 'b h n d -> b n (g h d)', g = self.groups)
 
             if self.orthog_projected_values:
                 projected = orthog_project(out, v_for_proj)

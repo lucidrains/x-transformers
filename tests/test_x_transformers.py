@@ -1478,6 +1478,7 @@ def test_belief_attn(
             dim = 512,
             depth = 6,
             heads = 8,
+            attn_kv_heads = 4,
             rotary_pos_emb = True,
             attn_orthog_projected_values = orthog_project,
             attn_orthog_projected_values_per_head = orthog_project_per_head
