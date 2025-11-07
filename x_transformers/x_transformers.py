@@ -1397,6 +1397,7 @@ class Attention(Module):
         logit_softclamp_value = 50.,
         learned_value_residual_mix = False,
         orthog_projected_values = False,  # https://openreview.net/forum?id=Ard2QzPAUK
+        orthog_projected_values_per_head = False,
         laser = False,                    # https://arxiv.org/abs/2411.03493v1
         laser_softclamp_value = 15.,
         qkv_receive_diff_residuals = False,
@@ -1627,6 +1628,9 @@ class Attention(Module):
         # "belief attention" - iclr 2026
 
         self.orthog_projected_values = orthog_projected_values
+        self.orthog_projected_values_per_head = orthog_projected_values_per_head
+
+        out_dim *= max(1, int(orthog_projected_values) + int(orthog_projected_values_per_head))
 
         # hybrid module, in same vein as hymba https://www.arxiv.org/abs/2411.13676
 
@@ -2069,11 +2073,24 @@ class Attention(Module):
             gates = self.to_v_gate(x)
             out = out * self.to_v_gate_activation(gates)
 
-        # maybe return orthogonal projected - "belief" attention
+        # maybe orthogonal projected weighted values - "belief" attention
 
-        if self.orthog_projected_values:
-            merged_v = self.merge_heads(orig_values)
-            out = orthog_project(out, merged_v)
+        if self.orthog_projected_values or self.orthog_projected_values_per_head:
+            orthog_projected = []
+            v_for_proj = self.merge_heads(orig_values)
+
+            if self.orthog_projected_values:
+                projected = orthog_project(out, v_for_proj)
+                orthog_projected.append(projected)
+
+            if self.orthog_projected_values_per_head:
+                v_for_proj = rearrange(v_for_proj, 'b n (h d) -> b n h d', h = h)
+                out = rearrange(out, 'b n (h d) -> b n h d', h = h)
+                projected = orthog_project(out, v_for_proj)
+                projected = rearrange(projected, 'b n h d -> b n (h d)')
+                orthog_projected.append(projected)
+
+            out = cat(orthog_projected, dim = -1)
 
         # combine the heads
 

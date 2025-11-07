@@ -1463,7 +1463,12 @@ def test_kv_input_residual():
 
     assert tokens.shape == out.shape
 
-def test_belief_attn():
+@param('orthog_project', (False, True))
+@param('orthog_project_per_head', (False, True))
+def test_belief_attn(
+    orthog_project,
+    orthog_project_per_head
+):
     from x_transformers import TransformerWrapper, Decoder
 
     model = TransformerWrapper(
@@ -1474,7 +1479,8 @@ def test_belief_attn():
             depth = 6,
             heads = 8,
             rotary_pos_emb = True,
-            attn_orthog_projected_values = True
+            attn_orthog_projected_values = orthog_project,
+            attn_orthog_projected_values_per_head = orthog_project_per_head
         )
     )
 

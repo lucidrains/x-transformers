@@ -52,7 +52,9 @@ model = TransformerWrapper(
         dim = 512,
         depth = 6,
         heads = 8,
-        rotary_pos_emb = True
+        rotary_pos_emb = True,
+        attn_orthog_projected_values = True,
+        attn_orthog_projected_values_per_head = True
     )
 )
 
