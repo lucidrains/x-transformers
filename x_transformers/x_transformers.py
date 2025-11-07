@@ -941,6 +941,14 @@ class DynamicTanh(Module):
         gamma = self.gamma + self.gamma_offset
         return (x * pre_tanh_scale).tanh() * gamma + self.beta
 
+class BatchNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.batchnorm = nn.BatchNorm1d(dim)
+
+    def forward(self, x):
+        return self.batchnorm(x.transpose(1, 2)).transpose(1, 2)
+        
 # residual and residual gates
 
 class Residual(Module):
@@ -2128,6 +2136,7 @@ class AttentionLayers(Module):
         use_adaptive_layernorm = False,
         use_adaptive_rmsnorm = False,
         use_adaptive_layerscale = False, # paired with use_adaptive_layernorm for ada-ln-zero from DiT paper
+        use_batchnorm = False,
         norm_add_unit_offset = True,
         dim_condition = None,
         adaptive_condition_mlp = False,
@@ -2277,7 +2286,7 @@ class AttentionLayers(Module):
 
         # determine norm
 
-        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_dynamic_tanh, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, or simple rmsnorm'
+        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_dynamic_tanh, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm, use_batchnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, simple rmsnorm, or use_batchnorm'
 
         norm_need_condition = False
         dim_condition = default(dim_condition, dim)
@@ -2301,6 +2310,8 @@ class AttentionLayers(Module):
         elif use_adaptive_rmsnorm:
             norm_need_condition = True
             norm_class = partial(AdaptiveRMSNorm, dim_condition = dim_condition * dim_condition_mult)
+        elif use_batchnorm:
+            norm_class = BatchNorm
         else:
             norm_class = LayerNorm
 
