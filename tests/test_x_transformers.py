@@ -1463,13 +1463,21 @@ def test_kv_input_residual():
 
     assert tokens.shape == out.shape
 
-def test_solu():
-    attn = Decoder(
-        dim = 256,
-        depth = 2,
-        heads = 4,
-        ff_solu = True
+def test_belief_attn():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            rotary_pos_emb = True,
+            attn_orthog_projected_values = True
+        )
     )
 
-    tokens = torch.randn(3, 32, 256)
-    attn(tokens)
+    x = torch.randint(0, 256, (1, 10))
+
+    logits = model(x)

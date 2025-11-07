@@ -1,3 +1,11 @@
+# /// script
+# dependencies = [
+#   "tqdm",
+#   "x-transformers",
+#   "wandb"
+# ]
+# ///
+
 from x_transformers import TransformerWrapper, Decoder
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
@@ -20,6 +28,7 @@ VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
 GENERATE_LENGTH = 1024
 SEQ_LEN = 1024
+TRACK_EXPERIMENT_ONLINE = False
 
 # helpers
 
@@ -80,6 +89,12 @@ val_loader    = cycle(DataLoader(val_dataset, batch_size = BATCH_SIZE, drop_last
 
 optim = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
+# experiment
+
+import wandb
+wandb.init(project = 'enwik8', mode = 'online' if TRACK_EXPERIMENT_ONLINE else 'disabled')
+wandb.run.name = 'baseline'
+
 # training
 
 for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
@@ -90,6 +105,8 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         (loss / GRADIENT_ACCUMULATE_EVERY).backward()
 
     print(f'training loss: {loss.item()}')
+    wandb.log(dict(loss = loss.item()))
+
     torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
     optim.step()
     optim.zero_grad()
@@ -98,7 +115,9 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
         model.eval()
         with torch.no_grad():
             loss = model(next(val_loader))
+
             print(f'validation loss: {loss.item()}')
+            wandb.log(dict(valid_loss = loss.item()))
 
     if i % GENERATE_EVERY == 0:
         model.eval()

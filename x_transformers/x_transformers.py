@@ -161,6 +161,21 @@ def or_reduce(masks):
         head = head | rest
     return head
 
+def orthog_project(x, y):
+    x, packed_shape = pack([x], 'b *')
+    y, _ = pack([y], 'b *')
+
+    dtype = x.dtype
+    x, y = x.double(), y.double()
+    unit = F.normalize(y, dim = -1)
+
+    parallel = (x * unit).sum(dim = -1, keepdim = True) * unit
+    orthog = x - parallel
+
+    orthog, = unpack(orthog, packed_shape, 'b *')
+
+    return orthog.to(dtype)
+
 # cache helpers
 
 def get_cached_kvs(
@@ -1381,7 +1396,8 @@ class Attention(Module):
         softclamp_logits = False,
         logit_softclamp_value = 50.,
         learned_value_residual_mix = False,
-        laser = False,                # https://arxiv.org/abs/2411.03493v1
+        orthog_projected_values = False,  # https://openreview.net/forum?id=Ard2QzPAUK
+        laser = False,                    # https://arxiv.org/abs/2411.03493v1
         laser_softclamp_value = 15.,
         qkv_receive_diff_residuals = False,
         use_latent_q = False,
@@ -1606,6 +1622,11 @@ class Attention(Module):
         # attention on attention
 
         self.attn_on_attn = on_attn
+
+        # return orthogonal projected weighted values on original values
+        # "belief attention" - iclr 2026
+
+        self.orthog_projected_values = orthog_projected_values
 
         # hybrid module, in same vein as hymba https://www.arxiv.org/abs/2411.13676
 
@@ -2047,6 +2068,12 @@ class Attention(Module):
         if exists(self.to_v_gate):
             gates = self.to_v_gate(x)
             out = out * self.to_v_gate_activation(gates)
+
+        # maybe return orthogonal projected - "belief" attention
+
+        if self.orthog_projected_values:
+            merged_v = self.merge_heads(orig_values)
+            out = orthog_project(out, merged_v)
 
         # combine the heads
 
