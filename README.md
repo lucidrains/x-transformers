@@ -2569,4 +2569,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{chen2025strongernormalizationfreetransformers,
+    title   = {Stronger Normalization-Free Transformers}, 
+    author  = {Mingzhi Chen and Taiming Lu and Jiachen Zhu and Mingjie Sun and Zhuang Liu},
+    year    = {2025},
+    eprint  = {2512.10938},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2512.10938}, 
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

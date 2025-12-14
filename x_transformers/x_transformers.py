@@ -941,6 +941,31 @@ class DynamicTanh(Module):
         gamma = self.gamma + self.gamma_offset
         return (x * pre_tanh_scale).tanh() * gamma + self.beta
 
+class Derf(Module):
+    """ https://arxiv.org/abs/2512.10938 """
+    def __init__(
+        self,
+        dim,
+        init_alpha = 0.5,
+        init_bias = 0.,
+        unit_offset = False
+    ):
+        super().__init__()
+        scale_offset = 1. if unit_offset else 0.
+
+        self.alpha = nn.Parameter(tensor(init_alpha) - scale_offset)
+        self.s = nn.Parameter(tensor(init_bias))
+
+        self.gamma = nn.Parameter(torch.ones(dim) - scale_offset)
+        self.beta = nn.Parameter(torch.zeros(dim))
+
+        self.scale_offset = scale_offset
+
+    def forward(self, x):
+        x = x * (self.alpha + self.scale_offset) + self.s
+        activated = torch.erf(x)
+        return activated * (self.gamma + self.scale_offset) + self.beta
+
 # residual and residual gates
 
 class Residual(Module):
@@ -2123,6 +2148,7 @@ class AttentionLayers(Module):
         use_scalenorm = False,
         use_rmsnorm = False,
         use_dynamic_tanh = False,
+        use_derf = False,
         dynamic_tanh_init_alpha = 1.,
         use_simple_rmsnorm = False,
         use_adaptive_layernorm = False,
@@ -2277,7 +2303,7 @@ class AttentionLayers(Module):
 
         # determine norm
 
-        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_dynamic_tanh, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, or simple rmsnorm'
+        assert at_most_one_of(use_scalenorm, use_rmsnorm, use_dynamic_tanh, use_derf, use_simple_rmsnorm, use_adaptive_layernorm, use_adaptive_rmsnorm), 'you can only use either scalenorm, rmsnorm, adaptive layernorm, adaptive rmsnorm, or simple rmsnorm'
 
         norm_need_condition = False
         dim_condition = default(dim_condition, dim)
@@ -2295,6 +2321,8 @@ class AttentionLayers(Module):
         elif use_dynamic_tanh:
             assert pre_norm, 'dynamic tanh norm only tested for pre-norm'
             norm_class = partial(DynamicTanh, init_alpha = dynamic_tanh_init_alpha)
+        elif use_derf:
+            norm_class = Derf
         elif use_adaptive_layernorm:
             norm_need_condition = True
             norm_class = partial(AdaptiveLayerNorm, dim_condition = dim_condition * dim_condition_mult)

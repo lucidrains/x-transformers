@@ -1488,3 +1488,23 @@ def test_belief_attn(
     x = torch.randint(0, 256, (1, 10))
 
     logits = model(x)
+
+def test_derf():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            attn_kv_heads = 4,
+            rotary_pos_emb = True,
+            use_derf = True
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 10))
+
+    logits = model(x)
