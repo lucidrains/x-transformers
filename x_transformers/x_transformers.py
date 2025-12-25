@@ -2301,14 +2301,13 @@ class AttentionLayers(Module):
 
         # LIMe
 
-        hiddens_counter = 0
         self.layer_integrators = ModuleList([])
 
         assert not (qkv_receive_diff_residuals and not (hyper_conn_produce_diff_views or integrate_layers))
 
         # positions related
 
-        self.disable_abs_pos_emb = default(disable_abs_pos_emb, (rel_pos_bias or rotary_pos_emb))
+        self.disable_abs_pos_emb = default(disable_abs_pos_emb, (rel_pos_bias or rotary_pos_emb or polar_pos_emb))
 
         rotary_emb_dim = default(rotary_emb_dim, dim_head // 2)
 
