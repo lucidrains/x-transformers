@@ -785,6 +785,7 @@ class PolarEmbedding(Module):
     def __init__(
         self,
         dim,
+        heads,
         bias_uniform_init = False,
         base = 10000,
     ):
@@ -792,7 +793,7 @@ class PolarEmbedding(Module):
         inv_freq = 1. / (base ** (arange(0, dim).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
 
-        self.learned_bias = nn.Parameter(torch.zeros(dim))
+        self.learned_bias = nn.Parameter(torch.zeros(heads, 1, dim))
 
         if bias_uniform_init:
             self.learned_bias.uniform_(-2. * math.pi, 0.)
@@ -2322,7 +2323,7 @@ class AttentionLayers(Module):
 
         # polar positional embedding (PoPE) - https://arxiv.org/abs/2509.10534
 
-        self.polar_pos_emb = PolarEmbedding(dim_head, polar_bias_uniform_init) if polar_pos_emb else None
+        self.polar_pos_emb = PolarEmbedding(dim_head, heads, polar_bias_uniform_init) if polar_pos_emb else None
 
         assert at_most_one_of(alibi_pos_bias, rel_pos_bias, data_dependent_alibi), 'you can only choose one of Alibi positional bias, data dependent Alibi (forgetting transformers), dynamic tanh, or T5 relative positional bias'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
