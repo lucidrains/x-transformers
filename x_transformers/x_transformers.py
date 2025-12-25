@@ -779,6 +779,49 @@ def apply_rotary_pos_emb(t, freqs, scale = 1):
 
     return out.type(orig_dtype)
 
+class PolarEmbedding(Module):
+    """ https://arxiv.org/abs/2509.10534 """
+
+    def __init__(
+        self,
+        dim,
+        bias_uniform_init = False,
+        base = 10000,
+    ):
+        super().__init__()
+        inv_freq = 1. / (base ** (arange(0, dim).float() / dim))
+        self.register_buffer('inv_freq', inv_freq)
+
+        self.learned_bias = nn.Parameter(torch.zeros(dim))
+
+        if bias_uniform_init:
+            self.learned_bias.uniform_(-2. * math.pi, 0.)
+
+    @autocast('cuda', enabled = False)
+    def forward(self, t, offset = 0):
+        max_pos = t.max() + 1
+
+        if t.ndim == 1:
+            t = rearrange(t, 'n -> 1 n')
+
+        freqs = torch.einsum('b i , j -> b i j', t.type_as(self.inv_freq), self.inv_freq)
+
+        bias = self.learned_bias.clamp(-2. * math.pi, 0.)
+
+        return freqs, bias
+
+@autocast('cuda', enabled = False)
+def apply_polar_pos_emb(t, freqs):
+    rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
+    freqs = freqs[:, -seq_len:]
+
+    t = t.float()
+
+    t = F.softplus(t)
+    out = cat((t * freqs.cos(), t * freqs.sin()), dim = -1)
+
+    return out.type(orig_dtype)
+
 # norms
 
 class Scale(Module):
@@ -1745,6 +1788,7 @@ class Attention(Module):
         attn_bias = None,
         rotary_pos_emb = None,
         context_rotary_pos_emb = None,
+        polar_pos_emb = None,
         pos = None, # for custom alibi positions
         prev_attn = None,
         mem = None,
@@ -1895,6 +1939,11 @@ class Attention(Module):
             if partial_rotate_heads:
                 q = cat((q_rest, q), dim = 1)
                 k = cat((k_rest, k), dim = 1)
+
+        if exists(polar_pos_emb):
+            freqs, bias = polar_pos_emb
+            q = apply_polar_pos_emb(q, freqs)
+            k = apply_polar_pos_emb(k, freqs + bias)
 
         input_mask = context_mask
 
@@ -2174,6 +2223,8 @@ class AttentionLayers(Module):
         rotary_xpos_scale_base = 512,
         rotary_base_rescale_factor = 1.,
         rotate_num_heads = None,
+        polar_pos_emb = False,
+        polar_bias_uniform_init = False,
         weight_tie_layers = False,
         custom_layers: tuple[str, ...] | None = None,
         layers_execute_order: tuple[int, ...] | None = None,
@@ -2266,8 +2317,13 @@ class AttentionLayers(Module):
         if verbose and rotary_emb_dim < 32:
             logger.warning('when training language model, rotary embedding dimension should be at least 32')
 
+        assert at_most_one_of(rotary_pos_emb, polar_pos_emb), f'either rotary positional embedding or polar positional embedding can be turned on'
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor, base_rescale_factor = rotary_base_rescale_factor) if rotary_pos_emb else None
+
+        # polar positional embedding (PoPE) - https://arxiv.org/abs/2509.10534
+
+        self.polar_pos_emb = PolarEmbedding(dim_head, polar_bias_uniform_init) if polar_pos_emb else None
 
         assert at_most_one_of(alibi_pos_bias, rel_pos_bias, data_dependent_alibi), 'you can only choose one of Alibi positional bias, data dependent Alibi (forgetting transformers), dynamic tanh, or T5 relative positional bias'
         assert rel_pos_num_buckets <= rel_pos_max_distance, 'number of relative position buckets must be less than the relative position max distance'
@@ -2626,6 +2682,7 @@ class AttentionLayers(Module):
         cache_age = 1,
         return_hiddens = False,
         rotary_pos_emb = None,
+        polar_pos_emb = None,
         pos = None,
         context_pos = None,
         attn_bias = None,
@@ -2720,6 +2777,15 @@ class AttentionLayers(Module):
                     rotary_pos_emb = rotary_pos_emb,
                     context_rotary_pos_emb = context_rotary_pos_emb
                 )
+
+        # polar positions
+
+        if exists(self.polar_pos_emb):
+            if not exists(polar_pos_emb):
+                if not exists(pos):
+                    pos = arange(x.shape[1] + seq_pos_offset, device = x.device)
+
+                polar_pos_emb = self.polar_pos_emb(pos)
 
         # assume cached key / values
 
@@ -2910,7 +2976,7 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, return_intermediates = True)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
             elif layer_type == 'f':

@@ -1508,3 +1508,21 @@ def test_derf():
     x = torch.randint(0, 256, (1, 10))
 
     logits = model(x)
+
+def test_pope():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            polar_pos_emb = True,
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 10))
+
+    logits = model(x)
