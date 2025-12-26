@@ -24,6 +24,7 @@ from accelerate import Accelerator
 
 NUM_BATCHES = int(1e5)
 BATCH_SIZE = 4
+VALIDATE_BATCH_SIZE = 1
 GRADIENT_ACCUMULATE_EVERY = 4
 LEARNING_RATE = 1e-4
 GENERATE_EVERY  = 500
@@ -110,7 +111,7 @@ val_loaders = dict()
 
 for valid_seq_len in VALIDATE_SEQ_LENS:
     val_dataset   = TextSamplerDataset(data_val, valid_seq_len)
-    val_loader    = DataLoader(val_dataset, batch_size = BATCH_SIZE, drop_last = True)
+    val_loader    = DataLoader(val_dataset, batch_size = VALIDATE_BATCH_SIZE, drop_last = True)
     val_loader    = cycle(val_loader)
 
     val_loaders[valid_seq_len] = val_loader
