@@ -1052,7 +1052,7 @@ class GRUGating(Module):
 
 # hyper connections
 
-def sinkhorn_knopps(t, iters = 20):
+def sinkhorn(t, iters = 20):
     dtype = t.dtype
     t = t.float()
 
@@ -1072,7 +1072,7 @@ class HyperConnection(Module):
         layer_index,
         num_residual_streams,
         num_input_views = 1,
-        tanh = True,
+        sinkhorn_iters = 5,
         **kwargs
     ):
         """
@@ -1104,6 +1104,8 @@ class HyperConnection(Module):
         self.dynamic_beta_fn = nn.Parameter(torch.zeros(dim))
         self.dynamic_beta_scale = nn.Parameter(torch.ones(()) * 1e-2)
 
+        self.sinkhorn_iters = sinkhorn_iters
+
     def prepare(self, residuals):
         views = self.num_input_views
         streams = self.num_residual_streams
@@ -1123,7 +1125,7 @@ class HyperConnection(Module):
         # the sinkhorn knopps constraint for the residual mixing
 
         alpha_residual = rearrange(alpha_residual, '... (s1 s2) -> ... s1 s2', s2 = streams)
-        alpha_residual = sinkhorn_knopps(alpha_residual)
+        alpha_residual = sinkhorn(alpha_residual, self.sinkhorn_iters)
         alpha_residual = rearrange(alpha_residual, '... s1 s2 -> ... (s1 s2)')
 
         alpha = cat((alpha_input, alpha_residual), dim = -1)
@@ -2287,6 +2289,7 @@ class AttentionLayers(Module):
         learned_value_residual_mix = True,   # seeing big improvements when the value residual mix value is learned per token - credit goes to @faresobeid for taking the first step with learned scalar mix, then @Blinkdl for taking it a step further with data dependent. here we will use per token learned
         rel_pos_kwargs: dict = dict(),
         residual_fn_kwargs: dict = dict(),
+        hyper_conn_sinkhorn_iters = 5,
         verbose = True,
         **kwargs
     ):
@@ -2618,7 +2621,7 @@ class AttentionLayers(Module):
                 layer_integrate = DynamicLIMe(dim, num_layer_hiddens, num_views = layer_integrate_num_view, use_softmax = layer_integrate_use_softmax)
 
             if has_hyper_connections:
-                residual_fn = partial(HyperConnection, num_residual_streams = num_residual_streams)
+                residual_fn = partial(HyperConnection, num_residual_streams = num_residual_streams, sinkhorn_iters = hyper_conn_sinkhorn_iters)
 
                 if layer_type == 'a' and hyper_conn_produce_diff_views:
                     residual_fn = partial(residual_fn, num_input_views = 3)
