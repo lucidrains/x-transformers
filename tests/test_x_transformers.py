@@ -594,8 +594,8 @@ def test_cross_attn_rotary(
         context_mask = context_mask
     )
 
-@param('tanh', (True, False))
-def test_hyper_connections(tanh):
+@param('qkv_receive_diff_residuals', (False, True))
+def test_hyper_connections(qkv_receive_diff_residuals):
 
     model = TransformerWrapper(
         num_tokens = 20000,
@@ -605,9 +605,7 @@ def test_hyper_connections(tanh):
             depth = 6,
             heads = 8,
             num_residual_streams = 8, # 8 dynamic hyper connection residual streams
-            residual_fn_kwargs = dict(
-                tanh = tanh
-            )
+            qkv_receive_diff_residuals = qkv_receive_diff_residuals
         )
     )
 
