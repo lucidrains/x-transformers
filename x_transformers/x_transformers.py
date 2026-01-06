@@ -1052,6 +1052,18 @@ class GRUGating(Module):
 
 # hyper connections
 
+def sinkhorn_knopps(t, iters = 20):
+    dtype = t.dtype
+    t = t.float()
+
+    t = t.softmax(dim = -2)
+
+    for _ in range(iters):
+        t = F.normalize(t, p = 1, dim = -1)
+        t = F.normalize(t, p = 1, dim = -2)
+
+    return t.to(dtype)
+
 class HyperConnection(Module):
     def __init__(
         self,
@@ -1066,10 +1078,11 @@ class HyperConnection(Module):
         """
         https://arxiv.org/abs/2409.19606
         Appendix J - Algorithm 2, Dynamic only
+
+        https://arxiv.org/abs/2512.24880
+        "Manifold constrained" mixing matrices
         """
         super().__init__()
-
-        self.act = nn.Tanh() if tanh else nn.Identity()
 
         self.norm = nn.LayerNorm(dim, bias = False)
 
@@ -1092,18 +1105,33 @@ class HyperConnection(Module):
         self.dynamic_beta_scale = nn.Parameter(torch.ones(()) * 1e-2)
 
     def prepare(self, residuals):
+        streams = self.num_residual_streams
 
         residuals = rearrange(residuals, '(b s) n d -> b n s d', s = self.num_residual_streams)
 
         normed = self.norm(residuals)
 
-        wc_weight = self.act(normed @ self.dynamic_alpha_fn)
+        wc_weight = normed @ self.dynamic_alpha_fn
         dynamic_alpha = wc_weight * self.dynamic_alpha_scale
         alpha = dynamic_alpha + self.static_alpha
 
-        dc_weight = self.act(normed @ self.dynamic_beta_fn)
+        alpha_input, alpha_residual = alpha[..., :1], alpha[..., 1:]
+
+        alpha_input = alpha_input.sigmoid() # constraint Hpre
+
+        # the sinkhorn knopps constraint for the residual mixing
+
+        alpha_residual = rearrange(alpha_residual, '... (s1 s2) -> ... s1 s2', s2 = streams)
+        alpha_residual = sinkhorn_knopps(alpha_residual)
+        alpha_residual = rearrange(alpha_residual, '... s1 s2 -> ... (s1 s2)')
+
+        alpha = cat((alpha_input, alpha_residual), dim = -1)
+
+        dc_weight = (normed @ self.dynamic_beta_fn).sigmoid() * 2
         dynamic_beta = dc_weight * self.dynamic_beta_scale
         beta = dynamic_beta + self.static_beta
+
+        beta = beta.sigmoid() * 2 # constraint Hpost
 
         # width connection
 
