@@ -111,9 +111,9 @@ def test_adaptive_rmsnorm():
         max_seq_len = 1024,
         attn_layers = Decoder(
             dim = 512,
-            dim_condition = 768,
             depth = 12,
             heads = 8,
+            dim_condition = 768,
             use_adaptive_rmsnorm = True,
             adaptive_condition_mlp = True
         )

@@ -120,6 +120,10 @@ class equals():
 def Sequential(*modules):
     return nn.Sequential(*filter(exists, modules))
 
+class Identity(Module):
+    def forward(self, t, *args, **kwargs):
+        return t
+
 # tensor helpers
 
 def log(t, eps = 1e-20):
@@ -2461,7 +2465,7 @@ class AttentionLayers(Module):
 
         self.need_condition = norm_need_condition or post_branch_fn_needs_condition
 
-        self.adaptive_mlp = nn.Identity()
+        self.adaptive_mlp = Identity()
 
         if self.need_condition and adaptive_condition_mlp:
             self.adaptive_mlp = nn.Sequential(
@@ -2544,7 +2548,7 @@ class AttentionLayers(Module):
 
         # whether it has post norm
 
-        self.final_norm = norm_fn() if pre_norm and pre_norm_has_final_norm else nn.Identity()
+        self.final_norm = norm_fn() if pre_norm and pre_norm_has_final_norm else Identity()
 
         # whether unet or not
 
@@ -3198,12 +3202,12 @@ class ViTransformerWrapper(Module):
             LayerNorm(dim)
         )
 
-        self.post_emb_norm = LayerNorm(dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = LayerNorm(dim) if post_emb_norm else Identity()
         self.dropout = nn.Dropout(emb_dropout)
 
         self.attn_layers = attn_layers
 
-        self.mlp_head = nn.Linear(dim, num_classes) if exists(num_classes) else nn.Identity()
+        self.mlp_head = nn.Linear(dim, num_classes) if exists(num_classes) else Identity()
 
     def forward(
         self,
@@ -3337,10 +3341,10 @@ class TransformerWrapper(Module):
 
         self.emb_frac_gradient = emb_frac_gradient
 
-        self.post_emb_norm = LayerNorm(emb_dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = LayerNorm(emb_dim) if post_emb_norm else Identity()
         self.emb_dropout = nn.Dropout(emb_dropout)
 
-        self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else nn.Identity()
+        self.project_emb = nn.Linear(emb_dim, dim) if emb_dim != dim else Identity()
         self.attn_layers = attn_layers
 
         self.init_()
