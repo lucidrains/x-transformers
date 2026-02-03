@@ -3288,7 +3288,8 @@ class TransformerWrapper(Module):
         sigsoftmax_logits = False,
         ff_deep_embed = False,
         to_logits: Module | None = None,
-        add_continuous_pred_head = False
+        add_continuous_pred_head = False,
+        input_not_include_cache = False
     ):
         super().__init__()
 
@@ -3450,6 +3451,10 @@ class TransformerWrapper(Module):
         self.can_cache_kv = self.num_memory_tokens == 0 and not recycling and self.attn_layers.can_cache_kv
         self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
+        # when cache is received, whether the input also includes the past to be excised off
+
+        self.input_not_include_cache = input_not_include_cache
+
     def init_(self):
         if hasattr(self.token_emb, 'init_'):
             self.token_emb.init_()
@@ -3492,11 +3497,13 @@ class TransformerWrapper(Module):
         attn_z_loss_weight = 1e-4,
         seq_start_pos = None,
         cache: LayerIntermediates | None = None,
-        input_not_include_cache = False,
+        input_not_include_cache = None,
         token_emb_kwargs = dict(),
         to_logits_kwargs = dict(),
         **kwargs,
     ):
+
+        input_not_include_cache = default(input_not_include_cache, self.input_not_include_cache)
 
         # if sequence is None, auto create an empty one if `prepend_embeds` was supplied
 
