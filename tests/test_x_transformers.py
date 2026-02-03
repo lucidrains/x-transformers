@@ -1524,3 +1524,47 @@ def test_pope():
     x = torch.randint(0, 256, (1, 10))
 
     logits = model(x)
+
+def test_seq_start_pos_parity():
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        input_not_include_cache = True,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2
+        )
+    )
+
+    model.eval()
+
+    seq_len = 10
+    batch_size = 2
+    seq_start_pos = torch.tensor([5, 0])
+
+    x = torch.randint(0, 256, (batch_size, seq_len))
+
+    # parallel
+
+    parallel_logits = model(x, seq_start_pos = seq_start_pos)
+
+    # sequential
+
+    seq_logits = []
+    cache = None
+
+    for i in range(seq_len):
+        logits, cache = model(
+            x[:, i:i+1],
+            cache = cache,
+            seq_start_pos = seq_start_pos,
+            return_intermediates = True
+        )
+        seq_logits.append(logits)
+
+    seq_logits = torch.cat(seq_logits, dim = 1)
+
+    is_not_masked = torch.arange(seq_len) >= seq_start_pos[:, None]
+
+    assert torch.allclose(parallel_logits[is_not_masked], seq_logits[is_not_masked], atol = 1e-5)

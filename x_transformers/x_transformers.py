@@ -2779,7 +2779,7 @@ class AttentionLayers(Module):
         # handle left padded sequences
 
         if exists(seq_start_pos):
-            seq_arange = arange(x.shape[-2], device = x.device, dtype = torch.long)
+            seq_arange = arange(x.shape[-2] + seq_pos_offset, device = x.device, dtype = torch.long)
             left_pad_mask = seq_arange >= seq_start_pos[..., None]
 
             if exists(self_attn_kv_mask):
