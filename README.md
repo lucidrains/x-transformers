@@ -1,6 +1,6 @@
 ## x-transformers
 
-[![PyPI version](https://badge.fury.io/py/x-transformers.svg)](https://badge.fury.io/py/x-transformers)
+[![PyPI version](https://badge.fury.io/py/x-transformers.svg)](https://badge.fury.io/py/x-transformers)&nbsp;&nbsp;[![Visualise&nbsp;Repo](https://img.shields.io/badge/Visualise%20Repo-blue?style=flat)](https://repomapr.com/lucidrains/x-transformers)
 
 A concise but fully-featured transformer, complete with a set of promising e**x**perimental features from various papers.
 
