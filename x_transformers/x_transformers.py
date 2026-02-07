@@ -2710,7 +2710,7 @@ class AttentionLayers(Module):
         mems = None,
         mem_masks = None,
         seq_start_pos: Tensor | None = None,
-        seq_pos_offset: int = 0,
+        seq_pos_offset = None,
         cache: LayerIntermediates | None = None,
         input_not_include_cache = False,
         cache_age = 1,
@@ -2737,6 +2737,12 @@ class AttentionLayers(Module):
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
+
+        # handle seq pos offset if not passed in from wrapper
+        # default to 0, but if cache is detected, set appropriate for the relative positional embeddings
+
+        if not exists(seq_pos_offset):
+            seq_pos_offset = cache.cache_length if exists(cache) else 0
 
         # handle condition
 

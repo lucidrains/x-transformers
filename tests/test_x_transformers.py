@@ -1533,7 +1533,7 @@ def test_seq_start_pos_parity():
         input_not_include_cache = True,
         attn_layers = Decoder(
             dim = 32,
-            depth = 2
+            depth = 2,
         )
     )
 
@@ -1568,3 +1568,44 @@ def test_seq_start_pos_parity():
     is_not_masked = torch.arange(seq_len) >= seq_start_pos[:, None]
 
     assert torch.allclose(parallel_logits[is_not_masked], seq_logits[is_not_masked], atol = 1e-5)
+
+@param('pos_emb_type', ('rotary', 'polar'))
+def test_pos_emb_parity(pos_emb_type):
+    pos_emb_kwargs = {f'{pos_emb_type}_pos_emb': True}
+
+    model = Decoder(
+        dim = 128,
+        depth = 1,
+        heads = 4,
+        **pos_emb_kwargs
+    )
+
+    model.eval()
+
+    # parallel
+
+    seq = torch.randn(2, 15, 128)
+
+    parallel_logits = model(seq)
+
+    # prompt pass
+
+    prompt = seq[:, :10]
+    cache = None
+    all_seq_logits = []
+
+    logits, cache = model(prompt, cache = cache, return_hiddens = True)
+    all_seq_logits.append(logits[:, -1:])
+
+    # sequential
+
+    for i in range(4):
+        input_embeds = seq[:, 10 + i : 10 + i + 1]
+        logits, cache = model(input_embeds, cache = cache, return_hiddens = True)
+        all_seq_logits.append(logits[:, -1:])
+
+    seq_logits = torch.cat(all_seq_logits, dim = 1)
+
+    parallel_logits_without_prompt = parallel_logits[:, 9 : 14]
+
+    assert torch.allclose(seq_logits, parallel_logits_without_prompt, atol = 1e-5)
