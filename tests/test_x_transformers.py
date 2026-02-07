@@ -1574,6 +1574,7 @@ def test_seq_start_pos_parity():
 
 
 @pytest.mark.skipif(
+    not torch.cuda.is_available() or \
     torch.cuda.get_device_capability()[0] < 8 or \
     __import__('importlib').util.find_spec('flash_attn') is None,
     reason="CUDA compute capability must be >= 8 and flash_attn must be installed"
