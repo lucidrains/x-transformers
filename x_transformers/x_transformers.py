@@ -1513,7 +1513,8 @@ class Attention(Module):
             enable_flash = True,
             enable_math = True,
             enable_mem_efficient = True
-        )
+        ),
+        flash_pack_seq = False,
     ):
         super().__init__()
         dim_kv = default(dim_context, dim)
@@ -1695,7 +1696,8 @@ class Attention(Module):
             logit_softclamp_value = logit_softclamp_value,
             cope = cope,
             onnxable = onnxable,
-            sdp_kwargs = attend_sdp_kwargs
+            sdp_kwargs = attend_sdp_kwargs,
+            flash_pack_seq=flash_pack_seq,
         )
 
         # head scaling
@@ -1833,6 +1835,7 @@ class Attention(Module):
         additional_key_values: tuple[Tensor, Tensor] | None = None,
         additional_key_value_mask = None,
         kv_input_residual = None,
+        flash_pack_seq_kwargs = None,
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context, qkv_receive_diff_residuals, is_multi_latent_attn = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context), self.qkv_receive_diff_residuals, self.use_latent_kv
 
@@ -2099,7 +2102,8 @@ class Attention(Module):
             q, k, v,
             mask = final_attn_mask,
             attn_bias = attn_bias,
-            prev_attn = prev_attn
+            prev_attn = prev_attn,
+            flash_pack_seq_kwargs = flash_pack_seq_kwargs,
         )
 
         # laser
@@ -2306,7 +2310,7 @@ class AttentionLayers(Module):
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
         data_dependent_alibi = attn_kwargs.get('data_dependent_alibi', False)
-
+        flash_pack_seq = attn_kwargs.get('flash_pack_seq', False)
         assert len(kwargs) == 0, f'unrecognized kwargs passed in {kwargs.keys()}'
 
         self.dim = dim
@@ -2353,6 +2357,7 @@ class AttentionLayers(Module):
 
         assert at_most_one_of(rotary_pos_emb, polar_pos_emb), f'either rotary positional embedding or polar positional embedding can be turned on'
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
+        assert not flash_pack_seq or rotary_pos_emb, 'block masking only tested for rotary positional embeddings'
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor, base_rescale_factor = rotary_base_rescale_factor) if rotary_pos_emb else None
 
         # polar positional embedding (PoPE) - https://arxiv.org/abs/2509.10534
@@ -2733,11 +2738,14 @@ class AttentionLayers(Module):
         in_attn_cond = None, # https://arxiv.org/abs/2105.04090
         layers_execute_order: tuple[int, ...] | None = None,
         self_attn_kv_residuals: Tensor | None = None,
-        cross_attn_kv_residuals: Tensor | None = None
+        cross_attn_kv_residuals: Tensor | None = None,
+        flash_pack_seq_kwargs = None,
+        flash_pack_seq_context_kwargs = None,
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
-
+        assert not (exists(flash_pack_seq_kwargs) and (exists(attn_mask) or exists(mask))), 'attn_mask or mask cannot be used with flash block masking'
+        assert not (exists(flash_pack_seq_context_kwargs) and (exists(context_mask))), 'context_mask cannot be used with flash block masking'
         # handle condition
 
         if exists(condition):
@@ -3010,9 +3018,9 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, flash_pack_seq_kwargs = flash_pack_seq_kwargs, return_intermediates = True)
             elif layer_type == 'c':
-                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, return_intermediates = True)
+                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, flash_pack_seq_kwargs = flash_pack_seq_context_kwargs, return_intermediates = True)
             elif layer_type == 'f':
                 out = block(x, deep_embed = next(deep_embeds_iter, None))
 

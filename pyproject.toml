@@ -40,6 +40,10 @@ examples = [
     "tqdm",
 ]
 
+flash-pack-seq = [
+  "flash-attn>=2.0",
+]
+
 test = [
     "pytest",
 ]

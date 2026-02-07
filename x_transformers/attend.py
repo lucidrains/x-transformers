@@ -198,7 +198,8 @@ class Attend(Module):
             enable_flash = True,
             enable_math = True,
             enable_mem_efficient = True
-        )
+        ),
+        flash_pack_seq = False,          # efficient flash attention packed sequence masking for variable length sequences.
     ):
         super().__init__()
         self.scale = scale
@@ -299,13 +300,22 @@ class Attend(Module):
         # flash attention
 
         self.flash = flash
-
+        self.flash_pack_seq = flash_pack_seq
+        
         torch_version = version.parse(torch.__version__)
         assert not (flash and torch_version < version.parse('2.0.0')), 'in order to use flash attention, you must be using pytorch 2.0 or above'
 
-        # torch 2.3 uses new backend and context manager
+        if self.flash:            
+            if self.flash_pack_seq:
+                try:
+                    from flash_attn import flash_attn_varlen_func
+                    self.flash_attn_varlen_func = flash_attn_varlen_func
+                except ImportError:
+                    raise ImportError("block masking with Flash Attention requires the flash-attn package. Please install it with `pip install flash-attn`.")
+                major, minor = torch.cuda.get_device_capability()
+                assert major >= 8, f"block masking with Flash Attention requires SM80+ (Ampere or newer) GPUs, but your GPU has SM{major}{minor}."
 
-        if self.flash:
+            # torch 2.3 uses new backend and context manager
             if torch_version >= version.parse('2.3'):
                 from torch.nn.attention import SDPBackend
 
@@ -326,7 +336,8 @@ class Attend(Module):
         self,
         q, k, v,
         mask = None,
-        attn_bias = None
+        attn_bias = None,
+        flash_pack_seq_kwargs = None, # https://github.com/Dao-AILab/flash-attention/blob/v2.8.3/flash_attn/flash_attn_interface.py#L1370
     ):
         batch, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
 
@@ -421,14 +432,32 @@ class Attend(Module):
             mask = attn_bias
 
         # pytorch 2.0 flash attn: q, k, v, mask, dropout, causal, softmax_scale
-
-        with self.sdp_context_manager():
-            out = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask = mask,
-                dropout_p = self.dropout if self.training else 0., 
-                is_causal = causal
+        if self.flash_pack_seq:
+            assert exists(flash_pack_seq_kwargs), "flash_pack_seq_kwargs must be provided when self.flash_pack_seq is True"
+            cu_seqlens_k = flash_pack_seq_kwargs.get('cu_seqlens_k', None)
+            cu_seqlens_q = flash_pack_seq_kwargs.get('cu_seqlens_q', None)
+            assert q.shape[0] == 1 and k.shape[0] == 1 and v.shape[0] == 1, f"batch size must be 1 for block masking. Shape was q={q.shape}, k={k.shape}, v={v.shape}"
+            assert not exists(mask) and exists(cu_seqlens_q) and exists(cu_seqlens_k), "mask cannot be passed with cu_seqlens for block masking"
+            assert cu_seqlens_q.shape == cu_seqlens_k.shape and cu_seqlens_q.ndim == 1 and not cu_seqlens_q.is_floating_point() and not cu_seqlens_k.is_floating_point() and (cu_seqlens_q.diff() > 0).all() and (cu_seqlens_k.diff() > 0).all(), "cu_seqlens_q/k should be same-length 1D cumulative sequence lengths for block masking"
+            assert not causal or (cu_seqlens_q == cu_seqlens_k).all(), "causal attention with different cu_seqlens for q and k not supported"
+            # efficient packed sequences flash attentino masking
+            att = self.flash_attn_varlen_func(
+                q = rearrange(q, '1 h t d ->t h d'),
+                k = rearrange(k, '1 h t d ->t h d'),
+                v = rearrange(v, '1 h t d ->t h d'),
+                causal=causal,
+                dropout_p=self.dropout if self.training else 0.,
+                **flash_pack_seq_kwargs
             )
+            out = rearrange(att, 't h d -> 1 h t d')
+        else:
+            with self.sdp_context_manager():
+                out = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask = mask,
+                    dropout_p = self.dropout if self.training else 0., 
+                    is_causal = causal
+                )
 
         # for a row that is entirely masked out, should zero out the output of that row token
 
@@ -442,7 +471,8 @@ class Attend(Module):
         q, k, v,
         mask = None,
         attn_bias = None,
-        prev_attn = None
+        prev_attn = None,
+        flash_pack_seq_kwargs = None,
     ):
         """
         einstein notation
@@ -488,7 +518,7 @@ class Attend(Module):
 
         if self.flash:
             assert not exists(prev_attn), 'residual attention not compatible with flash attention'
-            return self.flash_attn(q, k, v, mask = mask, attn_bias = attn_bias)
+            return self.flash_attn(q, k, v, mask = mask, attn_bias = attn_bias, flash_pack_seq_kwargs = flash_pack_seq_kwargs)
 
         kv_einsum_eq = 'b j d' if k.ndim == 3 else 'b h j d'
 
