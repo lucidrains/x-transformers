@@ -2715,7 +2715,7 @@ class AttentionLayers(Module):
         mems = None,
         mem_masks = None,
         seq_start_pos: Tensor | None = None,
-        seq_pos_offset: int = 0,
+        seq_pos_offset = None,
         cache: LayerIntermediates | None = None,
         input_not_include_cache = False,
         cache_age = 1,
@@ -2746,6 +2746,13 @@ class AttentionLayers(Module):
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
         assert not (exists(flash_pack_seq_kwargs) and (exists(attn_mask) or exists(mask))), 'attn_mask or mask cannot be used with flash block masking'
         assert not (exists(flash_pack_seq_context_kwargs) and (exists(context_mask))), 'context_mask cannot be used with flash block masking'
+
+        # handle seq pos offset if not passed in from wrapper
+        # default to 0, but if cache is detected, set appropriate for the relative positional embeddings
+
+        if not exists(seq_pos_offset):
+            seq_pos_offset = cache.cache_length if exists(cache) else 0
+
         # handle condition
 
         if exists(condition):
