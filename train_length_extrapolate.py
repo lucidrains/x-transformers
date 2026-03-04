@@ -152,7 +152,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
     if i % GENERATE_EVERY == 0:
         model.eval()
         unwrapped_model = accelerator.unwrap_model(model)
-        
+
         inp = random.choice(val_dataset_generate)[:-1]
         inp = inp.to(accelerator.device)
         prime = decode_tokens(inp)

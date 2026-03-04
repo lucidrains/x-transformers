@@ -13,7 +13,7 @@ def exists(val):
     return val is not None
 
 def divisible_by(numer, denom):
-    return (numer % denom) == 0 
+    return (numer % denom) == 0
 
 # xl autoregressive wrapper class
 
@@ -137,7 +137,7 @@ class XLAutoregressiveWrapper(nn.Module):
 
         # go through each chunk and derive weighted losses
 
-        total_loss = 0.        
+        total_loss = 0.
 
         for chunk, chunk_labels, loss_weight in zip(split_x, split_labels, loss_weights):
 

@@ -43,7 +43,7 @@ def test_flash_pack_seq(exp):
         attn_cu_lengths = torch.tensor([0] + np.cumsum([split.shape[0] for split in splits]).tolist()).int().cuda()
         return splits, attn_cu_lengths
     with torch.no_grad():
-        with torch.autocast("cuda", dtype=torch.float16):        
+        with torch.autocast("cuda", dtype=torch.float16):
             if same_partition and causal:
                 splits, attn_cu_lengths = partition(x, n_part)
                 # Split mem using the cutting points from attn_cu_lengths
@@ -52,7 +52,7 @@ def test_flash_pack_seq(exp):
                 attn_cu_lengths_context = attn_cu_lengths
                 padded_batch = torch.nn.utils.rnn.pad_sequence(splits, batch_first=True, padding_value=pad_val)
                 padded_mem = torch.nn.utils.rnn.pad_sequence(splits_mem, batch_first=True, padding_value=pad_val)
-                
+
                 mask = (padded_batch != pad_val).any(dim=-1)
                 context_mask = (padded_mem != pad_val).any(dim=-1)
                 max_len = padded_batch.shape[1]
@@ -67,10 +67,10 @@ def test_flash_pack_seq(exp):
                 mask = (padded_batch != pad_val).any(dim=-1)
                 context_mask = (padded_mem != pad_val).any(dim=-1)
                 attn_mask = mask.unsqueeze(2) & context_mask.unsqueeze(1)
-                attn_mask = attn_mask.unsqueeze(1) 
+                attn_mask = attn_mask.unsqueeze(1)
 
 
-            # Standard padding            
+            # Standard padding
             reset_exp_det()
             atd = Attend(flash = False, flash_pack_seq = False,causal=causal).cuda().eval()
             o_atd = atd(q=padded_batch[:,None], k=padded_mem[:,None], v=padded_mem[:,None], mask=attn_mask)
@@ -84,7 +84,7 @@ def test_flash_pack_seq(exp):
                 attn_mask = attn_mask
             )
             o_att = torch.cat([o[~(m == pad_val).all(-1)] for o, m in zip(o_att, padded_batch)], dim=0)
-            
+
             atl = AttentionLayers(dim=dim, depth=n_layers, cross_attend=True, causal=causal, attn_flash=True, attn_flash_pack_seq=False, **atl_kwargs).cuda().eval()
             o_atl = atl(
                 x=padded_batch,
@@ -93,11 +93,11 @@ def test_flash_pack_seq(exp):
                 mask = mask,
             )
             o_atl = torch.cat([o[~(m == pad_val).all(-1)] for o, m in zip(o_atl, padded_batch)], dim=0)
-            
+
 
             # Block masking
             reset_exp_det()
-            atd_block = Attend(flash = True, flash_pack_seq = True, causal=causal).cuda().eval()        
+            atd_block = Attend(flash = True, flash_pack_seq = True, causal=causal).cuda().eval()
 
             flash_pack_seq_kwargs = dict(
                 cu_seqlens_q=attn_cu_lengths,
@@ -110,10 +110,10 @@ def test_flash_pack_seq(exp):
                 max_seqlen_q = attn_cu_lengths.diff().max().item(),
                 cu_seqlens_k=attn_cu_lengths_context,
                 max_seqlen_k = attn_cu_lengths_context.diff().max().item()
-            )            
+            )
             o_atd_block = atd_block(x[None,None], mem[None,None], mem[None,None], flash_pack_seq_kwargs=flash_pack_seq_kwargs_context)
             o_atd_block = o_atd_block[0][0,0]
-            
+
 
             att_block=Attention(dim=dim,flash=True,flash_pack_seq=True, causal=causal).cuda().eval()
             o_att_block = att_block(
@@ -121,7 +121,7 @@ def test_flash_pack_seq(exp):
                 context = mem.unsqueeze(0),
                 flash_pack_seq_kwargs=flash_pack_seq_kwargs_context
             )[0]
-            
+
             atl_block = AttentionLayers(dim=dim, depth=n_layers, cross_attend=True, causal=causal, attn_flash=True, attn_flash_pack_seq=True, **atl_kwargs).cuda().eval()
             o_atl_block = atl_block(
                 x = x.unsqueeze(0),

@@ -84,7 +84,7 @@ class ContinuousTransformerWrapper(Module):
         self.max_seq_len = max_seq_len
 
         self.max_mem_len = max_mem_len
-        
+
         no_abs_pos_emb = not exists(max_seq_len) or max_seq_len == 0 or not (use_abs_pos_emb and not attn_layers.disable_abs_pos_emb)
 
         if no_abs_pos_emb:

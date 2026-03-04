@@ -27,6 +27,9 @@ dependencies = [
     'loguru',
     'packaging>=21.0',
     'torch>=2.0',
+    'ema-pytorch>=0.7.0',
+    "python-fire>=0.1.0",
+    "fire>=0.7.1",
 ]
 
 [project.urls]

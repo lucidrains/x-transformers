@@ -70,7 +70,7 @@ class MultiInputTransformerWrapper(Module):
         else:
             self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len)
 
-        # additional embeddings - say type embedding from BERT        
+        # additional embeddings - say type embedding from BERT
 
         self.embeds = ModuleDict({f'{name}_embed': nn.Embedding(one_num_tokens, emb_dim) for name, one_num_tokens in num_tokens.items()})
 
@@ -151,7 +151,7 @@ class MultiInputTransformerWrapper(Module):
         # absolute positional embedding
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
-        pos_emb = self.pos_emb(first_input, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos        
+        pos_emb = self.pos_emb(first_input, pos = pos, seq_start_pos = seq_start_pos) if not external_pos_emb else pos
 
         token_emb = token_emb + pos_emb
 

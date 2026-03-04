@@ -1561,7 +1561,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     title   = {GLU Variants Improve Transformer},
     author  = {Noam Shazeer},
     year    = {2020},
-    url     = {https://arxiv.org/abs/2002.05202}    
+    url     = {https://arxiv.org/abs/2002.05202}
 }
 ```
 
@@ -1584,7 +1584,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{burtsev2020memory,
-    title   = {Memory Transformer}, 
+    title   = {Memory Transformer},
     author  = {Mikhail S. Burtsev and Grigory V. Sapunov},
     year    = {2020},
     eprint  = {2006.11527},
@@ -1595,7 +1595,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{zhao2019explicit,
-    title   = {Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection}, 
+    title   = {Explicit Sparse Transformer: Concentrated Attention Through Explicit Selection},
     author  = {Guangxiang Zhao and Junyang Lin and Zhiyuan Zhang and Xuancheng Ren and Qi Su and Xu Sun},
     year    = {2019},
     eprint  = {1912.11637},
@@ -1617,7 +1617,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{shazeer2020talkingheads,
-    title   = {Talking-Heads Attention}, 
+    title   = {Talking-Heads Attention},
     author  = {Noam Shazeer and Zhenzhong Lan and Youlong Cheng and Nan Ding and Le Hou},
     year    = {2020},
     eprint  = {2003.02436},
@@ -1628,7 +1628,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{press2020improving,
-    title   = {Improving Transformer Models by Reordering their Sublayers}, 
+    title   = {Improving Transformer Models by Reordering their Sublayers},
     author  = {Ofir Press and Noah A. Smith and Omer Levy},
     year    = {2020},
     eprint  = {1911.03864},
@@ -1639,7 +1639,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{lu2019understanding,
-    title   = {Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View}, 
+    title   = {Understanding and Improving Transformer From a Multi-Particle Dynamic System Point of View},
     author  = {Yiping Lu and Zhuohan Li and Di He and Zhiqing Sun and Bin Dong and Tao Qin and Liwei Wang and Tie-Yan Liu},
     year    = {2019},
     eprint  = {1906.02762},
@@ -1683,7 +1683,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{raffel2020exploring,
-    title   = {Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer}, 
+    title   = {Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer},
     author  = {Colin Raffel and Noam Shazeer and Adam Roberts and Katherine Lee and Sharan Narang and Michael Matena and Yanqi Zhou and Wei Li and Peter J. Liu},
     year    = {2020},
     eprint  = {1910.10683},
@@ -1853,7 +1853,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{so2021primer,
-    title   = {Primer: Searching for Efficient Transformers for Language Modeling}, 
+    title   = {Primer: Searching for Efficient Transformers for Language Modeling},
     author  = {David R. So and Wojciech Mańke and Hanxiao Liu and Zihang Dai and Noam Shazeer and Quoc V. Le},
     year    = {2021},
     eprint  = {2109.08668},
@@ -1864,7 +1864,7 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{ding2021erniedoc,
-    title   = {ERNIE-Doc: A Retrospective Long-Document Modeling Transformer}, 
+    title   = {ERNIE-Doc: A Retrospective Long-Document Modeling Transformer},
     author  = {Siyu Ding and Junyuan Shang and Shuohuan Wang and Yu Sun and Hao Tian and Hua Wu and Haifeng Wang},
     year    = {2021},
     eprint  = {2012.15688},
@@ -2449,13 +2449,13 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{bloem2025universalpretrainingiteratedrandom,
-    title   = {Universal pre-training by iterated random computation}, 
+    title   = {Universal pre-training by iterated random computation},
     author  = {Peter Bloem},
     year    = {2025},
     eprint  = {2506.20057},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG},
-    url     = {https://arxiv.org/abs/2506.20057}, 
+    url     = {https://arxiv.org/abs/2506.20057},
 }
 ```
 
@@ -2482,25 +2482,25 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{kimiteam2025kimik2openagentic,
-    title   = {Kimi K2: Open Agentic Intelligence}, 
+    title   = {Kimi K2: Open Agentic Intelligence},
     author  = {Kimi Team and Yifan Bai and Yiping Bao and Guanduo Chen and Jiahao Chen and Ningxin Chen and Ruijue Chen and Yanru Chen and Yuankun Chen and Yutian Chen and Zhuofu Chen and Jialei Cui and Hao Ding and Mengnan Dong and Angang Du and Chenzhuang Du and Dikang Du and Yulun Du and Yu Fan and Yichen Feng and Kelin Fu and Bofei Gao and Hongcheng Gao and Peizhong Gao and Tong Gao and Xinran Gu and Longyu Guan and Haiqing Guo and Jianhang Guo and Hao Hu and Xiaoru Hao and Tianhong He and Weiran He and Wenyang He and Chao Hong and Yangyang Hu and Zhenxing Hu and Weixiao Huang and Zhiqi Huang and Zihao Huang and Tao Jiang and Zhejun Jiang and Xinyi Jin and Yongsheng Kang and Guokun Lai and Cheng Li and Fang Li and Haoyang Li and Ming Li and Wentao Li and Yanhao Li and Yiwei Li and Zhaowei Li and Zheming Li and Hongzhan Lin and Xiaohan Lin and Zongyu Lin and Chengyin Liu and Chenyu Liu and Hongzhang Liu and Jingyuan Liu and Junqi Liu and Liang Liu and Shaowei Liu and T. Y. Liu and Tianwei Liu and Weizhou Liu and Yangyang Liu and Yibo Liu and Yiping Liu and Yue Liu and Zhengying Liu and Enzhe Lu and Lijun Lu and Shengling Ma and Xinyu Ma and Yingwei Ma and Shaoguang Mao and Jie Mei and Xin Men and Yibo Miao and Siyuan Pan and Yebo Peng and Ruoyu Qin and Bowen Qu and Zeyu Shang and Lidong Shi and Shengyuan Shi and Feifan Song and Jianlin Su and Zhengyuan Su and Xinjie Sun and Flood Sung and Heyi Tang and Jiawen Tao and Qifeng Teng and Chensi Wang and Dinglu Wang and Feng Wang and Haiming Wang and Jianzhou Wang and Jiaxing Wang and Jinhong Wang and Shengjie Wang and Shuyi Wang and Yao Wang and Yejie Wang and Yiqin Wang and Yuxin Wang and Yuzhi Wang and Zhaoji Wang and Zhengtao Wang and Zhexu Wang and Chu Wei and Qianqian Wei and Wenhao Wu and Xingzhe Wu and Yuxin Wu and Chenjun Xiao and Xiaotong Xie and Weimin Xiong and Boyu Xu and Jing Xu and Jinjing Xu and L. H. Xu and Lin Xu and Suting Xu and Weixin Xu and Xinran Xu and Yangchuan Xu and Ziyao Xu and Junjie Yan and Yuzi Yan and Xiaofei Yang and Ying Yang and Zhen Yang and Zhilin Yang and Zonghan Yang and Haotian Yao and Xingcheng Yao and Wenjie Ye and Zhuorui Ye and Bohong Yin and Longhui Yu and Enming Yuan and Hongbang Yuan and Mengjie Yuan and Haobing Zhan and Dehao Zhang and Hao Zhang and Wanlu Zhang and Xiaobin Zhang and Yangkun Zhang and Yizhi Zhang and Yongting Zhang and Yu Zhang and Yutao Zhang and Yutong Zhang and Zheng Zhang and Haotian Zhao and Yikai Zhao and Huabin Zheng and Shaojie Zheng and Jianren Zhou and Xinyu Zhou and Zaida Zhou and Zhen Zhu and Weiyu Zhuang and Xinxing Zu},
     year    = {2025},
     eprint  = {2507.20534},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG},
-    url = {https://arxiv.org/abs/2507.20534}, 
+    url = {https://arxiv.org/abs/2507.20534},
 }
 ```
 
 ```bibtex
 @misc{zhao2023learningfinegrainedbimanualmanipulation,
-    title   = {Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware}, 
+    title   = {Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware},
     author  = {Tony Z. Zhao and Vikash Kumar and Sergey Levine and Chelsea Finn},
     year    = {2023},
     eprint  = {2304.13705},
     archivePrefix = {arXiv},
     primaryClass = {cs.RO},
-    url     = {https://arxiv.org/abs/2304.13705}, 
+    url     = {https://arxiv.org/abs/2304.13705},
 }
 ```
 
@@ -2515,37 +2515,37 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{wang2025muonoutperformsadamtailend,
-    title   = {Muon Outperforms Adam in Tail-End Associative Memory Learning}, 
+    title   = {Muon Outperforms Adam in Tail-End Associative Memory Learning},
     author  = {Shuche Wang and Fengzhuo Zhang and Jiaxiang Li and Cunxiao Du and Chao Du and Tianyu Pang and Zhuoran Yang and Mingyi Hong and Vincent Y. F. Tan},
     year    = {2025},
     eprint  = {2509.26030},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG},
-    url     = {https://arxiv.org/abs/2509.26030}, 
+    url     = {https://arxiv.org/abs/2509.26030},
 }
 ```
 
 ```bibtex
 @misc{yan2017hierarchicalmultiscaleattentionnetworks,
-    title   = {Hierarchical Multi-scale Attention Networks for Action Recognition}, 
+    title   = {Hierarchical Multi-scale Attention Networks for Action Recognition},
     author  = {Shiyang Yan and Jeremy S. Smith and Wenjin Lu and Bailing Zhang},
     year    = {2017},
     eprint  = {1708.07590},
     archivePrefix = {arXiv},
     primaryClass = {cs.CV},
-    url     = {https://arxiv.org/abs/1708.07590}, 
+    url     = {https://arxiv.org/abs/1708.07590},
 }
 ```
 
 ```bibtex
 @misc{lv2025expressiveattentionnegativeweights,
-    title   = {More Expressive Attention with Negative Weights}, 
+    title   = {More Expressive Attention with Negative Weights},
     author  = {Ang Lv and Ruobing Xie and Shuaipeng Li and Jiayi Liao and Xingwu Sun and Zhanhui Kang and Di Wang and Rui Yan},
     year    = {2025},
     eprint  = {2411.07176},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL},
-    url     = {https://arxiv.org/abs/2411.07176}, 
+    url     = {https://arxiv.org/abs/2411.07176},
 }
 ```
 
@@ -2571,37 +2571,47 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 
 ```bibtex
 @misc{chen2025strongernormalizationfreetransformers,
-    title   = {Stronger Normalization-Free Transformers}, 
+    title   = {Stronger Normalization-Free Transformers},
     author  = {Mingzhi Chen and Taiming Lu and Jiachen Zhu and Mingjie Sun and Zhuang Liu},
     year    = {2025},
     eprint  = {2512.10938},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG},
-    url     = {https://arxiv.org/abs/2512.10938}, 
+    url     = {https://arxiv.org/abs/2512.10938},
 }
 ```
 
 ```bibtex
 @misc{gopalakrishnan2025decouplingwhatwherepolar,
-    title   = {Decoupling the "What" and "Where" With Polar Coordinate Positional Embeddings}, 
+    title   = {Decoupling the "What" and "Where" With Polar Coordinate Positional Embeddings},
     author  = {Anand Gopalakrishnan and Robert Csordás and Jürgen Schmidhuber and Michael C. Mozer},
     year    = {2025},
     eprint  = {2509.10534},
     archivePrefix = {arXiv},
     primaryClass = {cs.LG},
-    url     = {https://arxiv.org/abs/2509.10534}, 
+    url     = {https://arxiv.org/abs/2509.10534},
 }
 ```
 
 ```bibtex
 @misc{xie2025mhcmanifoldconstrainedhyperconnections,
-    title   = {mHC: Manifold-Constrained Hyper-Connections}, 
+    title   = {mHC: Manifold-Constrained Hyper-Connections},
     author  = {Zhenda Xie and Yixuan Wei and Huanqi Cao and Chenggang Zhao and Chengqi Deng and Jiashi Li and Damai Dai and Huazuo Gao and Jiang Chang and Liang Zhao and Shangyan Zhou and Zhean Xu and Zhengyan Zhang and Wangding Zeng and Shengding Hu and Yuqing Wang and Jingyang Yuan and Lean Wang and Wenfeng Liang},
     year    = {2025},
     eprint  = {2512.24880},
     archivePrefix = {arXiv},
     primaryClass = {cs.CL},
-    url     = {https://arxiv.org/abs/2512.24880}, 
+    url     = {https://arxiv.org/abs/2512.24880},
+}
+```
+
+```bibtex
+@misc{chefer2026self,
+    title   = {Self-Supervised Flow Matching for Scalable Multi-Modal Synthesis},
+    author  = {Hila Chefer and Patrick Esser and Dominik Lorenz and Dustin Podell and Vikash Raja and Vinh Tong and Antonio Torralba and Robin Rombach},
+    year    = {2026},
+    url     = {https://bfl.ai/research/self-flow},
+    note    = {Preprint}
 }
 ```
 

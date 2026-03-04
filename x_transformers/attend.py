@@ -301,11 +301,11 @@ class Attend(Module):
 
         self.flash = flash
         self.flash_pack_seq = flash_pack_seq
-        
+
         torch_version = version.parse(torch.__version__)
         assert not (flash and torch_version < version.parse('2.0.0')), 'in order to use flash attention, you must be using pytorch 2.0 or above'
 
-        if self.flash:            
+        if self.flash:
             if self.flash_pack_seq:
                 try:
                     from flash_attn import flash_attn_varlen_func
@@ -455,7 +455,7 @@ class Attend(Module):
                 out = F.scaled_dot_product_attention(
                     q, k, v,
                     attn_mask = mask,
-                    dropout_p = self.dropout if self.training else 0., 
+                    dropout_p = self.dropout if self.training else 0.,
                     is_causal = causal
                 )
 

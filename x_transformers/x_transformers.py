@@ -533,7 +533,7 @@ class DynamicPositionBias(Module):
         for layer in self.mlp:
             pos = layer(pos)
 
-        # get position biases        
+        # get position biases
         bias = pos[indices]
         bias = rearrange(bias, 'i j h -> h i j')
         return bias
@@ -555,7 +555,7 @@ class AlibiPositionalBias(Module):
 
         self.register_buffer('slopes', slopes, persistent = False)
         self.register_buffer('bias', None, persistent = False)
-    
+
     @property
     def device(self):
         return next(self.buffers()).device
