@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gzip
 import random
+from itertools import chain
 import numpy as np
 
 import torch
@@ -25,7 +26,7 @@ from tqdm import tqdm
 from ema_pytorch import EMA
 from accelerate import Accelerator
 
-from x_transformers import TransformerWrapper, Decoder
+from x_transformers import TransformerWrapper, Decoder, RMSNorm
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # Self-Masked Representation Training
@@ -62,7 +63,22 @@ class SelfMaskedRepTraining(nn.Module):
         self.student_layer = student_layer
         self.teacher_layer = teacher_layer
 
+        # prediction head logic
+
+        dim = net.attn_layers.dim
+
+        self.student_predict_head = nn.Sequential(
+            RMSNorm(dim),
+            nn.Linear(dim, dim, bias = False)
+        )
+
         self.register_buffer('zero', tensor(0.))
+
+    def parameters(self):
+        return chain(
+            self.student.parameters(),
+            self.student_predict_head.parameters()
+        )
 
     def update_teacher(self):
         self.teacher.update()
@@ -120,6 +136,10 @@ class SelfMaskedRepTraining(nn.Module):
         # cosine similarity representation loss
         
         student_rep = student_rep[:, :-1]
+
+        # prediction head
+
+        student_rep = self.student_predict_head(student_rep)
 
         # teacher_rep is already length n - 1
 
