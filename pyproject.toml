@@ -1,6 +1,6 @@
 [project]
 name = "x-transformers"
-version = "2.16.1"
+version = "2.16.2"
 description = "X-Transformers"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -31,7 +31,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://pypi.org/project/x-transformers/"
-Repository = "https://github.com/lucidrains/x-transformers"
+Repository = "https://codeberg.org/lucidrains/x-transformers"
 
 [project.optional-dependencies]
 examples = [
@@ -55,11 +55,19 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 pythonpath = [
-  "."
+    "."
 ]
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "x_transformers",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["x_transformers"]

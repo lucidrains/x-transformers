@@ -3263,6 +3263,22 @@ class ViTransformerWrapper(Module):
 
         return logits, embed
 
+class TransformerBlock(AttentionLayers):
+    def __init__(
+        self,
+        dim,
+        *,
+        depth = 1,
+        pre_norm_has_final_norm = False,
+        **kwargs
+    ):
+        super().__init__(
+            dim,
+            depth = depth,
+            pre_norm_has_final_norm = pre_norm_has_final_norm,
+            **kwargs
+        )
+
 class TransformerWrapper(Module):
     def __init__(
         self,

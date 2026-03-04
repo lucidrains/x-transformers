@@ -11,6 +11,7 @@ from x_transformers.x_transformers import (
     AdaptiveRMSNorm,
     TransformerWrapper,
     ViTransformerWrapper,
+    TransformerBlock,
 )
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
