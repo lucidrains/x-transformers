@@ -13,6 +13,7 @@ from __future__ import annotations
 import fire
 import gzip
 import random
+from copy import deepcopy
 from itertools import chain
 from collections import namedtuple
 import numpy as np
@@ -26,7 +27,7 @@ from torch.utils.data import DataLoader, Dataset
 from ema_pytorch import EMA
 from accelerate import Accelerator
 
-from x_transformers import TransformerWrapper, Decoder, RMSNorm
+from x_transformers import TransformerWrapper, Decoder, RMSNorm, FeedForward
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 # Self-Masked Representation Training
@@ -142,6 +143,7 @@ class SelfMaskedRepTraining(nn.Module):
         student_layer = 2,
         teacher_layer = 4,
         predict_next_teacher = False,
+        predict_head_expansion = 4,
         loss_fn = default_rep_loss_fn
     ):
         super().__init__()
@@ -164,14 +166,11 @@ class SelfMaskedRepTraining(nn.Module):
 
         self.student_predict_head = nn.Sequential(
             RMSNorm(dim),
-            nn.Linear(dim, dim, bias = False)
+            FeedForward(dim, mult = predict_head_expansion)
         )
 
         if self.predict_next_teacher:
-            self.student_predict_next_head = nn.Sequential(
-                RMSNorm(dim),
-                nn.Linear(dim, dim, bias = False)
-            )
+            self.student_predict_next_head = deepcopy(self.student_predict_head)
 
         self.register_buffer('zero', tensor(0.))
 
@@ -308,6 +307,7 @@ def train(
     student_layer = 2,
     teacher_layer = 4,
     predict_next_teacher = False,
+    predict_head_expansion = 4,
     use_ssl = True,
     distill_type = 'cosine'
 ):
@@ -346,7 +346,8 @@ def train(
             rep_loss_weight = rep_loss_weight,
             student_layer = student_layer,
             teacher_layer = teacher_layer,
-            predict_next_teacher = predict_next_teacher
+            predict_next_teacher = predict_next_teacher,
+            predict_head_expansion = predict_head_expansion
         )
     elif distill_type == 'reverse_kl':
         ssl_wrapper = SelfDistilledTraining(
