@@ -10,18 +10,18 @@
 
 from __future__ import annotations
 
+import fire
 import gzip
 import random
 from itertools import chain
+from collections import namedtuple
 import numpy as np
+from tqdm import tqdm
 
 import torch
 from torch import nn, Tensor, tensor, is_tensor
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-
-import fire
-from tqdm import tqdm
 
 from ema_pytorch import EMA
 from accelerate import Accelerator
@@ -46,6 +46,12 @@ def divisible_by(num, den):
 
 # ssl wrapper modules
 
+LossBreakdown = namedtuple('LossBreakdown', ['gen_loss', 'ssl_loss', 'ssl_loss_next'])
+
+def default_rep_loss_fn(pred, target):
+    cos_sim = F.cosine_similarity(pred, target, dim = -1)
+    return 1. - cos_sim.mean()
+
 class SelfDistilledTraining(nn.Module):
     def __init__(
         self,
@@ -60,6 +66,7 @@ class SelfDistilledTraining(nn.Module):
 
         self.mask_ratio = mask_ratio
         self.kl_loss_weight = kl_loss_weight
+        self.has_ssl_loss = kl_loss_weight > 0
 
         self.register_buffer('zero', tensor(0.))
 
@@ -94,10 +101,8 @@ class SelfDistilledTraining(nn.Module):
             **kwargs
         )
 
-        has_ssl_loss = self.kl_loss_weight > 0
-
-        if not has_ssl_loss:
-            return student_loss, (student_loss, self.zero)
+        if not self.has_ssl_loss:
+            return student_loss, LossBreakdown(student_loss, self.zero, None)
 
         # teacher pass
 
@@ -125,7 +130,7 @@ class SelfDistilledTraining(nn.Module):
 
         total_loss = student_loss + self.kl_loss_weight * ssl_loss
 
-        return total_loss, (student_loss, ssl_loss)
+        return total_loss, LossBreakdown(student_loss, ssl_loss, None)
 
 class SelfMaskedRepTraining(nn.Module):
     def __init__(
@@ -135,7 +140,9 @@ class SelfMaskedRepTraining(nn.Module):
         ema_beta = 0.999,
         rep_loss_weight = 0.1,
         student_layer = 2,
-        teacher_layer = 4
+        teacher_layer = 4,
+        predict_next_teacher = False,
+        loss_fn = default_rep_loss_fn
     ):
         super().__init__()
         self.student = AutoregressiveWrapper(net)
@@ -143,9 +150,13 @@ class SelfMaskedRepTraining(nn.Module):
 
         self.mask_ratio = mask_ratio
         self.rep_loss_weight = rep_loss_weight
+        self.has_ssl_loss = rep_loss_weight > 0
 
         self.student_layer = student_layer
         self.teacher_layer = teacher_layer
+
+        self.predict_next_teacher = predict_next_teacher
+        self.loss_fn = loss_fn
 
         # prediction head logic
 
@@ -156,12 +167,23 @@ class SelfMaskedRepTraining(nn.Module):
             nn.Linear(dim, dim, bias = False)
         )
 
+        if self.predict_next_teacher:
+            self.student_predict_next_head = nn.Sequential(
+                RMSNorm(dim),
+                nn.Linear(dim, dim, bias = False)
+            )
+
         self.register_buffer('zero', tensor(0.))
 
     def parameters(self):
+        heads = [self.student_predict_head.parameters()]
+
+        if self.predict_next_teacher:
+            heads.append(self.student_predict_next_head.parameters())
+
         return chain(
             self.student.parameters(),
-            self.student_predict_head.parameters()
+            *heads
         )
 
     def update_teacher(self):
@@ -192,10 +214,8 @@ class SelfMaskedRepTraining(nn.Module):
             **kwargs
         )
 
-        has_ssl_loss = self.rep_loss_weight > 0
-
-        if not has_ssl_loss:
-            return student_loss, (student_loss, self.zero)
+        if not self.has_ssl_loss:
+            return student_loss, LossBreakdown(student_loss, self.zero, None)
 
         # extract student representation at layer l
 
@@ -205,7 +225,7 @@ class SelfMaskedRepTraining(nn.Module):
         # teacher pass with unmasked (cleaner) inputs
 
         with torch.no_grad():
-            teacher_inp = x[:, :-1]
+            teacher_inp = x if self.predict_next_teacher else x[:, :-1]
 
             # ema wraps TransformerWrapper
 
@@ -223,19 +243,26 @@ class SelfMaskedRepTraining(nn.Module):
 
         # prediction head
 
-        student_rep = self.student_predict_head(student_rep)
+        student_pred = self.student_predict_head(student_rep)
 
-        # teacher_rep is already length n - 1
+        # teacher_rep is length n if predict_next_teacher else n - 1
 
-        cos_sim = F.cosine_similarity(student_rep, teacher_rep, dim = -1)
+        teacher_rep_current = teacher_rep[:, :-1] if self.predict_next_teacher else teacher_rep
+        ssl_loss = self.loss_fn(student_pred, teacher_rep_current)
 
-        # mean positive-valued cosine similarity loss going to 0
+        ssl_loss_next = None
 
-        ssl_loss = 1. - cos_sim.mean()
+        if self.predict_next_teacher:
+            teacher_rep_next = teacher_rep[:, 1:]
+
+            student_pred_next = self.student_predict_next_head(student_rep)
+            ssl_loss_next = self.loss_fn(student_pred_next, teacher_rep_next)
+
+            ssl_loss = (ssl_loss + ssl_loss_next) / 2
 
         total_loss = student_loss + self.rep_loss_weight * ssl_loss
 
-        return total_loss, (student_loss, ssl_loss)
+        return total_loss, LossBreakdown(student_loss, ssl_loss, ssl_loss_next)
 
 # data helpers
 
@@ -280,6 +307,7 @@ def train(
     rep_loss_weight = 0.1,
     student_layer = 2,
     teacher_layer = 4,
+    predict_next_teacher = False,
     use_ssl = True,
     distill_type = 'cosine'
 ):
@@ -317,7 +345,8 @@ def train(
             ema_beta = ema_beta,
             rep_loss_weight = rep_loss_weight,
             student_layer = student_layer,
-            teacher_layer = teacher_layer
+            teacher_layer = teacher_layer,
+            predict_next_teacher = predict_next_teacher
         )
     elif distill_type == 'reverse_kl':
         ssl_wrapper = SelfDistilledTraining(
@@ -361,23 +390,28 @@ def train(
         ssl_wrapper.train()
 
         total_loss = 0.
-        total_gen_loss = 0.
-        total_ssl_loss = 0.
+
+        from collections import defaultdict
+        total_breakdown = defaultdict(float)
 
         for __ in range(gradient_accumulate_every):
             seq = next(train_loader)
 
-            loss, (gen_loss, ssl_loss) = ssl_wrapper(seq)
+            loss, breakdown = ssl_wrapper(seq)
+
+            for k, v in breakdown._asdict().items():
+                if not exists(v) or not is_tensor(v):
+                    continue
+                total_breakdown[k] += v.item() / gradient_accumulate_every
 
             loss = loss / gradient_accumulate_every
 
             accelerator.backward(loss)
 
             total_loss += loss.item()
-            total_gen_loss += gen_loss.item() / gradient_accumulate_every
-            total_ssl_loss += ssl_loss.item() / gradient_accumulate_every if is_tensor(ssl_loss) else 0.
 
-        accelerator.print(f'{i}: loss: {total_loss:.3f} | gen: {total_gen_loss:.3f} | ssl: {total_ssl_loss:.3f}')
+        breakdown_str = ' | '.join(f"{k}: {v:.3f}" for k, v in total_breakdown.items())
+        accelerator.print(f'{i}: loss: {total_loss:.3f} | {breakdown_str}')
 
         accelerator.clip_grad_norm_(ssl_wrapper.parameters(), 0.5)
         optim.step()
