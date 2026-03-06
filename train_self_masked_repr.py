@@ -45,6 +45,11 @@ def default(val, d):
 def divisible_by(num, den):
     return (num % den) == 0
 
+def set_dropout_(model: nn.Module, prob: float):
+    for module in model.modules():
+        if isinstance(module, nn.Dropout):
+            module.p = prob
+
 # ssl wrapper modules
 
 LossBreakdown = namedtuple('LossBreakdown', ['gen_loss', 'ssl_loss', 'ssl_loss_next'])
@@ -59,15 +64,27 @@ class SelfDistilledTraining(nn.Module):
         net: TransformerWrapper,
         mask_ratio = 0.15,
         ema_beta = 0.999,
-        kl_loss_weight = 0.1
+        kl_loss_weight = 0.1,
+        use_self_attn_kv_mask = True,
+        use_asymmetric_dropout = False,
+        student_dropout_rate = 0.,
+        teacher_dropout_rate = 0.
     ):
         super().__init__()
+        assert use_self_attn_kv_mask or use_asymmetric_dropout, 'must use either asymmetric dropout, self attention kv masking, or both'
+        assert not use_asymmetric_dropout or student_dropout_rate > teacher_dropout_rate, 'student must have greater dropout rate than teacher to ensure teacher has a better view'
+
         self.student = AutoregressiveWrapper(net)
         self.teacher = EMA(net, beta = ema_beta)
 
         self.mask_ratio = mask_ratio
         self.kl_loss_weight = kl_loss_weight
         self.has_ssl_loss = kl_loss_weight > 0
+
+        self.use_self_attn_kv_mask = use_self_attn_kv_mask
+        self.use_asymmetric_dropout = use_asymmetric_dropout
+        self.student_dropout_rate = student_dropout_rate
+        self.teacher_dropout_rate = teacher_dropout_rate
 
         self.register_buffer('zero', tensor(0.))
 
@@ -95,10 +112,13 @@ class SelfDistilledTraining(nn.Module):
 
         # student pass with masked inputs
 
+        if self.use_asymmetric_dropout:
+            set_dropout_(self.student, self.student_dropout_rate)
+
         student_loss, (student_logits, _) = self.student(
             x,
             return_outputs = True,
-            self_attn_kv_mask = ~mask,
+            self_attn_kv_mask = ~mask if self.use_self_attn_kv_mask else None,
             **kwargs
         )
 
@@ -106,6 +126,9 @@ class SelfDistilledTraining(nn.Module):
             return student_loss, LossBreakdown(student_loss, self.zero, None)
 
         # teacher pass
+
+        if self.use_asymmetric_dropout:
+            set_dropout_(self.teacher, self.teacher_dropout_rate)
 
         with torch.no_grad():
             teacher_inp = x[:, :-1]
@@ -144,15 +167,27 @@ class SelfMaskedRepTraining(nn.Module):
         teacher_layer = 4,
         predict_next_teacher = False,
         predict_head_expansion = 4,
-        loss_fn = default_rep_loss_fn
+        loss_fn = default_rep_loss_fn,
+        use_self_attn_kv_mask = True,
+        use_asymmetric_dropout = False,
+        student_dropout_rate = 0.,
+        teacher_dropout_rate = 0.
     ):
         super().__init__()
+        assert use_self_attn_kv_mask or use_asymmetric_dropout, 'must use either asymmetric dropout, self attention kv masking, or both'
+        assert not use_asymmetric_dropout or student_dropout_rate > teacher_dropout_rate, 'student must have greater dropout rate than teacher to ensure teacher has a better view'
+
         self.student = AutoregressiveWrapper(net)
         self.teacher = EMA(net, beta = ema_beta)
 
         self.mask_ratio = mask_ratio
         self.rep_loss_weight = rep_loss_weight
         self.has_ssl_loss = rep_loss_weight > 0
+
+        self.use_self_attn_kv_mask = use_self_attn_kv_mask
+        self.use_asymmetric_dropout = use_asymmetric_dropout
+        self.student_dropout_rate = student_dropout_rate
+        self.teacher_dropout_rate = teacher_dropout_rate
 
         self.student_layer = student_layer
         self.teacher_layer = teacher_layer
@@ -206,10 +241,13 @@ class SelfMaskedRepTraining(nn.Module):
 
         # student pass with masked inputs
 
+        if self.use_asymmetric_dropout:
+            set_dropout_(self.student, self.student_dropout_rate)
+
         student_loss, (student_logits, student_cache) = self.student(
             x,
             return_outputs = True,
-            self_attn_kv_mask = ~mask,
+            self_attn_kv_mask = ~mask if self.use_self_attn_kv_mask else None,
             **kwargs
         )
 
@@ -222,6 +260,9 @@ class SelfMaskedRepTraining(nn.Module):
         student_rep = student_hiddens[self.student_layer]
 
         # teacher pass with unmasked (cleaner) inputs
+
+        if self.use_asymmetric_dropout:
+            set_dropout_(self.teacher, self.teacher_dropout_rate)
 
         with torch.no_grad():
             teacher_inp = x if self.predict_next_teacher else x[:, :-1]
@@ -304,12 +345,16 @@ def train(
     mask_ratio = 0.15,
     ema_beta = 0.999,
     rep_loss_weight = 0.1,
-    student_layer = 2,
-    teacher_layer = 4,
+    student_layer = 3,
+    teacher_layer = 5,
     predict_next_teacher = False,
     predict_head_expansion = 4,
     use_ssl = True,
-    distill_type = 'cosine'
+    distill_type = 'cosine',
+    use_self_attn_kv_mask = True,
+    use_asymmetric_dropout = False,
+    student_dropout_rate = 0.,
+    teacher_dropout_rate = 0.
 ):
     # accelerator
 
@@ -347,14 +392,22 @@ def train(
             student_layer = student_layer,
             teacher_layer = teacher_layer,
             predict_next_teacher = predict_next_teacher,
-            predict_head_expansion = predict_head_expansion
+            predict_head_expansion = predict_head_expansion,
+            use_self_attn_kv_mask = use_self_attn_kv_mask,
+            use_asymmetric_dropout = use_asymmetric_dropout,
+            student_dropout_rate = student_dropout_rate,
+            teacher_dropout_rate = teacher_dropout_rate
         )
     elif distill_type == 'reverse_kl':
         ssl_wrapper = SelfDistilledTraining(
             student,
             mask_ratio = mask_ratio,
             ema_beta = ema_beta,
-            kl_loss_weight = rep_loss_weight
+            kl_loss_weight = rep_loss_weight,
+            use_self_attn_kv_mask = use_self_attn_kv_mask,
+            use_asymmetric_dropout = use_asymmetric_dropout,
+            student_dropout_rate = student_dropout_rate,
+            teacher_dropout_rate = teacher_dropout_rate
         )
 
     ssl_wrapper = accelerator.prepare(ssl_wrapper)
