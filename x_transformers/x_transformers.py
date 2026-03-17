@@ -1066,6 +1066,7 @@ class AttentionAggregatedResidual(Module):
     def __init__(
         self,
         dim,
+        num_views = 1,
         heads = 4,
         dim_head = 64,
         rotary_pos_emb = True,
@@ -1081,15 +1082,20 @@ class AttentionAggregatedResidual(Module):
             **attn_kwargs
         )
 
+        self.num_views = num_views
+        self.multiple_views = num_views > 1
+
         self.attn_pool = AttentionPool(
             dim = dim,
             dim_context = dim,
-            num_pooled_tokens = 0,
+            num_pooled_tokens = num_views,
             use_transformer_blocks = False,
             heads = heads,
             dim_head = dim_head,
             attn_kwargs = attn_kwargs
         )
+
+        nn.init.zeros_(self.attn_pool.queries)
 
         self.use_rotary = rotary_pos_emb
         self.use_polar = polar_pos_emb
@@ -1101,19 +1107,18 @@ class AttentionAggregatedResidual(Module):
         else:
             self.pos_emb = None
 
-    def prepare(self, residual):
-        return residual, residual, dict()
+    def forward(
+        self,
+        x,
+        hiddens: list[Tensor] | None = None,
+        **kwargs
+    ):
+        assert exists(hiddens), 'hiddens must be passed to AttentionAggregatedResidual'
 
-    def forward(self, x, residual, layer_hiddens: list[Tensor] | None = None, **kwargs):
-        assert exists(layer_hiddens), 'layer_hiddens must be passed to AttentionAggregatedResidual'
-
-        hiddens = stack(layer_hiddens, dim = 1)
+        hiddens = stack(hiddens, dim = 1)
 
         hiddens = rearrange(hiddens, 'b l n d -> b n l d')
         hiddens, packed_shape = pack_one(hiddens, '* l d')
-
-        queries, _ = pack_one(x, '* d')
-        queries = rearrange(queries, '... d -> ... 1 d')
 
         # positional embeddings for layer depth distance
 
@@ -1121,7 +1126,7 @@ class AttentionAggregatedResidual(Module):
 
         if exists(self.pos_emb):
             num_layers = hiddens.shape[-2]
-            positions = arange(num_layers + 1, device = x.device)
+            positions = arange(num_layers, device = x.device)
             pos_emb = self.pos_emb(positions)
 
             if self.use_polar:
@@ -1129,12 +1134,16 @@ class AttentionAggregatedResidual(Module):
             else:
                 attn_kwargs.update(rotary_pos_emb = pos_emb, context_rotary_pos_emb = pos_emb)
 
-        pooled = self.attn_pool(hiddens, queries = queries, **attn_kwargs)
+        pooled = self.attn_pool(hiddens, **attn_kwargs)
 
-        pooled = rearrange(pooled, '... 1 d -> ... d')
-        pooled = unpack_one(pooled, packed_shape, '* d')
+        if self.multiple_views:
+            pooled = rearrange(pooled, '... v d -> v ... d', v = self.num_views)
+            pooled = unpack_one(pooled, packed_shape, 'v * d')
+        else:
+            pooled = rearrange(pooled, '... 1 d -> ... d')
+            pooled = unpack_one(pooled, packed_shape, '* d')
 
-        return x + pooled
+        return pooled
 
 # hyper connections
 
@@ -2736,6 +2745,18 @@ class AttentionLayers(Module):
 
                 layer_integrate = DynamicLIMe(dim, num_layer_hiddens, num_views = layer_integrate_num_view, use_softmax = layer_integrate_use_softmax)
 
+            elif attn_aggregated_residuals:
+                layer_integrate_num_view = 3 if layer_qkv_receives_diff_view else 1
+                layer_integrate = AttentionAggregatedResidual(
+                    dim,
+                    num_views = layer_integrate_num_view,
+                    heads = heads,
+                    dim_head = dim_head,
+                    rotary_pos_emb = rotary_pos_emb,
+                    polar_pos_emb = polar_pos_emb,
+                    attn_kwargs = attn_aggregated_residual_kwargs
+                )
+
             if has_hyper_connections:
                 residual_fn = partial(HyperConnection, num_residual_streams = num_residual_streams, sinkhorn_iters = hyper_conn_sinkhorn_iters)
 
@@ -2744,15 +2765,6 @@ class AttentionLayers(Module):
 
             elif gate_residual:
                 residual_fn = GRUGating
-            elif attn_aggregated_residuals:
-                residual_fn = partial(
-                    AttentionAggregatedResidual,
-                    heads = attn_kwargs.get('heads', 8),
-                    dim_head = attn_kwargs.get('dim_head', 64),
-                    rotary_pos_emb = not polar_pos_emb,
-                    polar_pos_emb = polar_pos_emb,
-                    attn_kwargs = attn_aggregated_residual_kwargs
-                )
             else:
                 residual_fn = Residual
 

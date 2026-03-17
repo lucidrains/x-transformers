@@ -1636,7 +1636,8 @@ def test_continuous_transformer_external_projects():
     assert logits.shape == (1, 16, 16)
 
 @param('pos_emb_type', ('rotary', 'polar', 'none'))
-def test_attn_aggregated_residuals(pos_emb_type):
+@param('qkv_receive_diff_residuals', (False, True))
+def test_attn_aggregated_residuals(pos_emb_type, qkv_receive_diff_residuals):
 
     kwargs = dict()
     if pos_emb_type == 'rotary':
@@ -1652,6 +1653,7 @@ def test_attn_aggregated_residuals(pos_emb_type):
             depth = 6,
             heads = 8,
             attn_aggregated_residuals = True,
+            qkv_receive_diff_residuals = qkv_receive_diff_residuals,
             **kwargs
         )
     )

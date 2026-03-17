@@ -25,6 +25,12 @@ from accelerate import Accelerator
 
 # helpers
 
+def exists(v):
+    return v is not None
+
+def default(v, d):
+    return v if exists(v) else d
+
 def cycle(loader):
     while True:
         for data in loader:
@@ -41,16 +47,18 @@ def train(
     batch_size = 4,
     gradient_accumulate_every = 4,
     learning_rate = 1e-4,
-    validate_every = 50,
-    generate_every = 50,
-    generate_length = 1024,
+    validate_every = 100,
+    generate_every = 500,
+    generate_length = None,
     seq_len = 1024,
     track_experiment_online = False,
-    attn_aggregated_residuals = False,
+    run_name = 'baseline',
     cpu = False
 ):
     accelerator = Accelerator(cpu=cpu)
     device = accelerator.device
+
+    generate_length = default(generate_length, seq_len)
 
     # instantiate GPT-like decoder model
 
@@ -63,9 +71,7 @@ def train(
             heads = 8,
             rotary_pos_emb = False,
             polar_pos_emb = True,
-            attn_orthog_projected_values = True,
-            attn_orthog_projected_values_per_head = True,
-            attn_aggregated_residuals = attn_aggregated_residuals
+            attn_aggregated_residuals = True
         )
     )
 
@@ -104,7 +110,7 @@ def train(
     # experiment
 
     wandb.init(project = 'enwik8', mode = 'online' if track_experiment_online else 'disabled')
-    wandb.run.name = 'baseline' if not attn_aggregated_residuals else 'attn_aggregated_residuals'
+    wandb.run.name = run_name
 
     model, optim, train_loader, val_loader = accelerator.prepare(
         model, optim, train_loader, val_loader
