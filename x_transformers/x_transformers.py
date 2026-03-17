@@ -1076,6 +1076,11 @@ class AttentionAggregatedResidual(Module):
         super().__init__()
         assert at_most_one_of(rotary_pos_emb, polar_pos_emb), 'either rotary or polar positional embedding can be used, not both'
 
+        attn_kwargs = dict(
+            k_rmsnorm = True,
+            **attn_kwargs
+        )
+
         self.attn_pool = AttentionPool(
             dim = dim,
             dim_context = dim,
@@ -1229,7 +1234,7 @@ class HyperConnection(Module):
 
         return branch_input, residuals, dict(beta = beta)
 
-    def forward(self, x, residuals, *, beta):
+    def forward(self, x, residuals, *, beta, **kwargs):
         residuals = einsum('b n d, b n s -> b n s d', x, beta) + residuals
         return rearrange(residuals, 'b n s d -> (b s) n d')
 
@@ -1544,6 +1549,8 @@ class Attention(Module):
         qk_norm_groups = 1,
         qk_norm_scale = 10,
         qk_norm_dim_scale = False,
+        qk_rmsnorm = False,
+        k_rmsnorm = False,
         value_rmsnorm = False,      # used in alphagenome and bytedance's GR3 for further stability
         l2_distance = False,
         sigmoid = False,
@@ -1709,7 +1716,14 @@ class Attention(Module):
         assert (not qk_norm) or divisible_by(dim_head, qk_norm_groups), 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
 
-        # value rms norm
+        # qk rmsnorm
+
+        assert not (qk_rmsnorm and k_rmsnorm), 'qk_rmsnorm and k_rmsnorm cannot both be set to True'
+
+        self.q_rmsnorm = MultiheadRMSNorm(dim_head, heads = heads) if qk_rmsnorm else None
+        self.k_rmsnorm = MultiheadRMSNorm(dim_head, heads = kv_heads) if (qk_rmsnorm or k_rmsnorm) else None
+
+        # value rmsnorm
 
         self.value_rmsnorm = MultiheadRMSNorm(dim_head, heads = heads) if value_rmsnorm else None
 
@@ -2008,8 +2022,13 @@ class Attention(Module):
             q, k = map(qk_l2norm, (q, k))
             scale = self.qk_norm_scale
 
-            q = q * self.qk_norm_q_scale
-            k = k * self.qk_norm_k_scale
+            q = q * scale
+            k = k * scale
+
+        # maybe qk rmsnorm
+
+        q = maybe(self.q_rmsnorm)(q)
+        k = maybe(self.k_rmsnorm)(k)
 
         # maybe value rmsnorm
 
