@@ -2,7 +2,9 @@
 # dependencies = [
 #   "tqdm",
 #   "x-transformers",
-#   "wandb"
+#   "wandb",
+#   "fire",
+#   "accelerate"
 # ]
 # ///
 
@@ -17,18 +19,9 @@ import torch
 import torch.optim as optim
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
-
-# constants
-
-NUM_BATCHES = int(1e5)
-BATCH_SIZE = 4
-GRADIENT_ACCUMULATE_EVERY = 4
-LEARNING_RATE = 1e-4
-VALIDATE_EVERY  = 100
-GENERATE_EVERY  = 500
-GENERATE_LENGTH = 1024
-SEQ_LEN = 1024
-TRACK_EXPERIMENT_ONLINE = False
+import fire
+import wandb
+from accelerate import Accelerator
 
 # helpers
 
@@ -43,95 +36,120 @@ def decode_token(token):
 def decode_tokens(tokens):
     return ''.join(list(map(decode_token, tokens)))
 
-# instantiate GPT-like decoder model
+def train(
+    num_batches = int(1e5),
+    batch_size = 4,
+    gradient_accumulate_every = 4,
+    learning_rate = 1e-4,
+    validate_every = 50,
+    generate_every = 50,
+    generate_length = 1024,
+    seq_len = 1024,
+    track_experiment_online = False,
+    attn_aggregated_residuals = False,
+    cpu = False
+):
+    accelerator = Accelerator(cpu=cpu)
+    device = accelerator.device
 
-model = TransformerWrapper(
-    num_tokens = 256,
-    max_seq_len = SEQ_LEN,
-    attn_layers = Decoder(
-        dim = 512,
-        depth = 6,
-        heads = 8,
-        rotary_pos_emb = True,
-        attn_orthog_projected_values = True,
-        attn_orthog_projected_values_per_head = True
-    )
-)
+    # instantiate GPT-like decoder model
 
-model = AutoregressiveWrapper(model)
-model.cuda()
-
-# prepare enwik8 data
-
-with gzip.open('./data/enwik8.gz') as file:
-    data = np.frombuffer(file.read(int(95e6)), dtype=np.uint8).copy()
-    train_x, valid_x = np.split(data, [int(90e6)])
-    data_train, data_val = torch.from_numpy(train_x), torch.from_numpy(valid_x)
-
-class TextSamplerDataset(Dataset):
-    def __init__(self, data, seq_len):
-        super().__init__()
-        self.data = data
-        self.seq_len = seq_len
-
-    def __getitem__(self, index):
-        rand_start = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
-        full_seq = self.data[rand_start: rand_start + self.seq_len + 1].long()
-        return full_seq.cuda()
-
-    def __len__(self):
-        return self.data.size(0) // self.seq_len
-
-train_dataset = TextSamplerDataset(data_train, SEQ_LEN)
-val_dataset   = TextSamplerDataset(data_val, SEQ_LEN)
-train_loader  = cycle(DataLoader(train_dataset, batch_size = BATCH_SIZE, drop_last = True))
-val_loader    = cycle(DataLoader(val_dataset, batch_size = BATCH_SIZE, drop_last = True))
-
-# optimizer
-
-optim = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-# experiment
-
-import wandb
-wandb.init(project = 'enwik8', mode = 'online' if TRACK_EXPERIMENT_ONLINE else 'disabled')
-wandb.run.name = 'baseline'
-
-# training
-
-for i in tqdm.tqdm(range(NUM_BATCHES), mininterval=10., desc='training'):
-    model.train()
-
-    for __ in range(GRADIENT_ACCUMULATE_EVERY):
-        loss = model(next(train_loader))
-        (loss / GRADIENT_ACCUMULATE_EVERY).backward()
-
-    print(f'training loss: {loss.item()}')
-    wandb.log(dict(loss = loss.item()))
-
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-    optim.step()
-    optim.zero_grad()
-
-    if i % VALIDATE_EVERY == 0:
-        model.eval()
-        with torch.no_grad():
-            loss = model(next(val_loader))
-
-            print(f'validation loss: {loss.item()}')
-            wandb.log(dict(valid_loss = loss.item()))
-
-    if i % GENERATE_EVERY == 0:
-        model.eval()
-        inp = random.choice(val_dataset)[:-1]
-        prime = decode_tokens(inp)
-        print(f'%s \n\n %s', (prime, '*' * 100))
-
-        sample = model.generate(
-            prompts = inp,
-            seq_len = GENERATE_LENGTH,
-            cache_kv = True
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = seq_len,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            rotary_pos_emb = False,
+            polar_pos_emb = True,
+            attn_orthog_projected_values = True,
+            attn_orthog_projected_values_per_head = True,
+            attn_aggregated_residuals = attn_aggregated_residuals
         )
+    )
 
-        output_str = decode_tokens(sample)
-        print(output_str)
+    model = AutoregressiveWrapper(model)
+
+    # prepare enwik8 data
+
+    with gzip.open('./data/enwik8.gz') as file:
+        data = np.frombuffer(file.read(int(95e6)), dtype=np.uint8).copy()
+        train_x, valid_x = np.split(data, [int(90e6)])
+        data_train, data_val = torch.from_numpy(train_x), torch.from_numpy(valid_x)
+
+    class TextSamplerDataset(Dataset):
+        def __init__(self, data, seq_len):
+            super().__init__()
+            self.data = data
+            self.seq_len = seq_len
+
+        def __getitem__(self, index):
+            rand_start = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
+            full_seq = self.data[rand_start: rand_start + self.seq_len + 1].long()
+            return full_seq.to(device)
+
+        def __len__(self):
+            return self.data.size(0) // self.seq_len
+
+    train_dataset = TextSamplerDataset(data_train, seq_len)
+    val_dataset   = TextSamplerDataset(data_val, seq_len)
+    train_loader  = cycle(DataLoader(train_dataset, batch_size = batch_size, drop_last = True))
+    val_loader    = cycle(DataLoader(val_dataset, batch_size = batch_size, drop_last = True))
+
+    # optimizer
+
+    optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    # experiment
+
+    wandb.init(project = 'enwik8', mode = 'online' if track_experiment_online else 'disabled')
+    wandb.run.name = 'baseline' if not attn_aggregated_residuals else 'attn_aggregated_residuals'
+
+    model, optim, train_loader, val_loader = accelerator.prepare(
+        model, optim, train_loader, val_loader
+    )
+
+    # training
+
+    for i in tqdm.tqdm(range(num_batches), mininterval=10., desc='training'):
+        model.train()
+
+        for _ in range(gradient_accumulate_every):
+            loss = model(next(train_loader))
+            accelerator.backward(loss / gradient_accumulate_every)
+
+        print(f'training loss: {loss.item()}')
+        if accelerator.is_main_process:
+            wandb.log(dict(loss = loss.item()))
+
+        accelerator.clip_grad_norm_(model.parameters(), 0.5)
+        optim.step()
+        optim.zero_grad()
+
+        if i % validate_every == 0:
+            model.eval()
+            with torch.no_grad():
+                loss = model(next(val_loader))
+
+                print(f'validation loss: {loss.item()}')
+                if accelerator.is_main_process:
+                    wandb.log(dict(valid_loss = loss.item()))
+
+        if i % generate_every == 0:
+            model.eval()
+            inp = random.choice(val_dataset)[:-1]
+            prime = decode_tokens(inp.cpu().numpy())
+            print(f'%s \n\n %s' % (prime, '*' * 100))
+
+            sample = model.generate(
+                prompts = inp,
+                seq_len = generate_length,
+                cache_kv = True
+            )
+
+            output_str = decode_tokens(sample.cpu().numpy())
+            print(output_str)
+
+if __name__ == '__main__':
+    fire.Fire(train)

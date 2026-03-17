@@ -20,7 +20,7 @@ from torch.nn import Module, ModuleList, ModuleDict
 
 from loguru import logger
 
-from x_transformers.attend import Attend, Intermediates
+from x_transformers.attend import Attend, Intermediates, pack_one, unpack_one
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 import einx
@@ -170,7 +170,10 @@ def orthog_project(x, y):
     y, _ = pack([y], 'b *')
 
     dtype = x.dtype
-    x, y = x.double(), y.double()
+
+    if x.device.type != 'mps':
+        x, y = x.double(), y.double()
+
     unit = F.normalize(y, dim = -1)
 
     parallel = (x * unit).sum(dim = -1, keepdim = True) * unit
@@ -1054,6 +1057,80 @@ class GRUGating(Module):
 
         return gated_output.reshape_as(x)
 
+class AttentionAggregatedResidual(Module):
+    """
+    https://arxiv.org/abs/2601.21582
+    https://arxiv.org/abs/2603.15031
+    """
+
+    def __init__(
+        self,
+        dim,
+        heads = 4,
+        dim_head = 64,
+        rotary_pos_emb = True,
+        polar_pos_emb = False,
+        attn_kwargs: dict = dict(),
+        **kwargs
+    ):
+        super().__init__()
+        assert at_most_one_of(rotary_pos_emb, polar_pos_emb), 'either rotary or polar positional embedding can be used, not both'
+
+        self.attn_pool = AttentionPool(
+            dim = dim,
+            dim_context = dim,
+            num_pooled_tokens = 0,
+            use_transformer_blocks = False,
+            heads = heads,
+            dim_head = dim_head,
+            attn_kwargs = attn_kwargs
+        )
+
+        self.use_rotary = rotary_pos_emb
+        self.use_polar = polar_pos_emb
+
+        if polar_pos_emb:
+            self.pos_emb = PolarEmbedding(dim_head, heads)
+        elif rotary_pos_emb:
+            self.pos_emb = RotaryEmbedding(dim_head)
+        else:
+            self.pos_emb = None
+
+    def prepare(self, residual):
+        return residual, residual, dict()
+
+    def forward(self, x, residual, layer_hiddens: list[Tensor] | None = None, **kwargs):
+        assert exists(layer_hiddens), 'layer_hiddens must be passed to AttentionAggregatedResidual'
+
+        hiddens = stack(layer_hiddens, dim = 1)
+
+        hiddens = rearrange(hiddens, 'b l n d -> b n l d')
+        hiddens, packed_shape = pack_one(hiddens, '* l d')
+
+        queries, _ = pack_one(x, '* d')
+        queries = rearrange(queries, '... d -> ... 1 d')
+
+        # positional embeddings for layer depth distance
+
+        attn_kwargs = dict()
+
+        if exists(self.pos_emb):
+            num_layers = hiddens.shape[-2]
+            positions = arange(num_layers + 1, device = x.device)
+            pos_emb = self.pos_emb(positions)
+
+            if self.use_polar:
+                attn_kwargs.update(polar_pos_emb = pos_emb)
+            else:
+                attn_kwargs.update(rotary_pos_emb = pos_emb, context_rotary_pos_emb = pos_emb)
+
+        pooled = self.attn_pool(hiddens, queries = queries, **attn_kwargs)
+
+        pooled = rearrange(pooled, '... 1 d -> ... d')
+        pooled = unpack_one(pooled, packed_shape, '* d')
+
+        return x + pooled
+
 # hyper connections
 
 def sinkhorn(t, iters = 20):
@@ -1503,6 +1580,7 @@ class Attention(Module):
         laser = False,                    # https://arxiv.org/abs/2411.03493v1
         laser_softclamp_value = 15.,
         qkv_receive_diff_residuals = False,
+        project_out = None,
         use_latent_q = False,
         dim_latent_q = None,
         use_latent_kv = False,
@@ -1760,7 +1838,13 @@ class Attention(Module):
         # output dimension by default same as input, but can be overridden
 
         dim_out = default(dim_out, dim)
-        self.to_out = nn.Sequential(LinearNoBias(out_dim, dim_out * 2), nn.GLU()) if on_attn else LinearNoBias(out_dim, dim_out)
+
+        need_project_out = default(project_out, heads > 1 or dim != dim_out or on_attn)
+
+        if need_project_out:
+            self.to_out = nn.Sequential(LinearNoBias(out_dim, dim_out * 2), nn.GLU()) if on_attn else LinearNoBias(out_dim, dim_out)
+        else:
+            self.to_out = nn.Identity()
 
         # sublayer dropout
 
@@ -2273,6 +2357,8 @@ class AttentionLayers(Module):
         macaron = False,
         pre_norm = True,
         pre_norm_has_final_norm = True,
+        attn_aggregated_residuals = False,
+        attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
         scale_residual = False,
         scale_residual_constant = 1.,
@@ -2389,6 +2475,8 @@ class AttentionLayers(Module):
 
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
+
+        assert at_most_one_of(gate_residual, attn_aggregated_residuals), 'gate_residual and attn_aggregated_residuals are mutually exclusive'
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
@@ -2637,6 +2725,15 @@ class AttentionLayers(Module):
 
             elif gate_residual:
                 residual_fn = GRUGating
+            elif attn_aggregated_residuals:
+                residual_fn = partial(
+                    AttentionAggregatedResidual,
+                    heads = attn_kwargs.get('heads', 8),
+                    dim_head = attn_kwargs.get('dim_head', 64),
+                    rotary_pos_emb = not polar_pos_emb,
+                    polar_pos_emb = polar_pos_emb,
+                    attn_kwargs = attn_aggregated_residual_kwargs
+                )
             else:
                 residual_fn = Residual
 
@@ -2682,8 +2779,6 @@ class AttentionLayers(Module):
         tau = 100.
     ):
         # pairs up the attention intermediates with each attention module and does qk clip proposed by kimi team
-
-        layer_and_layer_types = (self.layers, self.layer_types)
 
         attn_layers = [layer for (_, layer, _), layer_type in zip(self.layers, self.layer_types) if layer_type in ('a', 'c')]
         attn_intermeds = intermediates.attn_intermediates
@@ -3042,7 +3137,7 @@ class AttentionLayers(Module):
             if exists(post_branch_norm):
                 out = post_branch_norm(out)
 
-            x = residual_fn(out, inner_residual, **residual_kwargs)
+            x = residual_fn(out, inner_residual, layer_hiddens = layer_hiddens, **residual_kwargs)
 
             if layer_type in ('a', 'c') and return_hiddens:
                 inter.layer_type = layer_type
@@ -3154,7 +3249,8 @@ class AttentionPool(Module):
         use_transformer_blocks = default(use_transformer_blocks, depth > 1)
         assert use_transformer_blocks or depth == 1
 
-        self.queries = nn.Parameter(torch.randn(num_pooled_tokens, dim) * 1e-2)
+        self.has_learned_queries = num_pooled_tokens > 0
+        self.queries = nn.Parameter(torch.randn(num_pooled_tokens, dim) * 1e-2) if self.has_learned_queries else None
 
         if use_transformer_blocks:
             assert not add_residual, 'residual already in effect when doing a full cross attention based transformer for pooling'
@@ -3167,12 +3263,14 @@ class AttentionPool(Module):
         self.add_residual = add_residual
         self.squeeze_output = squeeze_output
 
-    def forward(self, context, mask = None):
+    def forward(self, context, mask = None, queries = None, **kwargs):
         batch = context.shape[0]
 
-        queries = repeat(self.queries, 'n d -> b n d', b = batch)
+        if not exists(queries):
+            assert self.has_learned_queries, 'queries must be passed in if num_pooled_tokens was set to 0 at initialization'
+            queries = repeat(self.queries, 'n d -> b n d', b = batch)
 
-        pooled = self.pooler(queries, context, context_mask = mask)
+        pooled = self.pooler(queries, context, context_mask = mask, **kwargs)
 
         if self.add_residual:
             pooled = pooled + queries

@@ -1,6 +1,6 @@
 [project]
 name = "x-transformers"
-version = "2.16.2"
+version = "2.17.0"
 description = "X-Transformers"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -13,13 +13,13 @@ keywords = [
     'attention mechanism',
     'transformers'
   ]
-classifiers=[
+classifiers = [
     'Development Status :: 4 - Beta',
     'Intended Audience :: Developers',
     'Topic :: Scientific/Engineering :: Artificial Intelligence',
     'License :: OSI Approved :: MIT License',
     'Programming Language :: Python :: 3.6',
-  ]
+]
 
 dependencies = [
     'einx>=0.3.0',

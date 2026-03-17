@@ -1634,3 +1634,29 @@ def test_continuous_transformer_external_projects():
     logits = model(x)
 
     assert logits.shape == (1, 16, 16)
+
+@param('pos_emb_type', ('rotary', 'polar', 'none'))
+def test_attn_aggregated_residuals(pos_emb_type):
+
+    kwargs = dict()
+    if pos_emb_type == 'rotary':
+        kwargs = dict(rotary_pos_emb = True)
+    elif pos_emb_type == 'polar':
+        kwargs = dict(polar_pos_emb = True)
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 6,
+            heads = 8,
+            attn_aggregated_residuals = True,
+            **kwargs
+        )
+    )
+
+    x = torch.randint(0, 256, (2, 128))
+
+    logits = model(x)
+    logits.sum().backward()
