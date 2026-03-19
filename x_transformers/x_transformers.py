@@ -1943,8 +1943,11 @@ class Attention(Module):
         additional_key_value_mask = None,
         kv_input_residual = None,
         flash_pack_seq_kwargs = None,
+        causal = None,
     ):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context, qkv_receive_diff_residuals, is_multi_latent_attn = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context), self.qkv_receive_diff_residuals, self.use_latent_kv
+
+        causal = default(causal, self.causal)
 
         # an interesting possibility with hyper connections
         # having queries, keys, values be routed from different layers
@@ -2216,6 +2219,7 @@ class Attention(Module):
             attn_bias = attn_bias,
             prev_attn = prev_attn,
             flash_pack_seq_kwargs = flash_pack_seq_kwargs,
+            causal = causal,
         )
 
         # laser
@@ -2248,7 +2252,7 @@ class Attention(Module):
 
             hybrid_forward_kwargs = dict()
 
-            if not self.causal and exists(self.hybrid_mask_kwarg):
+            if not causal and exists(self.hybrid_mask_kwarg):
                 hybrid_forward_kwargs = {self.hybrid_mask_kwarg: mask}
 
             # handle maybe hybrid cache
@@ -2867,6 +2871,7 @@ class AttentionLayers(Module):
         cross_attn_kv_residuals: Tensor | None = None,
         flash_pack_seq_kwargs = None,
         flash_pack_seq_context_kwargs = None,
+        causal = None,
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
@@ -3151,7 +3156,7 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, flash_pack_seq_kwargs = flash_pack_seq_kwargs, return_intermediates = True)
+                out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, flash_pack_seq_kwargs = flash_pack_seq_kwargs, return_intermediates = True, causal = causal)
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, flash_pack_seq_kwargs = flash_pack_seq_context_kwargs, return_intermediates = True)
             elif layer_type == 'f':

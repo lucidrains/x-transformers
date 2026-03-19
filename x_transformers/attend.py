@@ -338,6 +338,7 @@ class Attend(Module):
         mask = None,
         attn_bias = None,
         flash_pack_seq_kwargs = None, # https://github.com/Dao-AILab/flash-attention/blob/v2.8.3/flash_attn/flash_attn_interface.py#L1370
+        causal = None,
     ):
         batch, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
 
@@ -370,7 +371,7 @@ class Attend(Module):
         # Check if mask exists and expand to compatible shape
         # The mask is B L, so it would have to be expanded to B H N L
 
-        causal = self.causal
+        causal = default(causal, self.causal)
 
         # in the case of kv caching with one token (q_len == 1), just turn off causal masking
         # in speculative decoding, this may go up to 5-6, so right aligned causal mask will be needed there
@@ -473,6 +474,7 @@ class Attend(Module):
         attn_bias = None,
         prev_attn = None,
         flash_pack_seq_kwargs = None,
+        causal = None,
     ):
         """
         einstein notation
@@ -486,7 +488,7 @@ class Attend(Module):
 
         scale = default(self.scale, q.shape[-1] ** -0.5)
 
-        causal = self.causal
+        causal = default(causal, self.causal)
 
         # handle key padding mask
 

@@ -1662,3 +1662,18 @@ def test_attn_aggregated_residuals(pos_emb_type, qkv_receive_diff_residuals):
 
     logits = model(x)
     logits.sum().backward()
+
+def test_causal_override():
+    model = TransformerWrapper(
+        num_tokens = 20000,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 2,
+            heads = 8
+        )
+    )
+
+    x = torch.randint(0, 20000, (2, 1024))
+
+    out = model(x, causal = False)
