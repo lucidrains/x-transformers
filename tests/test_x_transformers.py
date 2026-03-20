@@ -1659,7 +1659,7 @@ def test_attn_aggregated_residuals(
             heads = 8,
             attn_aggregated_residuals = True,
             qkv_receive_diff_residuals = qkv_receive_diff_residuals,
-            attn_pool_default_query_is_last_layer = last_layer_as_query,
+            attn_residuals_last_output_as_query = last_layer_as_query,
             **kwargs
         )
     )

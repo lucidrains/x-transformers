@@ -2404,7 +2404,7 @@ class AttentionLayers(Module):
         pre_norm = True,
         pre_norm_has_final_norm = True,
         attn_aggregated_residuals = False,
-        attn_pool_default_query_is_last_layer = True,
+        attn_residuals_last_output_as_query = False,
         attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
         scale_residual = False,
@@ -2773,7 +2773,7 @@ class AttentionLayers(Module):
                     dim_head = dim_head,
                     rotary_pos_emb = rotary_pos_emb,
                     polar_pos_emb = polar_pos_emb,
-                    last_layer_hiddens_as_query = attn_pool_default_query_is_last_layer,
+                    last_layer_hiddens_as_query = attn_residuals_last_output_as_query,
                     attn_kwargs = attn_aggregated_residual_kwargs
                 )
 
