@@ -1071,6 +1071,7 @@ class AttentionAggregatedResidual(Module):
         dim_head = 64,
         rotary_pos_emb = True,
         polar_pos_emb = False,
+        last_layer_hiddens_as_query = True,
         attn_kwargs: dict = dict(),
         **kwargs
     ):
@@ -1084,18 +1085,26 @@ class AttentionAggregatedResidual(Module):
 
         self.num_views = num_views
         self.multiple_views = num_views > 1
+        self.last_layer_hiddens_as_query = last_layer_hiddens_as_query
 
         self.attn_pool = AttentionPool(
             dim = dim,
             dim_context = dim,
-            num_pooled_tokens = num_views,
+            num_pooled_tokens = num_views if not last_layer_hiddens_as_query else 0,
             use_transformer_blocks = False,
             heads = heads,
             dim_head = dim_head,
             attn_kwargs = attn_kwargs
         )
 
-        nn.init.zeros_(self.attn_pool.queries)
+        self.to_queries = None
+
+        if last_layer_hiddens_as_query:
+            self.to_queries = nn.Sequential(
+                nn.RMSNorm(dim),
+                nn.Linear(dim, dim * num_views, bias = False),
+                Rearrange('b n (v d) -> (b n) v d', v = num_views)
+            )
 
         self.use_rotary = rotary_pos_emb
         self.use_polar = polar_pos_emb
@@ -1134,7 +1143,12 @@ class AttentionAggregatedResidual(Module):
             else:
                 attn_kwargs.update(rotary_pos_emb = pos_emb, context_rotary_pos_emb = pos_emb)
 
-        pooled = self.attn_pool(hiddens, **attn_kwargs)
+        queries = None
+
+        if self.last_layer_hiddens_as_query:
+            queries = self.to_queries(x)
+
+        pooled = self.attn_pool(hiddens, queries = queries, **attn_kwargs)
 
         if self.multiple_views:
             pooled = rearrange(pooled, '... v d -> v ... d', v = self.num_views)
@@ -2390,6 +2404,7 @@ class AttentionLayers(Module):
         pre_norm = True,
         pre_norm_has_final_norm = True,
         attn_aggregated_residuals = False,
+        attn_pool_default_query_is_last_layer = True,
         attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
         scale_residual = False,
@@ -2758,6 +2773,7 @@ class AttentionLayers(Module):
                     dim_head = dim_head,
                     rotary_pos_emb = rotary_pos_emb,
                     polar_pos_emb = polar_pos_emb,
+                    last_layer_hiddens_as_query = attn_pool_default_query_is_last_layer,
                     attn_kwargs = attn_aggregated_residual_kwargs
                 )
 

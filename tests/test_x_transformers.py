@@ -1637,7 +1637,12 @@ def test_continuous_transformer_external_projects():
 
 @param('pos_emb_type', ('rotary', 'polar', 'none'))
 @param('qkv_receive_diff_residuals', (False, True))
-def test_attn_aggregated_residuals(pos_emb_type, qkv_receive_diff_residuals):
+@param('last_layer_as_query', (False, True))
+def test_attn_aggregated_residuals(
+    pos_emb_type,
+    qkv_receive_diff_residuals,
+    last_layer_as_query
+):
 
     kwargs = dict()
     if pos_emb_type == 'rotary':
@@ -1654,6 +1659,7 @@ def test_attn_aggregated_residuals(pos_emb_type, qkv_receive_diff_residuals):
             heads = 8,
             attn_aggregated_residuals = True,
             qkv_receive_diff_residuals = qkv_receive_diff_residuals,
+            attn_pool_default_query_is_last_layer = last_layer_as_query,
             **kwargs
         )
     )
@@ -1676,4 +1682,5 @@ def test_causal_override():
 
     x = torch.randint(0, 20000, (2, 1024))
 
-    out = model(x, causal = False)
+    logits = model(x, causal = False)
+    assert logits.shape == (2, 1024, 20000)
