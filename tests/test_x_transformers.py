@@ -1684,3 +1684,22 @@ def test_causal_override():
 
     logits = model(x, causal = False)
     assert logits.shape == (2, 1024, 20000)
+
+def test_repeat_blocks_multiple():
+    from x_transformers import Decoder
+
+    decoder = Decoder(
+        dim = 64,
+        depth = 6,
+        heads = 4
+    )
+
+    x = torch.randn(1, 10, 64)
+
+    repeat_blocks = ((2, 2), (5, 2))
+    out, intermediates = decoder(x, repeat_blocks = repeat_blocks, return_hiddens = True)
+
+    # original depth 6. layer 2 repeated twice (+1), layer 5 repeated twice (+1). total blocks = 8.
+    # layer hiddens: 1 (input) + 8 * 2 (attn, ff) = 17
+    repeat_num_layers = len(intermediates.layer_hiddens)
+    assert repeat_num_layers == 17

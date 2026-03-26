@@ -2639,4 +2639,14 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@article{ng2026rys,
+    title   = {LLM Neuroanatomy: How I Topped the LLM Leaderboard Without Changing a Single Weight},
+    author  = {Ng, David Noel},
+    year    = {2026},
+    month   = {March},
+    url     = {https://dnhkng.github.io/posts/rys/}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

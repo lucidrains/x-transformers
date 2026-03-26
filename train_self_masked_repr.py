@@ -50,6 +50,12 @@ def set_dropout_(model: nn.Module, prob: float):
         if isinstance(module, nn.Dropout):
             module.p = prob
 
+def get_extraction_index(target_block, repeated_block, repeats):
+    base_idx = 2 * (target_block + 1)
+    if repeated_block <= target_block:
+        return base_idx + 2 * (repeats - 1)
+    return base_idx
+
 # ssl wrapper modules
 
 LossBreakdown = namedtuple('LossBreakdown', ['gen_loss', 'ssl_loss', 'ssl_loss_next'])
@@ -68,7 +74,10 @@ class SelfDistilledTraining(nn.Module):
         use_self_attn_kv_mask = True,
         use_asymmetric_dropout = False,
         student_dropout_rate = 0.,
-        teacher_dropout_rate = 0.
+        teacher_dropout_rate = 0.,
+        teacher_extra_repeats = 1,
+        student_recurrent_block_repeat_max = 3,
+        recurrent_block = None
     ):
         super().__init__()
         assert use_self_attn_kv_mask or use_asymmetric_dropout, 'must use either asymmetric dropout, self attention kv masking, or both'
@@ -85,6 +94,11 @@ class SelfDistilledTraining(nn.Module):
         self.use_asymmetric_dropout = use_asymmetric_dropout
         self.student_dropout_rate = student_dropout_rate
         self.teacher_dropout_rate = teacher_dropout_rate
+        self.teacher_extra_repeats = teacher_extra_repeats
+
+        self.depth = net.attn_layers.depth
+        self.recurrent_block = default(recurrent_block, self.depth // 2)
+        self.student_recurrent_block_repeat_max = student_recurrent_block_repeat_max
 
         self.register_buffer('zero', tensor(0.))
 
@@ -100,6 +114,13 @@ class SelfDistilledTraining(nn.Module):
         **kwargs
     ):
         batch, seq_len, device = *x.shape, x.device
+
+        # set block repeats
+        student_repeats = random.randint(1, self.student_recurrent_block_repeat_max)
+        teacher_repeats = student_repeats + self.teacher_extra_repeats
+
+        student_repeat_blocks = (self.recurrent_block, student_repeats)
+        teacher_repeat_blocks = (self.recurrent_block, teacher_repeats)
 
         # create mask for student
         # 1 is masked, 0 is unmasked
@@ -119,6 +140,7 @@ class SelfDistilledTraining(nn.Module):
             x,
             return_outputs = True,
             self_attn_kv_mask = ~mask if self.use_self_attn_kv_mask else None,
+            repeat_blocks = student_repeat_blocks,
             **kwargs
         )
 
@@ -138,6 +160,7 @@ class SelfDistilledTraining(nn.Module):
             teacher_logits, _ = self.teacher.ema_model(
                 teacher_inp,
                 return_intermediates = True,
+                repeat_blocks = teacher_repeat_blocks
             )
 
         # reverse KL divergence loss
@@ -171,7 +194,10 @@ class SelfMaskedRepTraining(nn.Module):
         use_self_attn_kv_mask = True,
         use_asymmetric_dropout = False,
         student_dropout_rate = 0.,
-        teacher_dropout_rate = 0.
+        teacher_dropout_rate = 0.,
+        teacher_extra_repeats = 1,
+        student_recurrent_block_repeat_max = 3,
+        recurrent_block = None
     ):
         super().__init__()
         assert use_self_attn_kv_mask or use_asymmetric_dropout, 'must use either asymmetric dropout, self attention kv masking, or both'
@@ -188,9 +214,13 @@ class SelfMaskedRepTraining(nn.Module):
         self.use_asymmetric_dropout = use_asymmetric_dropout
         self.student_dropout_rate = student_dropout_rate
         self.teacher_dropout_rate = teacher_dropout_rate
+        self.teacher_extra_repeats = teacher_extra_repeats
 
         self.student_layer = student_layer
         self.teacher_layer = teacher_layer
+
+        self.recurrent_block = default(recurrent_block, student_layer + (teacher_layer - student_layer) // 2)
+        self.student_recurrent_block_repeat_max = student_recurrent_block_repeat_max
 
         self.predict_next_teacher = predict_next_teacher
         self.loss_fn = loss_fn
@@ -230,6 +260,14 @@ class SelfMaskedRepTraining(nn.Module):
     ):
         batch, seq_len, device = *x.shape, x.device
 
+        # set block repeats
+
+        student_repeats = random.randint(1, self.student_recurrent_block_repeat_max)
+        teacher_repeats = student_repeats + self.teacher_extra_repeats
+
+        student_repeat_blocks = (self.recurrent_block, student_repeats)
+        teacher_repeat_blocks = (self.recurrent_block, teacher_repeats)
+
         # create mask for student
         # 1 is masked, 0 is unmasked
 
@@ -248,6 +286,7 @@ class SelfMaskedRepTraining(nn.Module):
             x,
             return_outputs = True,
             self_attn_kv_mask = ~mask if self.use_self_attn_kv_mask else None,
+            repeat_blocks = student_repeat_blocks,
             **kwargs
         )
 
@@ -257,7 +296,8 @@ class SelfMaskedRepTraining(nn.Module):
         # extract student representation at layer l
 
         student_hiddens = student_cache.layer_hiddens
-        student_rep = student_hiddens[self.student_layer]
+        student_idx = get_extraction_index(self.student_layer, self.recurrent_block, student_repeats)
+        student_rep = student_hiddens[student_idx]
 
         # teacher pass with unmasked (cleaner) inputs
 
@@ -267,15 +307,15 @@ class SelfMaskedRepTraining(nn.Module):
         with torch.no_grad():
             teacher_inp = x if self.predict_next_teacher else x[:, :-1]
 
-            # ema wraps TransformerWrapper
-
             _, teacher_cache = self.teacher.ema_model(
                 teacher_inp,
                 return_intermediates = True,
+                repeat_blocks = teacher_repeat_blocks
             )
 
             teacher_hiddens = teacher_cache.layer_hiddens
-            teacher_rep = teacher_hiddens[self.teacher_layer]
+            teacher_idx = get_extraction_index(self.teacher_layer, self.recurrent_block, teacher_repeats)
+            teacher_rep = teacher_hiddens[teacher_idx]
 
         # cosine similarity representation loss
 
@@ -354,7 +394,10 @@ def train(
     use_self_attn_kv_mask = True,
     use_asymmetric_dropout = False,
     student_dropout_rate = 0.,
-    teacher_dropout_rate = 0.
+    teacher_dropout_rate = 0.,
+    teacher_extra_repeats = 1,
+    student_recurrent_block_repeat_max = 3,
+    recurrent_block = None
 ):
     # accelerator
 
@@ -396,7 +439,10 @@ def train(
             use_self_attn_kv_mask = use_self_attn_kv_mask,
             use_asymmetric_dropout = use_asymmetric_dropout,
             student_dropout_rate = student_dropout_rate,
-            teacher_dropout_rate = teacher_dropout_rate
+            teacher_dropout_rate = teacher_dropout_rate,
+            teacher_extra_repeats = teacher_extra_repeats,
+            student_recurrent_block_repeat_max = student_recurrent_block_repeat_max,
+            recurrent_block = recurrent_block
         )
     elif distill_type == 'reverse_kl':
         ssl_wrapper = SelfDistilledTraining(
@@ -407,7 +453,10 @@ def train(
             use_self_attn_kv_mask = use_self_attn_kv_mask,
             use_asymmetric_dropout = use_asymmetric_dropout,
             student_dropout_rate = student_dropout_rate,
-            teacher_dropout_rate = teacher_dropout_rate
+            teacher_dropout_rate = teacher_dropout_rate,
+            teacher_extra_repeats = teacher_extra_repeats,
+            student_recurrent_block_repeat_max = student_recurrent_block_repeat_max,
+            recurrent_block = recurrent_block
         )
 
     ssl_wrapper = accelerator.prepare(ssl_wrapper)
