@@ -20,7 +20,7 @@ from torch.nn import Module, ModuleList, ModuleDict
 
 from loguru import logger
 
-from x_transformers.attend import Attend, Intermediates, pack_one, unpack_one
+from x_transformers.attend import Attend, Intermediates, pack_one, unpack_one, log_prob_from_hard_attend
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 import einx
@@ -2916,6 +2916,7 @@ class AttentionLayers(Module):
         input_not_include_cache = False,
         cache_age = 1,
         return_hiddens = False,
+        return_gumbel_log_probs = False,
         rotary_pos_emb = None,
         polar_pos_emb = None,
         pos = None,
@@ -2944,6 +2945,8 @@ class AttentionLayers(Module):
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
         assert not (exists(flash_pack_seq_kwargs) and (exists(attn_mask) or exists(mask))), 'attn_mask or mask cannot be used with flash block masking'
         assert not (exists(flash_pack_seq_context_kwargs) and (exists(context_mask))), 'context_mask cannot be used with flash block masking'
+
+        return_hiddens |= return_gumbel_log_probs
 
         # handle seq pos offset if not passed in from wrapper
         # default to 0, but if cache is detected, set appropriate for the relative positional embeddings
@@ -3281,6 +3284,16 @@ class AttentionLayers(Module):
 
         if not return_hiddens:
             return x
+
+        if return_gumbel_log_probs:
+            for intermeds in intermediates:
+                if (
+                    not exists(intermeds) or
+                    intermeds.layer_type not in ('a', 'c')
+                ):
+                    continue
+
+                intermeds.log_probs = log_prob_from_hard_attend(intermeds)
 
         intermediates = LayerIntermediates(
             hiddens = hiddens,

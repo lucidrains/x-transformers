@@ -26,6 +26,7 @@ class Intermediates:
     cached_kv:          tuple[Tensor, Tensor] | None = None
     layer_type:         str | None = None
     hybrid_hidden:      Tensor | None = None
+    log_probs:          Tensor | None = None
 
     def to_tuple(self):
         return (self.qk_similarities, self.pre_softmax_attn, self.post_softmax_attn)
