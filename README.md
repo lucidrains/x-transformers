@@ -2649,4 +2649,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{zhu2025scalinglatentreasoninglooped,
+    title   = {Scaling Latent Reasoning via Looped Language Models}, 
+    author  = {Rui-Jie Zhu and Zixuan Wang and Kai Hua and Tianyu Zhang and Ziniu Li and Haoran Que and Boyi Wei and Zixin Wen and Fan Yin and He Xing and Lu Li and Jiajun Shi and Kaijing Ma and Shanda Li and Taylor Kergan and Andrew Smith and Xingwei Qu and Mude Hui and Bohong Wu and Qiyang Min and Hongzhi Huang and Xun Zhou and Wei Ye and Jiaheng Liu and Jian Yang and Yunfeng Shi and Chenghua Lin and Enduo Zhao and Tianle Cai and Ge Zhang and Wenhao Huang and Yoshua Bengio and Jason Eshraghian},
+    year    = {2025},
+    eprint  = {2510.25741},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL},
+    url     = {https://arxiv.org/abs/2510.25741}, 
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

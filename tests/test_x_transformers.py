@@ -1707,13 +1707,20 @@ def test_repeat_blocks_multiple():
 def test_pre_and_post_norm():
     from x_transformers import Decoder
 
-    decoder = Decoder(
-        dim = 64,
-        depth = 2,
-        heads = 4,
-        pre_and_post_norm = True
+    decoder = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 32,
+        looped = True,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            pre_and_post_norm = True
+        )
     )
 
-    x = torch.randn(1, 10, 64)
-    last_hiddens = decoder(x)
-    assert x.shape == last_hiddens.shape
+    x = torch.randint(1, 256, (1, 10))
+    logits, intermediates = decoder(x, return_intermediates = True)
+
+    assert len(intermediates.exit_logits) == 4
+    assert len(intermediates.all_pred_logits) == 4
