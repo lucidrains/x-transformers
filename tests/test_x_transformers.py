@@ -1704,8 +1704,8 @@ def test_repeat_blocks_multiple():
     repeat_num_layers = len(intermediates.layer_hiddens)
     assert repeat_num_layers == 17
 
-def test_pre_and_post_norm():
-    from x_transformers import Decoder
+def test_looped():
+    from x_transformers import Decoder, AutoregressiveWrapper
 
     decoder = TransformerWrapper(
         num_tokens = 256,
@@ -1719,8 +1719,17 @@ def test_pre_and_post_norm():
         )
     )
 
-    x = torch.randint(1, 256, (1, 10))
-    logits, intermediates = decoder(x, return_intermediates = True)
+    tokens = torch.randint(1, 256, (1, 10))
+
+    ar_wrapper = AutoregressiveWrapper(
+        decoder,
+        looped_loss_threshold_exit = 0.05
+    )
+
+    loss = ar_wrapper(tokens)
+    loss.backward()
+
+    logits, intermediates = decoder(tokens, return_intermediates = True)
 
     assert len(intermediates.exit_logits) == 4
     assert len(intermediates.all_pred_logits) == 4

@@ -4,7 +4,7 @@ from math import ceil, log
 from typing import Tuple, Callable
 
 import torch
-from torch import nn, tensor, Tensor
+from torch import nn, tensor, Tensor, stack
 from torch.nn import Module
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -161,7 +161,9 @@ class AutoregressiveWrapper(Module):
         pad_value = 0,
         mask_prob = 0.,
         add_attn_z_loss = False,
-        next_embed_loss_weight = 0.1
+        next_embed_loss_weight = 0.1,
+        looped_loss_threshold_exit = 0.05,
+        looped_loss_slope = 50
     ):
         super().__init__()
         self.pad_value = pad_value
@@ -171,15 +173,23 @@ class AutoregressiveWrapper(Module):
         self.max_seq_len = net.max_seq_len
 
         # paper shows masking (MLM) in conjunction with autoregressive decoder-only training leads to big improvements https://arxiv.org/abs/2210.13432
+
         assert mask_prob < 1.
         self.mask_prob = mask_prob
 
         # whether to add router z-loss
+
         self.add_attn_z_loss = add_attn_z_loss
 
         # whether to add a continuous loss
+
         self.add_continuous_pred_head = net.add_continuous_pred_head
         self.next_embed_loss_weight = next_embed_loss_weight
+
+        # looped exit gate training
+
+        self.looped_loss_threshold_exit = looped_loss_threshold_exit
+        self.looped_loss_slope = looped_loss_slope
 
     @torch.no_grad()
     @eval_decorator
@@ -534,6 +544,7 @@ class AutoregressiveWrapper(Module):
             return_attn_z_loss = add_attn_z_loss,
             return_next_embed_pred = add_next_embed_loss,
             prepend_embeds = prepend_embeds,
+            looped_pred_all_logits = True,
             **kwargs
         )
 
@@ -565,6 +576,47 @@ class AutoregressiveWrapper(Module):
             target,
             ignore_index = ignore_index
         )
+
+        # additional losses
+
+        if self.net.looped:
+            exit_logits = stack(cache.exit_logits, dim = 1)
+            pred_logits = stack(cache.all_pred_logits, dim = 1)
+
+            exit_logits = exit_logits[..., :-1, :]
+            pred_logits = pred_logits[..., :-1, :]
+
+            exit_logits = rearrange(exit_logits, '... 1 -> ...')
+
+            targets = repeat(target, 'b n -> b l n', l = exit_logits.shape[1])
+            expanded_targets, packed_shape = pack([targets], '*')
+
+            with torch.no_grad():
+
+                losses = loss_fn(
+                    rearrange(pred_logits, '... l -> (...) l'),
+                    expanded_targets,
+                    ignore_index = ignore_index,
+                    reduction = 'none'
+                )
+
+                losses, = unpack(losses, packed_shape, '*')
+
+                loss_change_per_loop = losses[:, 1:] - losses[:, :-1]
+
+                exit_target = torch.sigmoid(self.looped_loss_slope * (loss_change_per_loop - self.looped_loss_threshold_exit))
+
+            exit_loss = F.binary_cross_entropy_with_logits(
+                exit_logits[:, :-1],
+                exit_target.detach(),
+                reduction = 'none'
+            )
+
+            exit_loss_mask = (targets[:, 1:] != ignore_index)
+
+            exit_loss = exit_loss[exit_loss_mask].mean()
+
+            loss = loss + exit_loss
 
         if add_attn_z_loss:
             loss = loss + cache.attn_z_loss
