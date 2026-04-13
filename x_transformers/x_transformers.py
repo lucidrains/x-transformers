@@ -2450,6 +2450,7 @@ class AttentionLayers(Module):
         macaron = False,
         pre_norm = True,
         pre_norm_has_final_norm = True,
+        pre_and_post_norm = False,
         attn_aggregated_residuals = False,
         attn_residuals_last_output_as_query = False,
         attn_aggregated_residual_kwargs: dict = dict(),
@@ -2567,8 +2568,18 @@ class AttentionLayers(Module):
 
         assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
 
+        # pre norm and sandwich norm
+
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
+
+        # pre + post norm - keel paper and the recent looped lm (recurrent depth)
+
+        self.pre_and_post_norm = pre_and_post_norm
+
+        if self.pre_and_post_norm:
+            self.pre_norm = True
+            pre_norm_has_final_norm = False
 
         assert at_most_one_of(gate_residual, attn_aggregated_residuals), 'gate_residual and attn_aggregated_residuals are mutually exclusive'
 
@@ -2852,7 +2863,7 @@ class AttentionLayers(Module):
 
             pre_branch_norm = norm_fn() if pre_norm else None
             post_branch_norm = norm_fn() if sandwich_norm else None
-            post_main_norm = norm_fn() if not pre_norm else None
+            post_main_norm = norm_fn() if (not pre_norm or self.pre_and_post_norm) else None
 
             norms = ModuleList([
                 pre_branch_norm,

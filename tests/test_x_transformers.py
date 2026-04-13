@@ -1703,3 +1703,17 @@ def test_repeat_blocks_multiple():
     # layer hiddens: 1 (input) + 8 * 2 (attn, ff) = 17
     repeat_num_layers = len(intermediates.layer_hiddens)
     assert repeat_num_layers == 17
+
+def test_pre_and_post_norm():
+    from x_transformers import Decoder
+
+    decoder = Decoder(
+        dim = 64,
+        depth = 2,
+        heads = 4,
+        pre_and_post_norm = True
+    )
+
+    x = torch.randn(1, 10, 64)
+    last_hiddens = decoder(x)
+    assert x.shape == last_hiddens.shape
