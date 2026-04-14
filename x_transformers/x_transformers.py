@@ -26,6 +26,7 @@ from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, reduce, pack, unpack
+from torch_einops_utils import masked_mean, pad_at_dim
 
 # einstein notation
 
@@ -188,25 +189,6 @@ def l2norm(t, groups = 1):
 
 def softclamp(t, value):
     return (t / value).tanh() * value
-
-def masked_mean(t, mask = None, dim = 1):
-    if not exists(mask):
-        return t.mean(dim = dim)
-
-    dims_append = (1,) * (t.ndim - mask.ndim)
-    mask = mask.reshape(*mask.shape, *dims_append)
-
-    num = (t * mask).sum(dim = dim)
-    den = mask.sum(dim = dim).clamp(min = 1.)
-    return num / den
-
-def pad_at_dim(t, pad: tuple[int, int], dim = -1, value = 0.):
-    if pad == (0, 0):
-        return t
-
-    dims_from_right = (- dim - 1) if dim < 0 else (t.ndim - dim - 1)
-    zeros = ((0, 0) * dims_from_right)
-    return F.pad(t, (*zeros, *pad), value = value)
 
 def or_reduce(masks):
     head, *body = masks

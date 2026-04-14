@@ -11,6 +11,8 @@ from torch.nn.utils.rnn import pad_sequence
 
 from einops import rearrange, repeat, pack, unpack
 
+from torch_einops_utils import masked_mean, pad_at_dim
+
 def exists(val):
     return val is not None
 
@@ -163,7 +165,8 @@ class AutoregressiveWrapper(Module):
         add_attn_z_loss = False,
         next_embed_loss_weight = 0.1,
         looped_loss_threshold_exit = 0.05,
-        looped_loss_slope = 50
+        looped_loss_slope = 50,
+        looped_exit_loss_weight = 1.
     ):
         super().__init__()
         self.pad_value = pad_value
@@ -190,6 +193,7 @@ class AutoregressiveWrapper(Module):
 
         self.looped_loss_threshold_exit = looped_loss_threshold_exit
         self.looped_loss_slope = looped_loss_slope
+        self.looped_exit_loss_weight = looped_exit_loss_weight
 
     @torch.no_grad()
     @eval_decorator
@@ -569,15 +573,7 @@ class AutoregressiveWrapper(Module):
 
         loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
 
-        # cross entropy loss
-
-        loss = loss_fn(
-            rearrange(logits, 'b n c -> b c n'),
-            target,
-            ignore_index = ignore_index
-        )
-
-        # additional losses
+        # losses - if looped
 
         if self.net.looped:
             exit_logits = stack(cache.exit_logits, dim = 1)
@@ -591,20 +587,23 @@ class AutoregressiveWrapper(Module):
             targets = repeat(target, 'b n -> b l n', l = exit_logits.shape[1])
             expanded_targets, packed_shape = pack([targets], '*')
 
+            # losses across loops
+
+            losses = loss_fn(
+                rearrange(pred_logits, '... l -> (...) l'),
+                expanded_targets,
+                ignore_index = ignore_index,
+                reduction = 'none'
+            )
+
+            losses, = unpack(losses, packed_shape, '*')
+
+            # the exit loss
+
             with torch.no_grad():
-
-                losses = loss_fn(
-                    rearrange(pred_logits, '... l -> (...) l'),
-                    expanded_targets,
-                    ignore_index = ignore_index,
-                    reduction = 'none'
-                )
-
-                losses, = unpack(losses, packed_shape, '*')
-
                 loss_change_per_loop = losses[:, 1:] - losses[:, :-1]
 
-                exit_target = torch.sigmoid(self.looped_loss_slope * (loss_change_per_loop - self.looped_loss_threshold_exit))
+                exit_target = torch.sigmoid(self.looped_loss_slope * (loss_change_per_loop + self.looped_loss_threshold_exit))
 
             exit_loss = F.binary_cross_entropy_with_logits(
                 exit_logits[:, :-1],
@@ -616,7 +615,37 @@ class AutoregressiveWrapper(Module):
 
             exit_loss = exit_loss[exit_loss_mask].mean()
 
-            loss = loss + exit_loss
+            # exit probs for weighting the loss
+
+            with torch.no_grad():
+                step_exit_probs = exit_logits.sigmoid()
+                continue_probs = 1. - step_exit_probs
+                cum_continue_probs = pad_at_dim(continue_probs, (1, -1), value = 1., dim = 1).cumprod(dim = 1)
+                exit_probs = step_exit_probs * cum_continue_probs
+
+            # weighted losses
+
+            ignore_mask = targets != ignore_index
+
+            losses = losses * exit_probs.detach()
+
+            loss = masked_mean(losses, ignore_mask)
+
+            # total loss
+
+            loss = (
+                loss +
+                exit_loss * self.looped_exit_loss_weight
+            )
+
+        else:
+            # regular cross entropy loss
+
+            loss = loss_fn(
+                rearrange(logits, 'b n c -> b c n'),
+                target,
+                ignore_index = ignore_index
+            )
 
         if add_attn_z_loss:
             loss = loss + cache.attn_z_loss
