@@ -618,10 +618,10 @@ class AutoregressiveWrapper(Module):
             # exit probs for weighting the loss
 
             with torch.no_grad():
-                step_exit_probs = exit_logits.sigmoid()
-                continue_probs = 1. - step_exit_probs
-                cum_continue_probs = pad_at_dim(continue_probs, (1, -1), value = 1., dim = 1).cumprod(dim = 1)
-                exit_probs = step_exit_probs * cum_continue_probs
+                step_exit_logprobs = F.logsigmoid(exit_logits)
+                continue_logprobs = F.logsigmoid(-exit_logits)
+                cum_continue_logprobs = pad_at_dim(continue_logprobs, (1, -1), value = 0., dim = 1).cumsum(dim = 1)
+                exit_probs = (step_exit_logprobs + cum_continue_logprobs).exp()
 
             # weighted losses
 
