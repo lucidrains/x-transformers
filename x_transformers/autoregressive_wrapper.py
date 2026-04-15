@@ -620,7 +620,10 @@ class AutoregressiveWrapper(Module):
             with torch.no_grad():
                 step_exit_logprobs = F.logsigmoid(exit_logits)
                 continue_logprobs = F.logsigmoid(-exit_logits)
+
                 cum_continue_logprobs = pad_at_dim(continue_logprobs, (1, -1), value = 0., dim = 1).cumsum(dim = 1)
+                step_exit_logprobs = pad_at_dim(step_exit_logprobs[:, :-1], (0, 1), value = 0., dim = 1) # last step always exit
+
                 exit_probs = (step_exit_logprobs + cum_continue_logprobs).exp()
 
             # weighted losses

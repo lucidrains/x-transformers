@@ -1733,3 +1733,6 @@ def test_looped():
 
     assert len(intermediates.exit_logits) == 4
     assert len(intermediates.all_pred_logits) == 4
+
+    maybe_early_exit_logit = decoder(tokens[:, :1], looped_inference = True)
+    assert maybe_early_exit_logit.shape == (1, 1, 256)

@@ -3753,6 +3753,8 @@ class TransformerWrapper(Module):
         recycle_steps = None,
         looped_steps = None,
         looped_pred_all_logits = None,
+        looped_inference = False,
+        looped_exit_prob_threshold = 0.9,
         pos = None,
         prepend_embeds = None,
         prepend_mask = None,
@@ -3929,22 +3931,61 @@ class TransformerWrapper(Module):
 
             assert exists(looped_steps) and looped_steps > 0, '`looped_steps` must be provided on forward if looped is turned on and not training'
 
+            # for looped inference
+
+            assert not (looped_inference and n > 1), 'looped scheme only works with single token decoding, for now'
+            cum_exit_prob = 0.
+            cum_continue_logprob = 0.
+
+            # looped training
+
             all_pred_logits = []
             exit_logits = []
 
+            # loop
+
             for i in range(looped_steps):
+                is_last = i == (looped_steps - 1)
 
                 attended, intermediates = _attn_layers_forward(x, **kwargs)
 
-                layer_exit_logits = self.exit_gate(attended)
+                # whether to calculate exit logits
 
-                exit_logits.append(layer_exit_logits)
+                determine_early_exit = looped_inference and not is_last
 
-                if looped_pred_all_logits:
+                if not looped_inference or determine_early_exit:
+                    layer_exit_logits = self.exit_gate(attended)
+                    exit_logits.append(layer_exit_logits)
+
+                # whether to pred all logits
+
+                should_early_exit = False
+                should_pred_logits = looped_pred_all_logits
+
+                if determine_early_exit:
+                    exit_logprob = F.logsigmoid(layer_exit_logits)
+                    continue_logprob = F.logsigmoid(-layer_exit_logits)
+
+                    step_exit_prob = (cum_continue_logprob + exit_logprob).exp()
+                    cum_exit_prob += step_exit_prob
+
+                    should_early_exit = cum_exit_prob >= looped_exit_prob_threshold
+
+                    # update for next iteration
+                    cum_continue_logprob += continue_logprob
+
+                # predict the logit for this recurrent step
+
+                if should_pred_logits:
                     layer_pred_logits = self.to_logits(attended)
                     all_pred_logits.append(layer_pred_logits)
 
                 x = attended
+
+                # maybe early exit
+
+                if looped_inference and should_early_exit:
+                    break
 
             # store for training exit logits
 
