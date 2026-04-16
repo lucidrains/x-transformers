@@ -380,6 +380,7 @@ class AutoregressiveWrapper(Module):
             alpha = 0.1
         ),
         cache_kv = True,
+        return_intermediates = False,
         **kwargs
     ):
         max_seq_len, greedy = self.max_seq_len, temperature == 0.
@@ -421,6 +422,11 @@ class AutoregressiveWrapper(Module):
         # kv caches
 
         cache = None
+
+        # maybe looped
+
+        if self.net.looped:
+            kwargs.update(looped_inference = True)
 
         # if doing contrastive decoding, turn off filter automatically
 
@@ -520,7 +526,10 @@ class AutoregressiveWrapper(Module):
 
         out, = unpack(out, ps, '* n')
 
-        return out
+        if not return_intermediates:
+            return out
+
+        return out, cache
 
     def forward(
         self,

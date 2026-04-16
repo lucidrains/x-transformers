@@ -3937,7 +3937,6 @@ class TransformerWrapper(Module):
 
             # for looped inference
 
-            assert not (looped_inference and n > 1), 'looped scheme only works with single token decoding, for now'
             cum_exit_prob = 0.
             cum_continue_logprob = 0.
 
@@ -3999,8 +3998,10 @@ class TransformerWrapper(Module):
 
             # keep track of the exit indices
 
+            prev_exit_indices = cache.exit_indices if exists(cache) else None
+
             exit_indices = tensor([[i]], device = device) # the last index from for loop above
-            intermediates.exit_indices = safe_cat((intermediates.exit_indices, exit_indices), dim = -1)
+            intermediates.exit_indices = safe_cat((prev_exit_indices, exit_indices), dim = -1)
 
         elif self.recycling:
 
