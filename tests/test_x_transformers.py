@@ -1734,5 +1734,10 @@ def test_looped():
     assert len(intermediates.exit_logits) == 4
     assert len(intermediates.all_pred_logits) == 4
 
-    maybe_early_exit_logit = decoder(tokens[:, :1], looped_inference = True)
+    maybe_early_exit_logit, intermediates = decoder(tokens[:, :1], max_looped_steps = 5, looped_inference = True, return_intermediates = True)
     assert maybe_early_exit_logit.shape == (1, 1, 256)
+    assert intermediates.exit_indices < 5
+
+    five_recurrence_logit, intermediates = decoder(tokens[:, :1], looped_steps = 5, looped_inference = True, return_intermediates = True)
+    assert five_recurrence_logit.shape == (1, 1, 256)
+    assert intermediates.exit_indices == 4

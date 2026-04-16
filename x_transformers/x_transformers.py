@@ -26,7 +26,7 @@ from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, reduce, pack, unpack
-from torch_einops_utils import masked_mean, pad_at_dim
+from torch_einops_utils import masked_mean, pad_at_dim, safe_cat
 
 # einstein notation
 
@@ -56,6 +56,7 @@ class LayerIntermediates:
     logits:             Tensor | None = None
     exit_logits:        list[Tensor] | None = None
     all_pred_logits:    list[Tensor] | None = None
+    exit_indices:       Tensor | None = None
     cache_length:       int = 0
 
 LinearNoBias = partial(nn.Linear, bias = False)
@@ -65,10 +66,11 @@ LinearNoBias = partial(nn.Linear, bias = False)
 def exists(val):
     return val is not None
 
-def default(val, d):
-    if exists(val):
-        return val
-    return d() if callable(d) else d
+def default(*args):
+    for arg in args:
+        if exists(arg):
+            return arg() if callable(arg) else arg
+    return None
 
 def identity(t, *args, **kwargs):
     return t
@@ -3752,6 +3754,7 @@ class TransformerWrapper(Module):
         mem_masks = None,
         recycle_steps = None,
         looped_steps = None,
+        max_looped_steps = None,
         looped_pred_all_logits = None,
         looped_inference = False,
         looped_exit_prob_threshold = 0.9,
@@ -3926,10 +3929,11 @@ class TransformerWrapper(Module):
 
             # looped
 
-            looped_steps = default(looped_steps, self.train_max_looped_steps)
-            looped_pred_all_logits = default(looped_pred_all_logits, self.training)
+            is_fixed_looped_steps = exists(looped_steps)
 
-            assert exists(looped_steps) and looped_steps > 0, '`looped_steps` must be provided on forward if looped is turned on and not training'
+            max_looped_steps = default(looped_steps, max_looped_steps, self.train_max_looped_steps)
+
+            looped_pred_all_logits = default(looped_pred_all_logits, self.training)
 
             # for looped inference
 
@@ -3944,14 +3948,14 @@ class TransformerWrapper(Module):
 
             # loop
 
-            for i in range(looped_steps):
-                is_last = i == (looped_steps - 1)
+            for i in range(max_looped_steps):
+                is_last = i == (max_looped_steps - 1)
 
                 attended, intermediates = _attn_layers_forward(x, **kwargs)
 
                 # whether to calculate exit logits
 
-                determine_early_exit = looped_inference and not is_last
+                determine_early_exit = looped_inference and not is_fixed_looped_steps and not is_last
 
                 if not looped_inference or determine_early_exit:
                     layer_exit_logits = self.exit_gate(attended)
@@ -3972,6 +3976,7 @@ class TransformerWrapper(Module):
                     should_early_exit = cum_exit_prob >= looped_exit_prob_threshold
 
                     # update for next iteration
+
                     cum_continue_logprob += continue_logprob
 
                 # predict the logit for this recurrent step
@@ -3991,6 +3996,11 @@ class TransformerWrapper(Module):
 
             intermediates.exit_logits = exit_logits
             intermediates.all_pred_logits = all_pred_logits
+
+            # keep track of the exit indices
+
+            exit_indices = tensor([[i]], device = device) # the last index from for loop above
+            intermediates.exit_indices = safe_cat((intermediates.exit_indices, exit_indices), dim = -1)
 
         elif self.recycling:
 
