@@ -1099,6 +1099,29 @@ class GRUGating(Module):
 
         return gated_output.reshape_as(x)
 
+class OrthogonalResidualUpdate(Module):
+    # Oh et al. https://arxiv.org/abs/2505.11881
+
+    def __init__(
+        self,
+        dim,
+        scale_residual = False,
+        **kwargs
+    ):
+        super().__init__()
+        self.residual_scale = nn.Parameter(torch.ones(dim)) if scale_residual else None
+
+    def prepare(self, residual):
+        return residual, residual, dict()
+
+    def forward(self, x, residual, **kwargs):
+        if exists(self.residual_scale):
+            residual = residual * self.residual_scale
+
+        orthogonal = orthog_project(x, residual)
+
+        return residual + orthogonal
+
 class AttentionAggregatedResidual(Module):
     """
     https://arxiv.org/abs/2601.21582
@@ -2450,6 +2473,7 @@ class AttentionLayers(Module):
         attn_residuals_last_output_as_query = False,
         attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
+        orthog_residual = False,
         scale_residual = False,
         scale_residual_constant = 1.,
         shift_tokens = 0,
@@ -2510,7 +2534,7 @@ class AttentionLayers(Module):
         self.num_residual_streams = num_residual_streams
         self.stream_emb = nn.Parameter(torch.zeros(num_residual_streams, dim)) if num_residual_streams > 1 else None
 
-        assert not (has_hyper_connections and gate_residual)
+        assert not (has_hyper_connections and (gate_residual or orthog_residual))
 
         hyper_conn_produce_diff_views = qkv_receive_diff_residuals and not integrate_layers
 
@@ -2576,7 +2600,7 @@ class AttentionLayers(Module):
             self.pre_norm = True
             pre_norm_has_final_norm = False
 
-        assert at_most_one_of(gate_residual, attn_aggregated_residuals), 'gate_residual and attn_aggregated_residuals are mutually exclusive'
+        assert at_most_one_of(gate_residual, attn_aggregated_residuals, orthog_residual), 'gate_residual, attn_aggregated_residuals and orthog_residual are mutually exclusive'
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
@@ -2841,6 +2865,8 @@ class AttentionLayers(Module):
 
             elif gate_residual:
                 residual_fn = GRUGating
+            elif orthog_residual:
+                residual_fn = OrthogonalResidualUpdate
             else:
                 residual_fn = Residual
 

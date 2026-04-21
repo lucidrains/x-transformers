@@ -1761,3 +1761,25 @@ def test_looped():
 
     assert exists(intermediates.looped_prompt_kv_cache)
     assert (intermediates.exit_indices < 5).all()
+
+def test_orthog_residual():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 2,
+            heads = 8,
+            orthog_residual = True
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 10))
+
+    logits = model(x)
+    assert logits.shape == (1, 10, 256)
+
+    loss = logits.sum()
+    loss.backward()

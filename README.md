@@ -2673,4 +2673,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{oh2026revisitingresidualconnectionsorthogonal,
+    title   = {Revisiting Residual Connections: Orthogonal Updates for Stable and Efficient Deep Networks},
+    author  = {Giyeong Oh and Woohyun Cho and Siyeol Kim and Suhwan Choi and Youngjae Yu},
+    year    = {2026},
+    eprint  = {2505.11881},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV},
+    url     = {https://arxiv.org/abs/2505.11881},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
