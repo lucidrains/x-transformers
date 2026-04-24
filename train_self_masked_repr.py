@@ -1,10 +1,11 @@
 # /// script
 # dependencies = [
+#   "accelerate",
+#   "ema_pytorch",
+#   "fire",
 #   "tqdm",
 #   "x-transformers",
-#   "ema_pytorch",
-#   "accelerate",
-#   "fire",
+#   "x-mlps-pytorch"
 # ]
 # ///
 
@@ -13,15 +14,16 @@ from __future__ import annotations
 import fire
 import gzip
 import random
-from copy import deepcopy
 from itertools import chain
-from collections import namedtuple
+from collections import namedtuple, defaultdict
+
 import numpy as np
 from tqdm import tqdm
 
 import torch
-from torch import nn, Tensor, tensor, is_tensor
+from torch.nn import Module
 import torch.nn.functional as F
+from torch import nn, Tensor, tensor, is_tensor, cat
 from torch.utils.data import DataLoader, Dataset
 
 from ema_pytorch import EMA
@@ -29,6 +31,8 @@ from accelerate import Accelerator
 
 from x_transformers import TransformerWrapper, Decoder, RMSNorm, FeedForward
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
+
+from x_mlps_pytorch import MLP
 
 # Self-Masked Representation Training
 # following the similar formula as in 'Self-Flow' from Chefer et al. at Black Forest Labs
@@ -179,7 +183,43 @@ class SelfDistilledTraining(nn.Module):
 
         return total_loss, LossBreakdown(student_loss, ssl_loss, None)
 
-class SelfMaskedRepTraining(nn.Module):
+class SelfPredictRepresentation(Module):
+    # https://arxiv.org/abs/2007.05929
+    # Max Schwarzer et al.
+
+    def __init__(
+        self,
+        dim,
+        dim_action,
+        expansion_factor = 4.,
+        detach_actions = True
+    ):
+        super().__init__()
+        self.state_norm = nn.RMSNorm(dim)
+
+        self.mlp = MLP(
+            dim + dim_action,
+            int(dim * expansion_factor),
+            dim
+        )
+
+        self.detach_actions = detach_actions
+
+    def forward(
+        self,
+        states,
+        actions
+    ):
+        if self.detach_actions:
+            actions = actions.detach()
+
+        states = self.state_norm(states)
+
+        state_action = cat((states, actions), dim = -1)
+
+        return self.mlp(state_action)
+
+class SelfMaskedRepTraining(Module):
     def __init__(
         self,
         net: TransformerWrapper,
@@ -235,7 +275,7 @@ class SelfMaskedRepTraining(nn.Module):
         )
 
         if self.predict_next_teacher:
-            self.student_predict_next_head = deepcopy(self.student_predict_head)
+            self.student_predict_next_head = SelfPredictRepresentation(dim, dim_action = dim, expansion_factor = predict_head_expansion)
 
         self.register_buffer('zero', tensor(0.))
 
@@ -335,7 +375,15 @@ class SelfMaskedRepTraining(nn.Module):
         if self.predict_next_teacher:
             teacher_rep_next = teacher_rep[:, 1:]
 
-            student_pred_next = self.student_predict_next_head(student_rep)
+            # sampled token is an 'action'
+
+            next_sampled_token_ids = x[:, 1:]
+            next_token_embed = self.student.net.token_emb(next_sampled_token_ids)
+
+            # student predicts the teacher representation based off current representation + sampled action
+
+            student_pred_next = self.student_predict_next_head(student_rep, next_token_embed)
+
             ssl_loss_next = self.loss_fn(student_pred_next, teacher_rep_next)
 
             ssl_loss = (ssl_loss + ssl_loss_next) / 2
@@ -494,7 +542,6 @@ def train(
 
         total_loss = 0.
 
-        from collections import defaultdict
         total_breakdown = defaultdict(float)
 
         for __ in range(gradient_accumulate_every):
