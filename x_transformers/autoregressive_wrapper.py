@@ -11,7 +11,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from einops import rearrange, repeat, pack, unpack
 
-from torch_einops_utils import masked_mean, pad_at_dim
+from torch_einops_utils import masked_mean, pad_at_dim, lens_to_mask
 
 def exists(val):
     return val is not None
@@ -536,9 +536,18 @@ class AutoregressiveWrapper(Module):
         x,
         return_outputs = False,
         prepend_embeds = None,
+        lens = None,
         **kwargs
     ):
         seq, ignore_index, add_attn_z_loss, add_next_embed_loss = x.shape[1], self.ignore_index, self.add_attn_z_loss, self.add_continuous_pred_head
+
+        # if lens for sequences passed in, set padding to `ignore_index`
+
+        if exists(lens):
+            mask = lens_to_mask(lens, seq)
+            x = x.masked_fill(~mask, ignore_index)
+
+        # split for next token prediction
 
         inp, target = x, x[:, 1:]
         inp = torch.where(inp == ignore_index, self.pad_value, inp)
