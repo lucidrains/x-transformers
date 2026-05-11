@@ -27,6 +27,7 @@ import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, reduce, pack, unpack
 from torch_einops_utils import masked_mean, pad_at_dim, safe_cat
+from torch_einops_utils.nn import Sequential, Lambda, Identity
 
 # einstein notation
 
@@ -132,12 +133,6 @@ class equals():
         return x == self.val
 
 
-def Sequential(*modules):
-    return nn.Sequential(*filter(exists, modules))
-
-class Identity(Module):
-    def forward(self, t, *args, **kwargs):
-        return t
 
 # recurrent depth related
 
@@ -1514,15 +1509,29 @@ class GLU(Module):
         dim_in,
         dim_out,
         activation: Callable,
-        mult_bias = False
+        mult_bias = False,
+        softclamp_value = None,
+        gate_softclamp_value = None
     ):
         super().__init__()
         self.act = activation
         self.proj = nn.Linear(dim_in, dim_out * 2)
         self.mult_bias = nn.Parameter(torch.ones(dim_out)) if mult_bias else 1.
 
+        # deepseek v4 softclamping of feedforward
+
+        self.softclamp_value = softclamp_value
+        self.gate_softclamp_value = gate_softclamp_value
+
     def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim = -1)
+
+        if exists(self.softclamp_value):
+            x = softclamp(x, self.softclamp_value)
+
+        if exists(self.gate_softclamp_value):
+            gate = softclamp(gate, self.gate_softclamp_value)
+
         return x * self.act(gate) * self.mult_bias
 
 class FeedForward(Module):
@@ -1542,6 +1551,8 @@ class FeedForward(Module):
         sublayer_dropout = 0.,
         no_bias = False,
         zero_init_output = False,
+        softclamp_value = None,
+        glu_gate_softclamp_value = None,
     ):
         super().__init__()
         inner_dim = int(dim * mult)
@@ -1561,10 +1572,11 @@ class FeedForward(Module):
             activation = nn.GELU()
 
         if glu:
-            proj_in = GLU(dim, inner_dim, activation, mult_bias = glu_mult_bias)
+            proj_in = GLU(dim, inner_dim, activation, mult_bias = glu_mult_bias, softclamp_value = softclamp_value, gate_softclamp_value = glu_gate_softclamp_value)
         else:
-            proj_in = nn.Sequential(
+            proj_in = Sequential(
                 nn.Linear(dim, inner_dim, bias = not no_bias),
+                Lambda(partial(softclamp, value = softclamp_value)) if exists(softclamp_value) else None,
                 activation
             )
 
