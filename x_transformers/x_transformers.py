@@ -1125,22 +1125,38 @@ class MVSplitResidualUpdate(Module):
         dim,
         init_alpha = 0.,
         init_beta = 0.03,
+        learned = False,
         **kwargs
     ):
         super().__init__()
-        self.alpha = nn.Parameter(torch.ones(dim) * init_alpha)
-        self.beta = nn.Parameter(torch.ones(dim) * init_beta)
+        self.learned = learned
+
+        if learned:
+            self.to_alpha = nn.Linear(dim, dim)
+            self.to_beta = nn.Linear(dim, dim)
+
+            nn.init.zeros_(self.to_alpha.weight)
+            nn.init.constant_(self.to_alpha.bias, init_alpha)
+
+            nn.init.zeros_(self.to_beta.weight)
+            nn.init.constant_(self.to_beta.bias, init_beta)
+        else:
+            self.alpha = nn.Parameter(torch.ones(dim) * init_alpha)
+            self.beta = nn.Parameter(torch.ones(dim) * init_beta)
 
     def prepare(self, residual):
         return residual, residual, dict()
 
-    def forward(self, x, residual, **kwargs):
-        mean_x = x.mean(dim = -2, keepdim = True)
-        mean_residual = residual.mean(dim = -2, keepdim = True)
+    def forward(self, x, residual, mask = None, **kwargs):
+        mean_x = masked_mean(x, mask = mask, dim = -2, keepdim = True)
+        mean_residual = masked_mean(residual, mask = mask, dim = -2, keepdim = True)
+
+        alpha = self.to_alpha(mean_x) if self.learned else self.alpha
+        beta = self.to_beta(mean_x) if self.learned else self.beta
 
         centered_x = x - mean_x
 
-        return residual + centered_x * self.beta + (mean_x - mean_residual) * self.alpha
+        return residual + centered_x * beta + (mean_x - mean_residual) * alpha
 
 class AttentionAggregatedResidual(Module):
     """
@@ -3322,7 +3338,7 @@ class AttentionLayers(Module):
             if exists(post_branch_norm):
                 out = post_branch_norm(out)
 
-            x = residual_fn(out, inner_residual, layer_hiddens = layer_hiddens, **residual_kwargs)
+            x = residual_fn(out, inner_residual, layer_hiddens = layer_hiddens, mask = mask, **residual_kwargs)
 
             if layer_type in ('a', 'c') and return_hiddens:
                 inter.layer_type = layer_type

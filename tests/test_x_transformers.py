@@ -1784,7 +1784,8 @@ def test_orthog_residual():
     loss = logits.sum()
     loss.backward()
 
-def test_mv_split_residual():
+@param('learned', (False, True))
+def test_mv_split_residual(learned):
     from x_transformers import TransformerWrapper, Decoder
 
     model = TransformerWrapper(
@@ -1795,14 +1796,16 @@ def test_mv_split_residual():
             depth = 2,
             heads = 8,
             mv_split_residual = True,
-            pre_and_post_norm = True
+            pre_and_post_norm = True,
+            residual_fn_kwargs = dict(learned = learned)
         )
     )
 
-    x = torch.randint(0, 256, (1, 10))
+    x = torch.randint(0, 256, (2, 10))
+    mask = torch.randint(0, 2, (2, 10)).bool()
 
-    logits = model(x)
-    assert logits.shape == (1, 10, 256)
+    logits = model(x, mask = mask)
+    assert logits.shape == (2, 10, 256)
 
     loss = logits.sum()
     loss.backward()
