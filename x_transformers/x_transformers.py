@@ -1117,6 +1117,31 @@ class OrthogonalResidualUpdate(Module):
 
         return residual + orthogonal
 
+class MVSplitResidualUpdate(Module):
+    # Pengqi Lu https://arxiv.org/abs/2605.06169
+
+    def __init__(
+        self,
+        dim,
+        init_alpha = 0.,
+        init_beta = 0.03,
+        **kwargs
+    ):
+        super().__init__()
+        self.alpha = nn.Parameter(torch.ones(dim) * init_alpha)
+        self.beta = nn.Parameter(torch.ones(dim) * init_beta)
+
+    def prepare(self, residual):
+        return residual, residual, dict()
+
+    def forward(self, x, residual, **kwargs):
+        mean_x = x.mean(dim = -2, keepdim = True)
+        mean_residual = residual.mean(dim = -2, keepdim = True)
+
+        centered_x = x - mean_x
+
+        return residual + centered_x * self.beta + (mean_x - mean_residual) * self.alpha
+
 class AttentionAggregatedResidual(Module):
     """
     https://arxiv.org/abs/2601.21582
@@ -2486,6 +2511,7 @@ class AttentionLayers(Module):
         attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
         orthog_residual = False,
+        mv_split_residual = False,
         scale_residual = False,
         scale_residual_constant = 1.,
         shift_tokens = 0,
@@ -2546,7 +2572,7 @@ class AttentionLayers(Module):
         self.num_residual_streams = num_residual_streams
         self.stream_emb = nn.Parameter(torch.zeros(num_residual_streams, dim)) if num_residual_streams > 1 else None
 
-        assert not (has_hyper_connections and (gate_residual or orthog_residual))
+        assert not (has_hyper_connections and (gate_residual or orthog_residual or mv_split_residual))
 
         hyper_conn_produce_diff_views = qkv_receive_diff_residuals and not integrate_layers
 
@@ -2612,7 +2638,7 @@ class AttentionLayers(Module):
             self.pre_norm = True
             pre_norm_has_final_norm = False
 
-        assert at_most_one_of(gate_residual, attn_aggregated_residuals, orthog_residual), 'gate_residual, attn_aggregated_residuals and orthog_residual are mutually exclusive'
+        assert at_most_one_of(gate_residual, attn_aggregated_residuals, orthog_residual, mv_split_residual), 'gate_residual, attn_aggregated_residuals, orthog_residual, and mv_split_residual are mutually exclusive'
 
         self.residual_attn = residual_attn
         self.cross_residual_attn = cross_residual_attn
@@ -2879,6 +2905,8 @@ class AttentionLayers(Module):
                 residual_fn = GRUGating
             elif orthog_residual:
                 residual_fn = OrthogonalResidualUpdate
+            elif mv_split_residual:
+                residual_fn = MVSplitResidualUpdate
             else:
                 residual_fn = Residual
 

@@ -1784,6 +1784,29 @@ def test_orthog_residual():
     loss = logits.sum()
     loss.backward()
 
+def test_mv_split_residual():
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 2,
+            heads = 8,
+            mv_split_residual = True,
+            pre_and_post_norm = True
+        )
+    )
+
+    x = torch.randint(0, 256, (1, 10))
+
+    logits = model(x)
+    assert logits.shape == (1, 10, 256)
+
+    loss = logits.sum()
+    loss.backward()
+
 def test_softclamp_ff():
     from x_transformers import TransformerWrapper, Decoder
 

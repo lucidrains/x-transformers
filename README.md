@@ -2685,4 +2685,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{lu2026meanmodescreamingmeanvariance,
+    title   = {Mean Mode Screaming: Mean--Variance Split Residuals for 1000-Layer Diffusion Transformers},
+    author  = {Pengqi Lu},
+    year    = {2026},
+    eprint  = {2605.06169},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2605.06169},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
