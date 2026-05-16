@@ -474,6 +474,7 @@ class Attend(Module):
         mask = None,
         attn_bias = None,
         prev_attn = None,
+        attn_delta = None,
         flash_pack_seq_kwargs = None,
         causal = None,
     ):
@@ -519,7 +520,7 @@ class Attend(Module):
             if exists(attn_bias):
                 attn_bias = F.pad(attn_bias, (1, 0), value = 0.)
 
-        if self.flash:
+        if self.flash and not exists(attn_delta):
             assert not exists(prev_attn), 'residual attention not compatible with flash attention'
             return self.flash_attn(q, k, v, mask = mask, attn_bias = attn_bias, flash_pack_seq_kwargs = flash_pack_seq_kwargs)
 
@@ -594,6 +595,11 @@ class Attend(Module):
         attn = self.attn_fn(sim)
 
         attn = attn.type(dtype)
+
+        # https://openreview.net/forum?id=uomCTwGflg
+
+        if exists(attn_delta):
+            attn = attn + attn_delta
 
         # add back the sign
 

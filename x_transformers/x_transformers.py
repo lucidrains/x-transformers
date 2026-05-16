@@ -2074,6 +2074,11 @@ class Attention(Module):
         additional_key_values: tuple[Tensor, Tensor] | None = None,
         additional_key_value_mask = None,
         kv_input_residual = None,
+        q_delta = None,
+        k_delta = None,
+        v_delta = None,
+        o_delta = None,
+        attn_delta = None,
         flash_pack_seq_kwargs = None,
         causal = None,
     ):
@@ -2139,6 +2144,17 @@ class Attention(Module):
         q = self.to_q(q_input)
         k = self.to_k(k_input)
         v = self.to_v(v_input)
+
+        # allow for modulation, https://arxiv.org/abs/2605.12357
+
+        if exists(q_delta):
+            q = q + q_delta
+
+        if exists(k_delta):
+            k = k + k_delta
+
+        if exists(v_delta):
+            v = v + v_delta
 
         q = self.split_q_heads(q)
         k = self.split_k_heads(k)
@@ -2350,6 +2366,7 @@ class Attention(Module):
             mask = final_attn_mask,
             attn_bias = attn_bias,
             prev_attn = prev_attn,
+            attn_delta = attn_delta,
             flash_pack_seq_kwargs = flash_pack_seq_kwargs,
             causal = causal,
         )
@@ -2427,6 +2444,11 @@ class Attention(Module):
         # merge heads
 
         out = self.merge_heads(out)
+
+        # maybe modulate output
+
+        if exists(o_delta):
+            out = out + o_delta
 
         # alphafold2 styled gating of the values
 
