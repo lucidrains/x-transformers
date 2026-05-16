@@ -1833,3 +1833,32 @@ def test_softclamp_ff():
 
     loss = logits.sum()
     loss.backward()
+
+@param('has_lens', (False, True))
+@param('bottleneck_type', ('deterministic', 'variational'))
+def test_continuous_autoencoder(has_lens, bottleneck_type):
+    from x_transformers.continuous_autoencoder import ContinuousTransformerAutoencoder
+
+    model = ContinuousTransformerAutoencoder(
+        dim = 512,
+        enc_depth = 2,
+        dec_depth = 2,
+        max_seq_len = 64,
+        dim_latent = 256,
+        bottleneck_type = bottleneck_type,
+        deterministic_bottleneck_kwargs = dict(activation = nn.Tanh())
+    )
+
+    x = torch.randn(2, 64, 512)
+    lens = torch.tensor([64, 32]) if has_lens else None
+
+    loss, (recon_loss, aux_loss) = model(x, lens = lens, return_all_losses = True)
+    loss.backward()
+
+    assert recon_loss.ndim == 0
+
+    # getting latents
+
+    latents = model.encode(x, lens = lens)
+
+    assert latents.shape == (2, 256)
