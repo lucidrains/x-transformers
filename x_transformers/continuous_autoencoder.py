@@ -87,6 +87,7 @@ class ContinuousTransformerAutoencoder(Module):
         bottleneck_type: Literal['deterministic', 'variational'] = 'deterministic',
         deterministic_bottleneck_kwargs: dict = dict(),
         variational_bottleneck_kwargs: dict = dict(),
+        loss_type: Literal['l1', 'l2'] = 'l2',
         attn_dim_head = 64,
         heads = 8,
         enc_kwargs: dict = dict(),
@@ -140,6 +141,9 @@ class ContinuousTransformerAutoencoder(Module):
 
         self.latents_dropout = nn.Dropout(latents_dropout_prob)
 
+        assert loss_type in {'l1', 'l2'}
+        self.loss_type = loss_type
+
     @property
     def device(self):
         return next(self.parameters()).device
@@ -186,7 +190,10 @@ class ContinuousTransformerAutoencoder(Module):
 
         # reconstruction loss
 
-        recon_loss = F.mse_loss(recon, seq, reduction = 'none')
+        if self.loss_type == 'l1':
+            recon_loss = F.l1_loss(recon, seq, reduction = 'none')
+        elif self.loss_type == 'l2':
+            recon_loss = F.mse_loss(recon, seq, reduction = 'none')
 
         mask = lens_to_mask(lens, max_len = seq_len) if exists(lens) else None
 

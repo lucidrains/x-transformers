@@ -1834,9 +1834,14 @@ def test_softclamp_ff():
     loss = logits.sum()
     loss.backward()
 
+@param('loss_type', ('l1', 'l2'))
 @param('has_lens', (False, True))
 @param('bottleneck_type', ('deterministic', 'variational'))
-def test_continuous_autoencoder(has_lens, bottleneck_type):
+def test_continuous_autoencoder(
+    loss_type,
+    has_lens,
+    bottleneck_type
+):
     from x_transformers.continuous_autoencoder import ContinuousTransformerAutoencoder
 
     model = ContinuousTransformerAutoencoder(
@@ -1846,6 +1851,7 @@ def test_continuous_autoencoder(has_lens, bottleneck_type):
         max_seq_len = 64,
         dim_latent = 256,
         bottleneck_type = bottleneck_type,
+        loss_type = loss_type,
         deterministic_bottleneck_kwargs = dict(activation = nn.Tanh())
     )
 
