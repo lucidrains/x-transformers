@@ -2544,7 +2544,7 @@ class AttentionLayers(Module):
         pre_norm = True,
         pre_norm_has_final_norm = True,
         pre_and_post_norm = False,
-        attn_aggregated_residuals = False,
+        attn_aggregated_residuals = False, # https://www.youtube.com/watch?v=iw1VF8HOCrk
         attn_residuals_last_output_as_query = False,
         attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
