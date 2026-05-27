@@ -82,6 +82,7 @@ class ContinuousTransformerAutoencoder(Module):
         enc_depth,
         dec_depth,
         max_seq_len,
+        dim_input = None,
         dim_latent = None,
         bottleneck: Module | None = None,
         bottleneck_type: Literal['deterministic', 'variational'] = 'deterministic',
@@ -96,11 +97,13 @@ class ContinuousTransformerAutoencoder(Module):
         **kwargs
     ):
         super().__init__()
+        dim_input = default(dim_input, dim)
         dim_latent = default(dim_latent, dim)
 
         self.encoder = ContinuousTransformerWrapper(
-            dim_in = dim,
+            dim_in = dim_input,
             max_seq_len = max_seq_len,
+            use_identity_if_same_dim = True,
             attn_layers = Encoder(
                 dim = dim,
                 depth = enc_depth,
@@ -126,9 +129,10 @@ class ContinuousTransformerAutoencoder(Module):
         )
 
         self.decoder = ContinuousTransformerWrapper(
-            dim_in = dim,
-            dim_out = dim,
+            dim_in = dim_input,
+            dim_out = dim_input,
             max_seq_len = max_seq_len,
+            use_identity_if_same_dim = True,
             attn_layers = Decoder(
                 dim = dim,
                 depth = dec_depth,

@@ -77,6 +77,7 @@ class ContinuousTransformerWrapper(Module):
         scaled_sinu_pos_emb = False,
         average_pool_embed = False,
         probabilistic = False,
+        use_identity_if_same_dim = False,
     ):
         super().__init__()
         dim = attn_layers.dim
@@ -118,13 +119,17 @@ class ContinuousTransformerWrapper(Module):
         assert not (exists(dim_in) and exists(project_in)), 'either `dim_in` or `project_in` can be passed in, but not both'
         assert not (exists(dim_out) and exists(project_out)), 'either `dim_out` or `project_out` can be passed in, but not both'
 
-        self.project_in = default(project_in, lambda: nn.Linear(dim_in, dim, bias = False) if exists(dim_in) else nn.Identity())
+        has_project_in = exists(dim_in) and (not use_identity_if_same_dim or dim_in != dim)
+        self.project_in = default(project_in, lambda: nn.Linear(dim_in, dim, bias = False) if has_project_in else nn.Identity())
 
         # output is multipled by 2 for outputting mean and log variance
 
         self.probabilistic = probabilistic
 
-        self.project_out = default(project_out, lambda: nn.Linear(dim, dim_out * (2 if probabilistic else 1), bias = False) if exists(dim_out) else nn.Identity())
+        dim_out_with_prob = (dim_out * (2 if probabilistic else 1)) if exists(dim_out) else None
+        has_project_out = exists(dim_out) and (not use_identity_if_same_dim or dim_out_with_prob != dim)
+
+        self.project_out = default(project_out, lambda: nn.Linear(dim, dim_out_with_prob, bias = False) if has_project_out else nn.Identity())
 
         # can cache kv
 
