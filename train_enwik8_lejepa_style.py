@@ -47,7 +47,9 @@ def train(
     run_name = 'gpt-lejepa',
     cpu = False,
     sigreg_loss_weight = 0.05,
-    frac_gradient = 0.
+    frac_gradient = 0.,
+    predict_next_embed_with_action = True,
+    predict_next_embed_no_action = True
 ):
     accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
@@ -62,7 +64,7 @@ def train(
             max_seq_len = seq_len,
             attn_layers = Decoder(
                 dim = 512,
-                depth = 6,
+                depth = 8,
                 heads = 8,
                 rotary_pos_emb = True,
                 pre_norm_has_final_norm = False
@@ -70,7 +72,9 @@ def train(
         ),
         dim = 512,
         sigreg_loss_weight = sigreg_loss_weight,
-        frac_gradient = frac_gradient
+        frac_gradient = frac_gradient,
+        predict_next_embed_with_action = predict_next_embed_with_action,
+        predict_next_embed_no_action = predict_next_embed_no_action
     )
 
     # prepare enwik8 data
@@ -121,16 +125,19 @@ def train(
         model.train()
 
         for _ in range(gradient_accumulate_every):
-            loss, (ce_loss, l2_loss, sreg_loss) = model(next(train_loader), return_loss_breakdown = True)
+            loss, (ce_loss, l2_loss, l2_no_action_loss, sreg_loss) = model(next(train_loader), return_loss_breakdown = True)
+
+        if exists(gradient_accumulate_every):
             accelerator.backward(loss / gradient_accumulate_every)
 
-        print(f'training loss: {loss.item():.4f} | ce: {ce_loss.item():.4f} | l2: {l2_loss.item():.4f} | sigreg: {sreg_loss.item():.4f}')
+        print(f'training loss: {loss.item():.4f} | ce: {ce_loss.item():.4f} | l2: {l2_loss.item():.4f} | l2 (no action): {l2_no_action_loss.item():.4f} | sigreg: {sreg_loss.item():.4f}')
 
         if accelerator.is_main_process:
             wandb.log(dict(
                 loss = loss.item(),
                 ce_loss = ce_loss.item(),
                 l2_loss = l2_loss.item(),
+                l2_no_action_loss = l2_no_action_loss.item(),
                 sigreg_loss = sreg_loss.item()
             ))
 
@@ -141,14 +148,15 @@ def train(
         if divisible_by(i, validate_every):
             model.eval()
             with torch.no_grad():
-                loss, (ce_loss, l2_loss, sreg_loss) = model(next(val_loader), return_loss_breakdown = True)
-                print(f'validation loss: {loss.item():.4f} | ce: {ce_loss.item():.4f} | l2: {l2_loss.item():.4f} | sigreg: {sreg_loss.item():.4f}')
+                loss, (ce_loss, l2_loss, l2_no_action_loss, sreg_loss) = model(next(val_loader), return_loss_breakdown = True)
+                print(f'validation loss: {loss.item():.4f} | ce: {ce_loss.item():.4f} | l2: {l2_loss.item():.4f} | l2 (no action): {l2_no_action_loss.item():.4f} | sigreg: {sreg_loss.item():.4f}')
 
                 if accelerator.is_main_process:
                     wandb.log(dict(
                         valid_loss = loss.item(),
                         valid_ce_loss = ce_loss.item(),
                         valid_l2_loss = l2_loss.item(),
+                        valid_l2_no_action_loss = l2_no_action_loss.item(),
                         valid_sigreg_loss = sreg_loss.item()
                     ))
 

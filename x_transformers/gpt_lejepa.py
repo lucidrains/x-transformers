@@ -13,6 +13,7 @@ from einops import rearrange
 from x_transformers import Decoder, TransformerWrapper, RMSNorm
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 from torch_einops_utils import lens_to_mask
+from torch_einops_utils.nn import Sequential
 
 # helpers
 
@@ -71,6 +72,9 @@ class LatentAutoregressive(Module):
         ),
         frac_gradient = 0.,
         predict_next_cosine_sim = True,
+        predict_next_embed_with_action = True,
+        predict_next_embed_no_action = True,
+        ce_probe_module = None, # i.e. extra transformer blocks
         ignore_index = -100,
         pad_value = 0
     ):
@@ -85,11 +89,19 @@ class LatentAutoregressive(Module):
         self.frac_gradient = frac_gradient
         self.predict_next_cosine_sim = predict_next_cosine_sim
 
+        assert predict_next_embed_with_action or predict_next_embed_no_action, 'at least one prediction head must be turned on'
+
+        self.predict_next_embed_with_action = predict_next_embed_with_action
+        self.predict_next_embed_no_action = predict_next_embed_no_action
+
+        self.register_buffer('zero', torch.tensor(0.), persistent = False)
+
         num_tokens = net.num_tokens
 
         # cross entropy linear probe - mlp on detached embeddings
 
-        net.to_logits = nn.Sequential(
+        net.to_logits = Sequential(
+            ce_probe_module,
             RMSNorm(dim),
             nn.Linear(dim, dim * 2),
             nn.LeakyReLU(),
@@ -99,12 +111,23 @@ class LatentAutoregressive(Module):
 
         # predict next embed given (embed, action)
 
-        self.to_next_embed_pred = nn.Sequential(
-            RMSNorm(dim * 2),
-            nn.Linear(dim * 2, dim * 2),
-            nn.LeakyReLU(),
-            nn.Linear(dim * 2, dim)
-        )
+        if predict_next_embed_with_action:
+            self.to_next_embed_pred = Sequential(
+                RMSNorm(dim * 2),
+                nn.Linear(dim * 2, dim * 2),
+                nn.LeakyReLU(),
+                nn.Linear(dim * 2, dim)
+            )
+
+        # predict next embed given ONLY embed (no action)
+
+        if predict_next_embed_no_action:
+            self.to_next_embed_no_action_pred = Sequential(
+                RMSNorm(dim),
+                nn.Linear(dim, dim * 2),
+                nn.LeakyReLU(),
+                nn.Linear(dim * 2, dim)
+            )
 
     def forward(
         self,
@@ -144,19 +167,35 @@ class LatentAutoregressive(Module):
 
         # l2 loss - predict next representation from current representation and action token
 
-        with torch.no_grad():
-            action_embed = self.net.token_emb(target)
-            target_embed = embed[:, 1:]
+        l2_loss = self.zero
+        l2_no_action_loss = self.zero
 
-        pred_input = torch.cat((embed_prev, action_embed), dim = -1)
-        pred_next_embed = self.to_next_embed_pred(pred_input)
+        target_embed = embed[:, 1:]
 
         if self.predict_next_cosine_sim:
-            pred_next_embed = l2norm(pred_next_embed)
             target_embed = l2norm(target_embed)
 
-        l2_loss = F.mse_loss(pred_next_embed, target_embed, reduction = 'none')
-        l2_loss = l2_loss[mask].mean()
+        if self.predict_next_embed_with_action:
+            with torch.no_grad():
+                action_embed = self.net.token_emb(target)
+
+            pred_input = torch.cat((embed_prev, action_embed), dim = -1)
+            pred_next_embed = self.to_next_embed_pred(pred_input)
+
+            if self.predict_next_cosine_sim:
+                pred_next_embed = l2norm(pred_next_embed)
+
+            l2_loss = F.mse_loss(pred_next_embed, target_embed, reduction = 'none')
+            l2_loss = l2_loss[mask].mean()
+
+        if self.predict_next_embed_no_action:
+            pred_next_embed_no_action = self.to_next_embed_no_action_pred(embed_prev)
+
+            if self.predict_next_cosine_sim:
+                pred_next_embed_no_action = l2norm(pred_next_embed_no_action)
+
+            l2_no_action_loss = F.mse_loss(pred_next_embed_no_action, target_embed, reduction = 'none')
+            l2_no_action_loss = l2_no_action_loss[mask].mean()
 
         # sigreg regularization on embeddings
 
@@ -165,10 +204,16 @@ class LatentAutoregressive(Module):
         # total
 
         lam = self.sigreg_loss_weight
-        total_loss = ce_loss + (1. - lam) * l2_loss + lam * sreg_loss
+
+        total_loss = (
+            ce_loss +
+            (1. - lam) * l2_loss +
+            (1. - lam) * l2_no_action_loss +
+            lam * sreg_loss
+        )
 
         if return_loss_breakdown:
-            return total_loss, (ce_loss, l2_loss, sreg_loss)
+            return total_loss, (ce_loss, l2_loss, l2_no_action_loss, sreg_loss)
 
         return total_loss
 
