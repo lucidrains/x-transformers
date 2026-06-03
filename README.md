@@ -2697,4 +2697,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{balestriero2025lejepaprovablescalableselfsupervised,
+    title   = {LeJEPA: Provable and Scalable Self-Supervised Learning Without the Heuristics},
+    author  = {Randall Balestriero and Yann LeCun},
+    year    = {2025},
+    eprint  = {2511.08544},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2511.08544},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
