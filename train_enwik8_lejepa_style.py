@@ -47,9 +47,12 @@ def train(
     run_name = 'gpt-lejepa',
     cpu = False,
     sigreg_loss_weight = 0.05,
+    l2_loss_weight = 1.,
     frac_gradient = 0.,
+    predictor_input_hiddens_index = -1,
     predict_next_embed_with_action = True,
-    predict_next_embed_no_action = True
+    predict_next_embed_no_action = True,
+    detach_target = False
 ):
     accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
@@ -72,9 +75,12 @@ def train(
         ),
         dim = 512,
         sigreg_loss_weight = sigreg_loss_weight,
+        l2_loss_weight = l2_loss_weight,
         frac_gradient = frac_gradient,
+        predictor_input_hiddens_index = predictor_input_hiddens_index,
         predict_next_embed_with_action = predict_next_embed_with_action,
-        predict_next_embed_no_action = predict_next_embed_no_action
+        predict_next_embed_no_action = predict_next_embed_no_action,
+        detach_target = detach_target
     )
 
     # prepare enwik8 data

@@ -65,6 +65,7 @@ class LatentAutoregressive(Module):
         *,
         dim,
         sigreg_loss_weight = 0.05,
+        l2_loss_weight = 1.,
         sigreg_loss_kwargs = dict(
             num_slices = 1024,
             domain = (-5, 5),
@@ -72,8 +73,10 @@ class LatentAutoregressive(Module):
         ),
         frac_gradient = 0.,
         predict_next_cosine_sim = True,
+        predictor_input_hiddens_index = -1,
         predict_next_embed_with_action = True,
-        predict_next_embed_no_action = True,
+        predict_next_embed_no_action = False,
+        detach_target = False,
         ce_probe_module = None, # i.e. extra transformer blocks
         ignore_index = -100,
         pad_value = 0
@@ -85,14 +88,17 @@ class LatentAutoregressive(Module):
         self.pad_value = pad_value
 
         self.sigreg_loss_weight = sigreg_loss_weight
+        self.l2_loss_weight = l2_loss_weight
         self.sigreg_loss_kwargs = sigreg_loss_kwargs
         self.frac_gradient = frac_gradient
         self.predict_next_cosine_sim = predict_next_cosine_sim
+        self.predictor_input_hiddens_index = predictor_input_hiddens_index
 
         assert predict_next_embed_with_action or predict_next_embed_no_action, 'at least one prediction head must be turned on'
 
         self.predict_next_embed_with_action = predict_next_embed_with_action
         self.predict_next_embed_no_action = predict_next_embed_no_action
+        self.detach_target = detach_target
 
         self.register_buffer('zero', torch.tensor(0.), persistent = False)
 
@@ -112,6 +118,8 @@ class LatentAutoregressive(Module):
         # predict next embed given (embed, action)
 
         if predict_next_embed_with_action:
+            self.action_emb = nn.Embedding(num_tokens, dim)
+
             self.to_next_embed_pred = Sequential(
                 RMSNorm(dim * 2),
                 nn.Linear(dim * 2, dim * 2),
@@ -152,6 +160,12 @@ class LatentAutoregressive(Module):
         )
 
         embed_prev = embed[:, :-1]
+
+        if exists(self.predictor_input_hiddens_index):
+            embed_prev_lower = cache.hiddens[self.predictor_input_hiddens_index][:, :-1]
+        else:
+            embed_prev_lower = embed_prev
+
         mask = target != ignore_index
 
         # cross entropy loss on detached embeddings (linear probe)
@@ -172,14 +186,16 @@ class LatentAutoregressive(Module):
 
         target_embed = embed[:, 1:]
 
+        if self.detach_target:
+            target_embed = target_embed.detach()
+
         if self.predict_next_cosine_sim:
             target_embed = l2norm(target_embed)
 
         if self.predict_next_embed_with_action:
-            with torch.no_grad():
-                action_embed = self.net.token_emb(target)
+            action_embed = self.action_emb(target)
 
-            pred_input = torch.cat((embed_prev, action_embed), dim = -1)
+            pred_input = torch.cat((embed_prev_lower, action_embed), dim = -1)
             pred_next_embed = self.to_next_embed_pred(pred_input)
 
             if self.predict_next_cosine_sim:
@@ -189,7 +205,7 @@ class LatentAutoregressive(Module):
             l2_loss = l2_loss[mask].mean()
 
         if self.predict_next_embed_no_action:
-            pred_next_embed_no_action = self.to_next_embed_no_action_pred(embed_prev)
+            pred_next_embed_no_action = self.to_next_embed_no_action_pred(embed_prev_lower)
 
             if self.predict_next_cosine_sim:
                 pred_next_embed_no_action = l2norm(pred_next_embed_no_action)
@@ -201,14 +217,18 @@ class LatentAutoregressive(Module):
 
         sreg_loss = self.sigreg_loss(embed_prev[mask], **self.sigreg_loss_kwargs)
 
+        if exists(self.predictor_input_hiddens_index):
+            sreg_loss_lower = self.sigreg_loss(embed_prev_lower[mask], **self.sigreg_loss_kwargs)
+            sreg_loss = (sreg_loss + sreg_loss_lower) / 2
+
         # total
 
         lam = self.sigreg_loss_weight
 
         total_loss = (
             ce_loss +
-            (1. - lam) * l2_loss +
-            (1. - lam) * l2_no_action_loss +
+            (1. - lam) * l2_loss * self.l2_loss_weight +
+            (1. - lam) * l2_no_action_loss * self.l2_loss_weight +
             lam * sreg_loss
         )
 
