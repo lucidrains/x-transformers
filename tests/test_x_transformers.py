@@ -1868,3 +1868,30 @@ def test_continuous_autoencoder(
     latents = model.encode(x, lens = lens)
 
     assert latents.shape == (2, 256)
+
+@param('attn_sigmoid', (False, True))
+def test_inverted_cross_attn(attn_sigmoid):
+    from x_transformers import CrossAttender
+
+    cross_attender = CrossAttender(
+        dim = 512,
+        cross_attn_dim_context = 256,
+        depth = 3,
+        heads = 8,
+        cross_attn_inverted_attention = (True, False, True),
+        cross_attn_sigmoid = attn_sigmoid
+    )
+
+    queries = torch.randn(2, 64, 512)
+    context = torch.randn(2, 128, 256)
+
+    # random masks
+    mask = torch.ones(2, 64).bool()
+    mask[:, 60:] = False
+
+    context_mask = torch.ones(2, 128).bool()
+    context_mask[:, 120:] = False
+
+    out = cross_attender(queries, context = context, mask = mask, context_mask = context_mask)
+
+    assert out.shape == (2, 64, 512)

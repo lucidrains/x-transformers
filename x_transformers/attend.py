@@ -45,6 +45,9 @@ def at_most_one_of(*bools):
 def compact(arr):
     return [*filter(exists, arr)]
 
+def l1norm(t, dim = -1, eps = 1e-8):
+    return F.normalize(t, p = 1, dim = dim, eps = eps)
+
 @torch.jit.script
 def softclamp(t: Tensor, value: float):
     return (t / value).tanh() * value
@@ -121,11 +124,11 @@ def qk_l2_dist_squared(q, k):
 
 # one-hot straight through softmax
 
-def one_hot_straight_through(logits, temperature = 1.):
-    one_hot_indices = logits.argmax(dim = -1, keepdim = True)
-    one_hot = torch.zeros_like(logits).scatter(-1, one_hot_indices, 1.)
+def one_hot_straight_through(logits, temperature = 1., dim = -1):
+    one_hot_indices = logits.argmax(dim = dim, keepdim = True)
+    one_hot = torch.zeros_like(logits).scatter(dim, one_hot_indices, 1.)
 
-    soft_attn = (logits / temperature).softmax(dim = -1)
+    soft_attn = (logits / temperature).softmax(dim = dim)
     return one_hot + soft_attn - soft_attn.detach()
 
 # sparse topk attention - only keep topk attn logits for softmax
@@ -135,20 +138,24 @@ def sparse_topk_attn(
     logits,
     sparse_topk,
     temperature = 1.,
-    straight_through = False
+    straight_through = False,
+    dim = -1
 ):
     orig_logits = logits
 
     mask_value = -torch.finfo(logits.dtype).max
-    top_values, _ = logits.topk(sparse_topk, dim = -1)
-    sparse_topk_mask = (logits >= top_values[..., -1:]) & (logits > mask_value)
+    top_values, _ = logits.topk(sparse_topk, dim = dim)
+
+    # build a mask dynamically across the specific dim
+    sparse_topk_mask = (logits >= top_values.select(dim, -1).unsqueeze(dim)) & (logits > mask_value)
+
     logits = logits.masked_fill(~sparse_topk_mask, mask_value)
-    topk_attn = logits.softmax(dim = -1)
+    topk_attn = logits.softmax(dim = dim)
 
     if not straight_through:
         return topk_attn
 
-    soft_attn = (orig_logits / temperature).softmax(dim = -1)
+    soft_attn = (orig_logits / temperature).softmax(dim = dim)
     return topk_attn.detach() + soft_attn - soft_attn.detach()
 
 # functions for creating causal mask
@@ -195,6 +202,7 @@ class Attend(Module):
         hard = False,
         cope = None,
         onnxable = False,
+        inverted_attention = False,
         sdp_kwargs: dict = dict(
             enable_flash = True,
             enable_math = True,
@@ -217,21 +225,25 @@ class Attend(Module):
         assert not (flash and sigmoid), 'sigmoid attention not available for flash'
         assert not (flash and hard), 'hard attention not available for flash'
         assert not (flash and is_sparse_topk_attn), 'topk attention not available for flash'
+        assert not (flash and inverted_attention), 'flash attention not compatible with inverted attention'
 
         assert at_most_one_of(sigmoid, hard, l2_distance, gumbel_softmax, is_sparse_topk_attn)
+
+        self.inverted_attention = inverted_attention
+        attn_dim = -2 if inverted_attention else -1
 
         if exists(custom_attn_fn):
             self.attn_fn = custom_attn_fn
         elif sigmoid:
             self.attn_fn = F.sigmoid
         elif hard:
-            self.attn_fn = one_hot_straight_through
+            self.attn_fn = partial(one_hot_straight_through, dim = attn_dim)
         elif is_sparse_topk_attn:
-            self.attn_fn = partial(sparse_topk_attn, sparse_topk = sparse_topk, straight_through = sparse_topk_straight_through)
+            self.attn_fn = partial(sparse_topk_attn, sparse_topk = sparse_topk, straight_through = sparse_topk_straight_through, dim = attn_dim)
         elif gumbel_softmax:
-            self.attn_fn = partial(F.gumbel_softmax, dim = -1, tau = gumbel_softmax_temp, hard = gumbel_softmax_hard)
+            self.attn_fn = partial(F.gumbel_softmax, dim = attn_dim, tau = gumbel_softmax_temp, hard = gumbel_softmax_hard)
         else:
-            softmax_fn = partial(F.softmax, dim = -1)
+            softmax_fn = partial(F.softmax, dim = attn_dim)
             self.attn_fn = partial(softmax_fn, dtype = torch.float32) if not qk_norm else softmax_fn
 
         # dropouts
@@ -338,13 +350,10 @@ class Attend(Module):
         q, k, v,
         mask = None,
         attn_bias = None,
-        flash_pack_seq_kwargs = None, # https://github.com/Dao-AILab/flash-attention/blob/v2.8.3/flash_attn/flash_attn_interface.py#L1370
+        flash_pack_seq_kwargs = None,
         causal = None,
     ):
         batch, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
-
-        # Recommended for multi-query single-key-value attention by Tri Dao
-        # kv shape torch.Size([1, 512, 64]) -> torch.Size([1, 8, 512, 64])
 
         if k.ndim == 3:
             k = repeat(k, 'b ... -> b h ...', h = q.shape[1])
@@ -363,14 +372,9 @@ class Attend(Module):
             q = cat((2 * q, q_norm_sq), dim = -1)
             q = F.pad(q, (0, 1), value = -1.)
 
-        # handle scale - by default they scale by dim_head ** -0.5, but need to take care if using cosine sim attention
-
         if exists(self.scale):
             default_scale = q.shape[-1] ** -0.5
             q = q * (self.scale / default_scale)
-
-        # Check if mask exists and expand to compatible shape
-        # The mask is B L, so it would have to be expanded to B H N L
 
         causal = default(causal, self.causal)
 
@@ -434,24 +438,24 @@ class Attend(Module):
             mask = attn_bias
 
         # pytorch 2.0 flash attn: q, k, v, mask, dropout, causal, softmax_scale
+
         if self.flash_pack_seq:
-            assert exists(flash_pack_seq_kwargs), "flash_pack_seq_kwargs must be provided when self.flash_pack_seq is True"
-            cu_seqlens_k = flash_pack_seq_kwargs.get('cu_seqlens_k', None)
-            cu_seqlens_q = flash_pack_seq_kwargs.get('cu_seqlens_q', None)
-            assert q.shape[0] == 1 and k.shape[0] == 1 and v.shape[0] == 1, f"batch size must be 1 for block masking. Shape was q={q.shape}, k={k.shape}, v={v.shape}"
-            assert not exists(mask) and exists(cu_seqlens_q) and exists(cu_seqlens_k), "mask cannot be passed with cu_seqlens for block masking"
-            assert cu_seqlens_q.shape == cu_seqlens_k.shape and cu_seqlens_q.ndim == 1 and not cu_seqlens_q.is_floating_point() and not cu_seqlens_k.is_floating_point() and (cu_seqlens_q.diff() > 0).all() and (cu_seqlens_k.diff() > 0).all(), "cu_seqlens_q/k should be same-length 1D cumulative sequence lengths for block masking"
-            assert not causal or (cu_seqlens_q == cu_seqlens_k).all(), "causal attention with different cu_seqlens for q and k not supported"
-            # efficient packed sequences flash attentino masking
-            att = self.flash_attn_varlen_func(
-                q = rearrange(q, '1 h t d ->t h d'),
-                k = rearrange(k, '1 h t d ->t h d'),
-                v = rearrange(v, '1 h t d ->t h d'),
-                causal=causal,
-                dropout_p=self.dropout if self.training else 0.,
+            assert exists(flash_pack_seq_kwargs), 'flash_pack_seq_kwargs must be provided'
+            assert not exists(mask), 'mask cannot be passed for block masking'
+            assert q.shape[0] == k.shape[0] == v.shape[0] == 1, 'batch size must be 1 for sequence packing'
+
+            dropout_p = self.dropout if self.training else 0.
+
+            q, k, v = tuple(rearrange(t, '1 h n d -> n h d') for t in (q, k, v))
+
+            out = self.flash_attn_varlen_func(
+                q, k, v,
+                causal = causal,
+                dropout_p = dropout_p,
                 **flash_pack_seq_kwargs
             )
-            out = rearrange(att, 't h d -> 1 h t d')
+
+            out = rearrange(out, 'n h d -> 1 h n d')
         else:
             with self.sdp_context_manager():
                 out = F.scaled_dot_product_attention(
@@ -475,6 +479,7 @@ class Attend(Module):
         attn_bias = None,
         prev_attn = None,
         attn_delta = None,
+        row_mask = None,
         flash_pack_seq_kwargs = None,
         causal = None,
     ):
@@ -562,8 +567,12 @@ class Attend(Module):
 
         mask_value = -torch.finfo(sim.dtype).max
 
-        if exists(mask):
-            sim = sim.masked_fill(~mask, mask_value)
+        attn_mask = mask
+        if self.inverted_attention:
+            attn_mask = rearrange(row_mask, 'b i -> b 1 i 1') if exists(row_mask) else None
+
+        if exists(attn_mask):
+            sim = sim.masked_fill(~attn_mask, mask_value)
 
         if causal:
             causal_mask = self.create_causal_mask(i, j, device = device)
@@ -593,6 +602,12 @@ class Attend(Module):
         pre_softmax_attn = sim
 
         attn = self.attn_fn(sim)
+
+        if self.inverted_attention:
+            if exists(mask):
+                attn = attn.masked_fill(~mask, 0.)
+
+            attn = l1norm(attn)
 
         attn = attn.type(dtype)
 

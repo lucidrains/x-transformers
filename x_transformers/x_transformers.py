@@ -1735,6 +1735,7 @@ class Attention(Module):
         dim_latent_kv = None,
         latent_rope_subheads = None,
         onnxable = False,
+        inverted_attention = False,
         attend_sdp_kwargs: dict = dict(
             enable_flash = True,
             enable_math = True,
@@ -1929,6 +1930,7 @@ class Attention(Module):
             logit_softclamp_value = logit_softclamp_value,
             cope = cope,
             onnxable = onnxable,
+            inverted_attention = inverted_attention,
             sdp_kwargs = attend_sdp_kwargs,
             flash_pack_seq=flash_pack_seq,
         )
@@ -2367,6 +2369,7 @@ class Attention(Module):
             attn_bias = attn_bias,
             prev_attn = prev_attn,
             attn_delta = attn_delta,
+            row_mask = mask,
             flash_pack_seq_kwargs = flash_pack_seq_kwargs,
             causal = causal,
         )
@@ -2818,6 +2821,7 @@ class AttentionLayers(Module):
         assert all([i < len(self.layer_types) for i in self.layers_execute_order])
 
         self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
+        self.num_cross_attn_layers = len(list(filter(equals('c'), layer_types)))
 
         # set the depth
 
@@ -2868,8 +2872,10 @@ class AttentionLayers(Module):
         self.add_value_residual = add_value_residual
 
         is_first_self_attn = True
-        is_first_cross_attn = True
         learned_value_residual_mix &= add_value_residual
+
+        attn_inverted_attention_iter = iter(cast_tuple(attn_kwargs.pop('inverted_attention', False), self.num_attn_layers))
+        cross_attn_inverted_attention_iter = iter(cast_tuple(cross_attn_kwargs.pop('inverted_attention', False), self.num_cross_attn_layers))
 
         # iterate and construct layers
 
@@ -2890,12 +2896,11 @@ class AttentionLayers(Module):
             if layer_type == 'a':
                 self_attn_learned_value_residual = learned_value_residual_mix and not is_first_self_attn
 
-                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, **attn_kwargs)
+                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, inverted_attention = next(attn_inverted_attention_iter), **attn_kwargs)
                 is_first_self_attn = False
 
             elif layer_type == 'c':
-                layer = Attention(dim, heads = heads, **{**attn_kwargs, **cross_attn_kwargs})
-                is_first_cross_attn = False
+                layer = Attention(dim, heads = heads, inverted_attention = next(cross_attn_inverted_attention_iter), **{**attn_kwargs, **cross_attn_kwargs})
 
             elif layer_type == 'f':
                 layer = FeedForward(dim, **ff_kwargs)

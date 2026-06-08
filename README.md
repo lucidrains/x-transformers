@@ -1852,6 +1852,25 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
+@inproceedings{Locatello2020SlotAttention,
+    title     = {Object-Centric Learning with Slot Attention},
+    author    = {Francesco Locatello and Dirk Weissenborn and Thomas Unterthiner and Aravindh Mahendran and Georg Heigold and Jakob Uszkoreit and Alexey Dosovitskiy and Thomas Kipf},
+    booktitle = {Advances in Neural Information Processing Systems},
+    year      = {2020}
+}
+```
+
+```bibtex
+@inproceedings{wu2023invertedattention,
+    title   = {Inverted-Attention Transformers can Learn Object Representations: Insights from Slot Attention},
+    author  = {Yi-Fu Wu and Klaus Greff and Gamaleldin Fathy Elsayed and Michael Curtis Mozer and Thomas Kipf and Sjoerd van Steenkiste},
+    booktitle = {UniReps:  the First Workshop on Unifying Representations in Neural Models},
+    year    = {2023},
+    url     = {https://openreview.net/forum?id=WgQZNoQ5AB}
+}
+```
+
+```bibtex
 @misc{so2021primer,
     title   = {Primer: Searching for Efficient Transformers for Language Modeling},
     author  = {David R. So and Wojciech Mańke and Hanxiao Liu and Zihang Dai and Noam Shazeer and Quoc V. Le},
