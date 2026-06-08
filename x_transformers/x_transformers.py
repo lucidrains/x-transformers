@@ -2874,8 +2874,17 @@ class AttentionLayers(Module):
         is_first_self_attn = True
         learned_value_residual_mix &= add_value_residual
 
-        attn_inverted_attention_iter = iter(cast_tuple(attn_kwargs.pop('inverted_attention', False), self.num_attn_layers))
-        cross_attn_inverted_attention_iter = iter(cast_tuple(cross_attn_kwargs.pop('inverted_attention', False), self.num_cross_attn_layers))
+        attn_kwargs.pop('inverted_attention', None)
+
+        # inverted attention
+        # https://openreview.net/forum?id=WgQZNoQ5AB
+
+        cross_attn_inverted_attentions = cast_tuple(cross_attn_kwargs.pop('inverted_attention', False), self.num_cross_attn_layers)
+
+        if causal and any(cross_attn_inverted_attentions):
+            logger.warning('causal attention is not compatible with inverted cross attention')
+
+        cross_attn_inverted_attention_iter = iter(cross_attn_inverted_attentions)
 
         # iterate and construct layers
 
@@ -2896,7 +2905,7 @@ class AttentionLayers(Module):
             if layer_type == 'a':
                 self_attn_learned_value_residual = learned_value_residual_mix and not is_first_self_attn
 
-                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, inverted_attention = next(attn_inverted_attention_iter), **attn_kwargs)
+                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, **attn_kwargs)
                 is_first_self_attn = False
 
             elif layer_type == 'c':
@@ -4064,6 +4073,8 @@ class TransformerWrapper(Module):
 
             looped_inference_and_is_prompt = looped_inference and not exists(cache) and looped_num_tokens > 1
 
+            assert not (looped_inference and b > 1), 'looped inference does not support batch sizes greater than 1'
+
             # looped training
 
             all_pred_logits = []
@@ -4072,7 +4083,6 @@ class TransformerWrapper(Module):
             # all intermediates gathered for special prompt recurrent kv cache handling
 
             all_intermediates = []
-
             # loop
 
             for i in range(max_looped_steps):
