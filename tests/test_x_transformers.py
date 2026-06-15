@@ -1895,3 +1895,76 @@ def test_inverted_cross_attn(attn_sigmoid):
     out = cross_attender(queries, context = context, mask = mask, context_mask = context_mask)
 
     assert out.shape == (2, 64, 512)
+
+def test_ttt_equivalency():
+    import copy
+    from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper, TTTModuleWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        max_mem_len = 512,
+        attn_layers = Decoder(
+            dim = 256,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    model_clone = copy.deepcopy(model)
+
+    wrapper_base = XLAutoregressiveWrapper(model)
+
+    wrapper_ttt = XLAutoregressiveWrapper(
+        model_clone,
+        ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
+        ttt_lr = 0.
+    )
+
+    # longer sequence to trigger inner ttt gradient updates
+
+    x = torch.randint(0, 256, (2, 1025))
+
+    loss_base = wrapper_base(x)
+    loss_ttt = wrapper_ttt(x)
+
+    assert torch.allclose(loss_base, loss_ttt, atol = 1e-5)
+
+    loss_base.backward()
+    loss_ttt.backward()
+
+    for (name_base, p_base), (name_ttt, p_ttt) in zip(model.named_parameters(), model_clone.named_parameters()):
+        assert exists(p_base.grad) and exists(p_ttt.grad)
+        assert torch.allclose(p_base.grad, p_ttt.grad, atol = 1e-4)
+
+    # test generate equivalency
+
+    prompt = x[:, :100]
+
+    torch.manual_seed(42)
+    out_base = wrapper_base.generate(prompt, 10, temperature = 0.)
+
+    torch.manual_seed(42)
+    out_ttt = wrapper_ttt.generate(prompt, 10, temperature = 0.)
+
+    assert torch.all(out_base == out_ttt)
+
+    # test that ttt > 0 actually changes the output
+
+    wrapper_ttt_actual = XLAutoregressiveWrapper(
+        copy.deepcopy(model),
+        ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
+        ttt_lr = 1.0
+    )
+
+    torch.manual_seed(42)
+    out_ttt_actual = wrapper_ttt_actual.generate(prompt, 10, temperature = 0.)
+
+    assert not torch.all(out_base == out_ttt_actual)
+
+    # test reset_all
+
+    TTTModuleWrapper.reset_all(wrapper_ttt_actual)
+
+    for wrapper in wrapper_ttt_actual.ttt_wrappers:
+        assert not exists(wrapper.batch_params)

@@ -2728,4 +2728,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{tandon2025endtoendtesttimetraininglong,
+    title   = {End-to-End Test-Time Training for Long Context},
+    author  = {Arnuv Tandon and Karan Dalal and Xinhao Li and Daniel Koceja and Marcel Rød and Sam Buchanan and Xiaolong Wang and Jure Leskovec and Sanmi Koyejo and Tatsunori Hashimoto and Carlos Guestrin and Jed McCaleb and Yejin Choi and Yu Sun},
+    year    = {2025},
+    eprint  = {2512.23675},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2512.23675},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
