@@ -16,7 +16,7 @@ import tqdm
 import gzip
 import numpy as np
 import torch
-import torch.optim as optim
+from torch.optim import Adam
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 import fire
@@ -27,6 +27,9 @@ from accelerate import Accelerator
 
 def exists(v):
     return v is not None
+
+def default(val, d):
+    return val if exists(val) else d
 
 def divisible_by(num, den):
     return (num % den) == 0
@@ -49,17 +52,20 @@ def train(
     learning_rate = 1e-4,
     validate_every = 100,
     generate_every = 500,
-    generate_length = 512,
+    generate_length = None,
     seq_len = 512,
     train_seq_len = 2048,
     e2e_ttt = False,
+    ttt_custom_loss = False,
     ttt_lr = 1e-3,
     ttt_wd = 0.0,
+    tbptt_steps = 2,
     track_experiment_online = False,
     run_name = 'xl-baseline',
     cpu = False
 ):
-    accelerator = Accelerator(cpu=cpu)
+    generate_length = default(generate_length, train_seq_len)
+    accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
 
     # instantiate GPT-like decoder model
@@ -79,16 +85,25 @@ def train(
     )
 
     ttt_module_paths = tuple()
+    custom_loss = None
     if e2e_ttt:
         # target the value projection of the last few layers, or just the last layer
         ttt_module_paths = ('attn_layers.layers.10.1.to_v',)
 
+        if ttt_custom_loss:
+            from x_transformers.xl_autoregressive_wrapper import TTTMetaLearningTargetKLLoss
+            custom_loss = TTTMetaLearningTargetKLLoss(dim = 512, num_classes = 256)
+
     model = XLAutoregressiveWrapper(
         model,
+        tbptt_steps = tbptt_steps,
         ttt_module_paths = ttt_module_paths,
         ttt_lr = ttt_lr,
-        ttt_wd = ttt_wd
+        ttt_wd = ttt_wd,
+        ttt_custom_loss_module = custom_loss
     )
+
+    optim = Adam(model.parameters(), lr=learning_rate)
 
     # prepare enwik8 data
 
@@ -117,9 +132,7 @@ def train(
     train_loader  = cycle(DataLoader(train_dataset, batch_size = batch_size, drop_last = True))
     val_loader    = cycle(DataLoader(val_dataset, batch_size = batch_size, drop_last = True))
 
-    # optimizer
-
-    optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # optimizer initialized above
 
     # experiment
 

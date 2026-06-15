@@ -1,8 +1,10 @@
+from __future__ import annotations
 from math import ceil
 from functools import reduce
 from contextlib import nullcontext
 
 import torch
+from torch import nn
 from torch.nn import Module
 import torch.nn.functional as F
 from torch.func import functional_call, vmap
@@ -16,6 +18,9 @@ from torch_einops_utils import masked_mean, mask_after
 
 def exists(val):
     return val is not None
+
+def default(val, d):
+    return val if exists(val) else d
 
 def is_empty(arr):
     return len(arr) == 0
@@ -57,6 +62,47 @@ class TTTModuleWrapper(Module):
 
         return vmap(call_single)(self.batch_params, *args)
 
+# custom TTT loss modules
+
+class TTTMetaLearningTargetKLLoss(Module):
+    def __init__(
+        self,
+        *,
+        dim,
+        num_classes,
+        depth = 1,
+        heads = 4,
+        dim_head = 64,
+        **kwargs
+    ):
+        super().__init__()
+        from x_transformers.x_transformers import Encoder
+
+        self.encoder = Encoder(
+            dim = dim,
+            depth = depth,
+            heads = heads,
+            attn_dim_head = dim_head,
+            **kwargs
+        )
+
+        self.to_prediction = nn.Linear(dim, num_classes)
+        self.to_meta_prediction = nn.Linear(dim, num_classes)
+
+    def forward(self, intermediates, mask = None):
+        hiddens = intermediates.last_layer_hiddens
+
+        pred = self.to_prediction(hiddens)
+
+        encoded = self.encoder(hiddens, mask = mask)
+        meta_pred = self.to_meta_prediction(encoded)
+
+        prob_earlier = pred.softmax(dim = -1)
+        log_prob_encoded = meta_pred.log_softmax(dim = -1)
+
+        loss = F.kl_div(log_prob_encoded, prob_earlier, reduction = 'none').sum(dim = -1)
+        return loss
+
 # xl autoregressive wrapper class
 
 class XLAutoregressiveWrapper(Module):
@@ -65,13 +111,16 @@ class XLAutoregressiveWrapper(Module):
         net,
         ignore_index = -100,
         pad_value = 0,
+        tbptt_steps = 1,
         ttt_module_paths = tuple(),
         ttt_lr = 1e-3,
-        ttt_wd = 0.01
+        ttt_wd = 0.01,
+        ttt_custom_loss_module: Module | None = None
     ):
         super().__init__()
         self.pad_value = pad_value
         self.ignore_index = ignore_index
+        self.tbptt_steps = tbptt_steps
 
         self.net = net
         self.max_seq_len = net.max_seq_len
@@ -80,12 +129,17 @@ class XLAutoregressiveWrapper(Module):
         self.ttt_lr = ttt_lr
         self.ttt_wd = ttt_wd
 
+        self.ttt_custom_loss_module = ttt_custom_loss_module
+
         self.ttt_wrappers = []
         for path in ttt_module_paths:
             mod = get_module_by_path(net, path)
             wrapper = TTTModuleWrapper(mod)
             set_module_by_path(net, path, wrapper)
             self.ttt_wrappers.append(wrapper)
+
+        if self.has_ttt:
+            assert tbptt_steps > 1, 'tbptt_steps must be greater than 1 if ttt is turned on'
 
     @property
     def has_ttt(self):
@@ -105,23 +159,30 @@ class XLAutoregressiveWrapper(Module):
         self,
         logits,        # (b n c)
         chunk_labels,  # (b n)
-        create_graph = False
+        create_graph = False,
+        intermediates = None
     ):
         if not self.has_ttt:
             return
 
         # compute loss
 
-        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
-        loss_t = loss_fn(
-            rearrange(logits, 'b n c -> b c n'),
-            chunk_labels,
-            ignore_index = self.ignore_index,
-            reduction = 'none'
-        )
-
         mask = chunk_labels != self.ignore_index
-        loss_t_per_batch = masked_mean(loss_t, mask)
+
+        if exists(self.ttt_custom_loss_module):
+            assert exists(intermediates), 'intermediates must be passed to update_ttt when using ttt_custom_loss_module'
+            loss_t = self.ttt_custom_loss_module(intermediates, mask = mask)
+            loss_t_per_batch = masked_mean(loss_t, mask) if loss_t.ndim > 1 else loss_t
+        else:
+            loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+            loss_t = loss_fn(
+                rearrange(logits, 'b n c -> b c n'),
+                chunk_labels,
+                ignore_index = self.ignore_index,
+                reduction = 'none'
+            )
+
+            loss_t_per_batch = masked_mean(loss_t, mask)
 
         all_batch_params = [
             param
@@ -187,19 +248,21 @@ class XLAutoregressiveWrapper(Module):
             self.init_ttt(batch)
 
             for idx, leading_tokens in enumerate(all_leading_tokens):
-                logits, mems = self.net(
+                logits, intermediates = self.net(
                     leading_tokens,
                     mems = mems,
                     return_mems = True,
+                    return_intermediates = True,
                     **kwargs
                 )
+                mems = intermediates.mems
 
                 if not self.has_ttt:
                     continue
 
                 curr_pos = idx * max_seq_len
                 chunk_labels = start_tokens[:, curr_pos + 1 : curr_pos + max_seq_len + 1]
-                self.update_ttt(logits, chunk_labels, create_graph = False)
+                self.update_ttt(logits, chunk_labels, create_graph = False, intermediates = intermediates)
 
         # test-time train on the remainder of the prompt
 
@@ -208,14 +271,16 @@ class XLAutoregressiveWrapper(Module):
                 remainder_x = remainder_tokens[:, :-1]
                 remainder_labels = remainder_tokens[:, 1:]
 
-                logits, _ = self.net(
+                logits, intermediates = self.net(
                     remainder_x,
                     mems = mems,
                     return_mems = True,
+                    return_intermediates = True,
                     **kwargs
                 )
+                mems = intermediates.mems
 
-                self.update_ttt(logits, remainder_labels, create_graph = False)
+                self.update_ttt(logits, remainder_labels, create_graph = False, intermediates = intermediates)
 
         # now start sampling from the current segment
 
@@ -306,13 +371,17 @@ class XLAutoregressiveWrapper(Module):
         with forward_context():
             for idx, (chunk, chunk_labels, loss_weight) in enumerate(zip(split_x, split_labels, loss_weights)):
                 is_last_chunk = (idx == num_chunks - 1)
+                should_detach = divisible_by(idx + 1, self.tbptt_steps)
 
-                logits, mems = self.net(
+                logits, intermediates = self.net(
                     chunk,
                     mems = mems,
                     return_mems = True,
+                    return_intermediates = True,
+                    detach_mems = should_detach,
                     **kwargs
                 )
+                mems = intermediates.mems
 
                 loss = loss_fn(
                     rearrange(logits, 'b n c -> b c n'),
@@ -329,6 +398,13 @@ class XLAutoregressiveWrapper(Module):
                 if is_last_chunk or not self.has_ttt:
                     continue
 
-                self.update_ttt(logits, chunk_labels, create_graph = self.training)
+                self.update_ttt(logits, chunk_labels, create_graph = self.training, intermediates = intermediates)
+
+                if should_detach:
+                    for wrapper in self.ttt_wrappers:
+                        wrapper.batch_params = {
+                            name: param.detach().requires_grad_(param.requires_grad)
+                            for name, param in wrapper.batch_params.items()
+                        }
 
         return total_loss

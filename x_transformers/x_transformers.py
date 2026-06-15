@@ -26,7 +26,7 @@ from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, reduce, pack, unpack
-from torch_einops_utils import masked_mean, pad_at_dim, safe_cat
+from torch_einops_utils import masked_mean, pad_at_dim, safe_cat, tree_map_tensor
 from torch_einops_utils.nn import Sequential, Lambda, Identity
 
 # einstein notation
@@ -3879,6 +3879,7 @@ class TransformerWrapper(Module):
         return_attn = False,
         mems = None,
         mem_masks = None,
+        detach_mems = True,
         recycle_steps = None,
         looped_steps = None,
         max_looped_steps = None,
@@ -4315,7 +4316,11 @@ class TransformerWrapper(Module):
         if return_mems:
             hiddens = intermediates.hiddens
             new_mems = [cat(pair, dim = -2) for pair in zip(mems, hiddens)] if exists(mems) else hiddens
-            new_mems = [t[..., -self.max_mem_len:, :].detach() for t in new_mems]
+
+            new_mems = [t[..., -self.max_mem_len:, :] for t in new_mems]
+
+            if detach_mems:
+                new_mems = tree_map_tensor(lambda t: t.detach(), new_mems)
 
             if not return_intermediates:
                 return out, new_mems
