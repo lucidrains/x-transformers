@@ -2031,3 +2031,33 @@ def test_ttt_custom_loss_optimization():
     prompt = x[:, :10]
     out = wrapper_ttt.generate(prompt, 5, temperature = 0.)
     assert out.shape == (2, 5)
+
+def test_ttt_sleep_phase():
+    from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper
+    from x_transformers import Decoder, TransformerWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 32,
+        max_mem_len = 32,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    wrapper_ttt = XLAutoregressiveWrapper(
+        model,
+        tbptt_steps = 100,
+        ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
+        ttt_lr = 1e-3
+    )
+
+    x = torch.randint(0, 256, (2, 65))
+
+    # Test dropout_mems and ttt_recurrent_steps
+    loss = wrapper_ttt(x, dropout_mems = True, ttt_recurrent_steps = 2)
+    loss.backward()
+
+    assert loss.ndim == 0

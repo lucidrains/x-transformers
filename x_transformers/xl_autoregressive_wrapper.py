@@ -344,8 +344,14 @@ class XLAutoregressiveWrapper(Module):
         self,
         x,
         mems = None,
+        dropout_mems = False,
+        ttt_recurrent_steps = 1,
         **kwargs
     ):
+        if ttt_recurrent_steps > 1:
+            # treating the ttt gradients as the fast weights
+            assert self.has_ttt, 'ttt must be turned on to use ttt_recurrent_steps'
+
         ignore_index, max_seq_len = self.ignore_index, self.max_seq_len
 
         x, labels = x[:, :-1], x[:, 1:]
@@ -373,32 +379,40 @@ class XLAutoregressiveWrapper(Module):
                 is_last_chunk = (idx == num_chunks - 1)
                 should_detach = divisible_by(idx + 1, self.tbptt_steps)
 
-                logits, intermediates = self.net(
-                    chunk,
-                    mems = mems,
-                    return_mems = True,
-                    return_intermediates = True,
-                    detach_mems = should_detach,
-                    **kwargs
-                )
-                mems = intermediates.mems
+                for recurrent_step in range(ttt_recurrent_steps):
+                    is_last_recurrent_step = (recurrent_step == ttt_recurrent_steps - 1)
 
-                loss = loss_fn(
-                    rearrange(logits, 'b n c -> b c n'),
-                    chunk_labels,
-                    ignore_index = ignore_index,
-                    reduction = 'none'
-                )
+                    passed_mems = None if dropout_mems else mems
 
-                mask = chunk_labels != ignore_index
-                loss_per_batch = masked_mean(loss, mask)
+                    logits, intermediates = self.net(
+                        chunk,
+                        mems = passed_mems,
+                        return_mems = True,
+                        return_intermediates = True,
+                        detach_mems = should_detach,
+                        **kwargs
+                    )
 
-                total_loss = total_loss + loss_per_batch.mean() * loss_weight
+                    if is_last_recurrent_step:
+                        mems = intermediates.mems
 
-                if is_last_chunk or not self.has_ttt:
-                    continue
+                    loss = loss_fn(
+                        rearrange(logits, 'b n c -> b c n'),
+                        chunk_labels,
+                        ignore_index = ignore_index,
+                        reduction = 'none'
+                    )
 
-                self.update_ttt(logits, chunk_labels, create_graph = self.training, intermediates = intermediates)
+                    mask = chunk_labels != ignore_index
+                    loss_per_batch = masked_mean(loss, mask)
+
+                    if is_last_recurrent_step:
+                        total_loss = total_loss + loss_per_batch.mean() * loss_weight
+
+                    if (is_last_chunk and is_last_recurrent_step) or not self.has_ttt:
+                        continue
+
+                    self.update_ttt(logits, chunk_labels, create_graph = self.training, intermediates = intermediates)
 
                 if should_detach:
                     for wrapper in self.ttt_wrappers:
