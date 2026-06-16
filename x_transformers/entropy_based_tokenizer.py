@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from itertools import zip_longest
 
 import torch
@@ -25,6 +26,43 @@ def calc_entropy_from_logits(logits):
     prob = logits.softmax(dim = -1)
     return -(prob * log(prob)).sum(dim = -1)
 
+def get_accumulated_threshold_mask(
+    entropies,
+    threshold,
+    ignore_entropy_below = 0.
+):
+    # https://www.nature.com/articles/s41467-026-73345-0
+
+    batch, seq_len, device = *entropies.shape, entropies.device
+
+    if ignore_entropy_below > 0.:
+        entropies = entropies.masked_fill(entropies < ignore_entropy_below, 0.)
+
+    cum_padded = F.pad(entropies.cumsum(dim = -1), (1, 0), value = 0.)
+
+    # find next threshold boundary
+
+    next_idx = torch.searchsorted(cum_padded, cum_padded + threshold)
+
+    # ensure strict progression
+
+    next_idx = torch.maximum(next_idx, torch.arange(seq_len + 1, device = device) + 1)
+
+    # absorbing state
+
+    next_idx = F.pad(next_idx, (0, 1), value = seq_len + 1)
+
+    reachable = torch.zeros((batch, seq_len + 2), dtype = torch.int32, device = device)
+    reachable[:, 0] = 1
+
+    # parallel pointer doubling
+
+    for _ in range(seq_len.bit_length()):
+        reachable.scatter_add_(1, next_idx, reachable.clone()).clamp_max_(1)
+        next_idx = next_idx.gather(1, next_idx)
+
+    return reachable[:, 1:-1].bool()
+
 # entropy based tokenizer applied in byte-latent transformer paper
 # they use a simple entropy threshold for segmenting a string into variable sized tokens
 
@@ -35,11 +73,18 @@ class EntropyBasedTokenizer(Module):
         self,
         decoder: Module,
         entropy_threshold: float,
+        accumulate_entropy: bool = False,
+        ignore_entropy_below: float = 0.,
         max_token_size: int | None = None
     ):
         super().__init__()
         self.decoder = decoder
         self.entropy_threshold = entropy_threshold
+        self.accumulate_entropy = accumulate_entropy
+
+        # when set to be equal to the entropy threshold (with accumulating entropy) it will recover the original non-accumulating behavior
+        assert ignore_entropy_below <= entropy_threshold, 'ignore_entropy_below must be lower than or equal to the entropy threshold'
+        self.ignore_entropy_below = ignore_entropy_below
 
         self.max_token_size = max_token_size
 
@@ -76,7 +121,16 @@ class EntropyBasedTokenizer(Module):
 
         # the mask for tokens that were of a sufficient surprise level
 
-        over_thres_mask = (entropies >= self.entropy_threshold) & mask
+        if self.accumulate_entropy:
+            over_thres_mask = get_accumulated_threshold_mask(
+                entropies,
+                self.entropy_threshold,
+                ignore_entropy_below = self.ignore_entropy_below
+            )
+        else:
+            over_thres_mask = entropies >= self.entropy_threshold
+
+        over_thres_mask &= mask
 
         # needed for selecting out indices at entropy threshold mask
 
