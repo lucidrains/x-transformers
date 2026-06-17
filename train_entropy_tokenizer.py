@@ -86,7 +86,7 @@ def train(
         ignore_entropy_below = ignore_entropy_below,
         max_token_size = 4
     )
-    
+
     model = AutoregressiveWrapper(model)
 
     # prepare enwik8 data

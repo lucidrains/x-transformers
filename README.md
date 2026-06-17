@@ -2740,4 +2740,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{huang2025llmjepalargelanguagemodels,
+    title   = {LLM-JEPA: Large Language Models Meet Joint Embedding Predictive Architectures},
+    author  = {Hai Huang and Yann LeCun and Randall Balestriero},
+    year    = {2025},
+    eprint  = {2509.14252},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL},
+    url     = {https://arxiv.org/abs/2509.14252},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

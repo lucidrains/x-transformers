@@ -52,7 +52,9 @@ def train(
     predictor_input_hiddens_index = -1,
     predict_next_embed_with_action = True,
     predict_next_embed_no_action = True,
-    detach_target = False
+    detach_target = False,
+    num_rollouts = 1,
+    rollout_loss_weights = None
 ):
     accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
@@ -80,7 +82,9 @@ def train(
         predictor_input_hiddens_index = predictor_input_hiddens_index,
         predict_next_embed_with_action = predict_next_embed_with_action,
         predict_next_embed_no_action = predict_next_embed_no_action,
-        detach_target = detach_target
+        detach_target = detach_target,
+        num_rollouts = num_rollouts,
+        rollout_loss_weights = rollout_loss_weights
     )
 
     # prepare enwik8 data
