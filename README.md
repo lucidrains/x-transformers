@@ -2752,4 +2752,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{teoh2026nextlatentpredictiontransformerslearn,
+    title   = {Next-Latent Prediction Transformers Learn Compact World Models},
+    author  = {Jayden Teoh and Manan Tomar and Kwangjun Ahn and Edward S. Hu and Tim Pearce and Pratyusha Sharma and Akshay Krishnamurthy and Riashat Islam and Alex Lamb and John Langford},
+    year    = {2026},
+    eprint  = {2511.05963},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2511.05963},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

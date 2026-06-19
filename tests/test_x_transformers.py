@@ -2061,3 +2061,30 @@ def test_ttt_sleep_phase():
     loss.backward()
 
     assert loss.ndim == 0
+
+def test_next_latent():
+    from x_transformers.next_latent_wrapper import NextLatentWrapper
+
+    transformer = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 384,
+            depth = 2,
+            heads = 6,
+        )
+    )
+
+    model = NextLatentWrapper(
+        transformer,
+        dim = 384,
+        num_rollouts = 2,
+        next_latent_loss_weight = 1.0,
+        kl_loss_weight = 1.0
+    )
+
+    x = torch.randint(0, 256, (2, 128))
+    loss, loss_breakdown = model(x, return_loss_breakdown = True)
+
+    assert loss.ndim == 0
+    loss.backward()

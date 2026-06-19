@@ -17,6 +17,7 @@ from x_transformers.x_transformers import (
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 from x_transformers.nonautoregressive_wrapper import NonAutoregressiveWrapper
 from x_transformers.belief_state_wrapper import BeliefStateWrapper
+from x_transformers.next_latent_wrapper import NextLatentWrapper
 
 from x_transformers.continuous import (
     ContinuousTransformerWrapper,
