@@ -4,12 +4,12 @@ from copy import deepcopy
 
 import torch
 import torch.nn.functional as F
-from torch import nn, Tensor
+from torch import nn, stack, cat, tensor
 from torch.nn import Module
 
 import einx
 from einops import rearrange, reduce
-from torch_einops_utils import pad_right_at_dim, masked_mean, exclusive_cumsum
+from torch_einops_utils import pad_right_at_dim, masked_mean, exclusive_cumsum, pack_with_inverse
 
 # helpers
 
@@ -49,6 +49,64 @@ def MLP(
 
     return nn.Sequential(*layers)
 
+class ResidualDynamics(Module):
+    def __init__(
+        self,
+        net: Module
+    ):
+        super().__init__()
+        self.net = net
+
+    def forward(
+        self,
+        rollout_next_token_embeds, # (r b n d)
+        curr_latent                # (b n d)
+    ):
+        next_embeds, unpack_next_embeds = pack_with_inverse(rollout_next_token_embeds, 'r * d')
+        curr_latent, _ = pack_with_inverse(curr_latent, '* d')
+
+        next_latents = []
+
+        for next_embed in next_embeds:
+            dynamics_input = cat((curr_latent, next_embed), dim = -1)
+            curr_latent = curr_latent + self.net(dynamics_input)
+
+            next_latents.append(curr_latent)
+
+        out = stack(next_latents)
+        return unpack_next_embeds(out, 'r * d')
+
+class RolloutGRU(Module):
+    def __init__(
+        self,
+        dim
+    ):
+        super().__init__()
+        self.gru = nn.GRU(input_size = dim, hidden_size = dim, batch_first = False)
+
+    def forward(
+        self,
+        rollout_next_token_embeds, # (r b n d)
+        curr_latent                # (b n d)
+    ):
+
+        # pack batch and sequence dimensions
+
+        next_embeds, unpack_next_embeds = pack_with_inverse(rollout_next_token_embeds, 'r * d')
+
+        first_hidden, _ = pack_with_inverse(curr_latent, '* d')
+        first_hidden = rearrange(first_hidden, '... -> 1 ...')
+
+        # run gru over the rollout sequence length
+
+        out, _ = self.gru(next_embeds, first_hidden)
+
+        # unpack
+
+        return unpack_next_embeds(out, 'r * d')
+
+# main next latent wrapper
+
 class NextLatentWrapper(Module):
     @staticmethod
     def sigreg_loss(
@@ -82,10 +140,12 @@ class NextLatentWrapper(Module):
         *,
         dim,
         num_rollouts = 1,
-        next_latent_loss_weight = 1.0,
-        kl_loss_weight = 1.0,
+        dynamics_type: str = 'residual',
+        dynamics_network: Module | None = None,
         dynamics_hidden_dim = None,
         dynamics_num_layers = 3,
+        next_latent_loss_weight = 1.0,
+        kl_loss_weight = 1.0,
         ignore_index = -100,
         pad_value = 0,
         rollout_weights: tuple[float, ...] | None = None,
@@ -96,7 +156,8 @@ class NextLatentWrapper(Module):
             num_knots = 17
         ),
         dynamic_rollout_loss_weight = True,
-        dynamic_loss_decay = 1.0
+        dynamic_loss_decay = 1.0,
+        dynamic_loss_threshold = 0.5
     ):
         super().__init__()
         self.net = net
@@ -124,13 +185,11 @@ class NextLatentWrapper(Module):
         # rollout weights
 
         if not exists(rollout_weights):
-            rollout_weights = tuple([1.] * num_rollouts)
+            rollout_weights = (1.,) * num_rollouts
 
         assert len(rollout_weights) == num_rollouts
-        rollout_weights = torch.tensor(rollout_weights)
+        rollout_weights = tensor(rollout_weights)
         self.register_buffer('rollout_loss_weights', rollout_weights / rollout_weights.sum(), persistent = False)
-
-        dynamics_hidden_dim = default(dynamics_hidden_dim, dim)
 
         # token embedding for next-token input to dynamics model
 
@@ -138,22 +197,34 @@ class NextLatentWrapper(Module):
 
         # latent dynamics model
 
-        self.dynamics_mlp = nn.Sequential(
-            nn.LayerNorm(dim * 2),
-            MLP(
-                dim_in = dim * 2,
-                dim_out = dim,
-                dim_hidden = dynamics_hidden_dim,
-                depth = dynamics_num_layers
-            )
-        )
+        assert dynamics_type in ('residual', 'gru', 'custom')
 
-        # init last layer to zero for residual update
+        if dynamics_type == 'residual':
+            if not exists(dynamics_network):
+                dynamics_hidden_dim = default(dynamics_hidden_dim, dim)
+                dynamics_network = nn.Sequential(
+                    nn.LayerNorm(dim * 2),
+                    MLP(
+                        dim_in = dim * 2,
+                        dim_out = dim,
+                        dim_hidden = dynamics_hidden_dim,
+                        depth = dynamics_num_layers
+                    )
+                )
 
-        nn.init.zeros_(self.dynamics_mlp[-1][-1].weight)
-        nn.init.zeros_(self.dynamics_mlp[-1][-1].bias)
+                nn.init.zeros_(dynamics_network[-1][-1].weight)
+                nn.init.zeros_(dynamics_network[-1][-1].bias)
 
-        self.register_buffer('zero', torch.tensor(0.), persistent = False)
+            self.dynamics_model = ResidualDynamics(dynamics_network)
+
+        elif dynamics_type == 'gru':
+            self.dynamics_model = RolloutGRU(dim = dim)
+
+        elif dynamics_type == 'custom':
+            assert exists(dynamics_network)
+            self.dynamics_model = dynamics_network
+
+        self.register_buffer('zero', tensor(0.), persistent = False)
 
     def forward(
         self,
@@ -200,14 +271,14 @@ class NextLatentWrapper(Module):
         padded_mask = pad_right_at_dim(mask, pad_amt, dim = 1, value = False)
         padded_token_embeds = pad_right_at_dim(token_embeds, pad_amt, dim = 1, value = 0.)
 
-        step_targets = padded_target_hiddens[:, 1:].unfold(1, seq - 1, 1)
-        step_targets = rearrange(step_targets, 'b r d n -> r b n d')
+        rollout_target_hiddens = padded_target_hiddens[:, 1:].unfold(1, seq - 1, 1)
+        rollout_target_hiddens = rearrange(rollout_target_hiddens, 'b r d n -> r b n d')
 
-        step_masks = padded_mask.unfold(1, seq - 1, 1)
-        step_masks = rearrange(step_masks, 'b r n -> r b n')
+        rollout_masks = padded_mask.unfold(1, seq - 1, 1)
+        rollout_masks = rearrange(rollout_masks, 'b r n -> r b n')
 
-        step_next_tokens = padded_token_embeds[:, 1:].unfold(1, seq - 1, 1)
-        step_next_tokens = rearrange(step_next_tokens, 'b r d n -> r b n d')
+        rollout_next_token_embeds = padded_token_embeds[:, 1:].unfold(1, seq - 1, 1)
+        rollout_next_token_embeds = rearrange(rollout_next_token_embeds, 'b r d n -> r b n d')
 
         # frozen copy of output head for kl loss
 
@@ -216,35 +287,24 @@ class NextLatentWrapper(Module):
             for p in frozen_to_logits.parameters():
                 p.requires_grad_(False)
 
-        pred_loss_inputs = []
-        pred = hidden_states[:, :-1]
+        curr_latent = hidden_states[:, :-1]
 
-        for step in range(num_rollouts):
-
-            step_next_embeds = step_next_tokens[step].detach()
-
-            dynamics_input = torch.cat((pred, step_next_embeds), dim = -1)
-
-            # they learn the residual with the dynamics mlp
-
-            delta = self.dynamics_mlp(dynamics_input)
-            pred = pred + delta
-
-            pred_loss_inputs.append(pred)
-
-        pred_loss_inputs = torch.stack(pred_loss_inputs)
+        dynamics_out = self.dynamics_model(
+            rollout_next_token_embeds.detach(),
+            curr_latent
+        )
 
         next_latent_loss = self.zero
         kl_loss = self.zero
 
         weights = self.rollout_loss_weights[:num_rollouts]
-        step_masks_expanded = rearrange(step_masks, '... -> ... 1')
+        step_masks_expanded = rearrange(rollout_masks, '... -> ... 1')
 
         # compute smooth l1 loss
 
         step_smooth_l1 = F.smooth_l1_loss(
-            pred_loss_inputs,
-            step_targets.detach(),
+            dynamics_out,
+            rollout_target_hiddens.detach(),
             reduction = 'none'
         )
 
@@ -272,9 +332,9 @@ class NextLatentWrapper(Module):
 
         if self.has_kl_loss:
             with torch.no_grad():
-                target_log_probs = F.log_softmax(frozen_to_logits(step_targets.detach()), dim = -1)
+                target_log_probs = F.log_softmax(frozen_to_logits(rollout_target_hiddens.detach()), dim = -1)
 
-            pred_log_probs = F.log_softmax(frozen_to_logits(pred_loss_inputs), dim = -1)
+            pred_log_probs = F.log_softmax(frozen_to_logits(dynamics_out), dim = -1)
 
             step_kl = F.kl_div(
                 pred_log_probs,
@@ -289,7 +349,7 @@ class NextLatentWrapper(Module):
             if self.dynamic_rollout_loss_weight:
                 step_kl = step_kl * dynamic_weights
 
-            kl_loss = masked_mean(step_kl, step_masks, dim = (1, 2)).sum()
+            kl_loss = masked_mean(step_kl, rollout_masks, dim = (1, 2)).sum()
 
         # sigreg regularization on embeddings
 

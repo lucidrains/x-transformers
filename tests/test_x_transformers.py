@@ -2062,7 +2062,8 @@ def test_ttt_sleep_phase():
 
     assert loss.ndim == 0
 
-def test_next_latent():
+@param('dynamics_type', ('residual', 'gru', 'custom'))
+def test_next_latent(dynamics_type):
     from x_transformers.next_latent_wrapper import NextLatentWrapper
 
     transformer = TransformerWrapper(
@@ -2075,9 +2076,30 @@ def test_next_latent():
         )
     )
 
+    if dynamics_type == 'custom':
+        from x_transformers.next_latent_wrapper import ResidualDynamics
+        custom_mlp = nn.Sequential(
+            nn.Linear(384 * 2, 384),
+            nn.GELU(),
+            nn.Linear(384, 384)
+        )
+        dynamics_network = ResidualDynamics(custom_mlp)
+
+    elif dynamics_type == 'residual':
+        dynamics_network = nn.Sequential(
+            nn.Linear(384 * 2, 384),
+            nn.GELU(),
+            nn.Linear(384, 384)
+        )
+
+    else:
+        dynamics_network = None
+
     model = NextLatentWrapper(
         transformer,
         dim = 384,
+        dynamics_type = dynamics_type,
+        dynamics_network = dynamics_network,
         num_rollouts = 2,
         next_latent_loss_weight = 1.0,
         kl_loss_weight = 1.0

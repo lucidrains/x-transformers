@@ -127,11 +127,13 @@ def train(
     wandb_project: str = 'path_star',
     wandb_run_name: str | None = None,
     use_nextlat: bool = True,
+    dynamics_type: str = 'residual',
     next_latent_loss_weight: float = 1.0,
     kl_loss_weight: float = 1.0,
     num_rollouts: int = 2,
     dynamic_rollout_loss_weight: bool = True,
     dynamic_loss_decay: float = 1.0,
+    dynamic_loss_threshold: float = 0.5,
     max_grad_norm: float | None = 100.0
 ):
     wandb.init(project = wandb_project, name = wandb_run_name, config = locals())
@@ -153,6 +155,11 @@ def train(
     accelerator.print(f"Vocab size: {train_dataset.vocab_size}, Max seq len: {train_dataset.max_seq_len}")
     accelerator.print(f"Using device: {device}")
 
+    if use_nextlat:
+        accelerator.print(f"Next latent is ENABLED (dynamics_type: {dynamics_type})")
+    else:
+        accelerator.print("Next latent is DISABLED. You can turn it on by passing `--use_nextlat=True`")
+
     # base model
 
     base_model = TransformerWrapper(
@@ -172,6 +179,7 @@ def train(
         model = NextLatentWrapper(
             base_model,
             dim = dim,
+            dynamics_type = dynamics_type,
             next_latent_loss_weight = next_latent_loss_weight,
             kl_loss_weight = kl_loss_weight,
             num_rollouts = num_rollouts,
