@@ -8,8 +8,8 @@ from torch import nn, Tensor
 from torch.nn import Module
 
 import einx
-from einops import rearrange
-from torch_einops_utils import pad_right_at_dim, masked_mean
+from einops import rearrange, reduce
+from torch_einops_utils import pad_right_at_dim, masked_mean, exclusive_cumsum
 
 # helpers
 
@@ -94,7 +94,9 @@ class NextLatentWrapper(Module):
             num_slices = 1024,
             domain = (-5, 5),
             num_knots = 17
-        )
+        ),
+        dynamic_rollout_loss_weight = True,
+        dynamic_loss_decay = 1.0
     ):
         super().__init__()
         self.net = net
@@ -114,6 +116,10 @@ class NextLatentWrapper(Module):
         self.has_next_latent_loss = next_latent_loss_weight > 0.
         self.has_kl_loss = kl_loss_weight > 0.
         self.has_sigreg = sigreg_loss_weight > 0.
+
+        self.dynamic_rollout_loss_weight = dynamic_rollout_loss_weight
+        self.dynamic_loss_decay = dynamic_loss_decay
+        self.dynamic_loss_threshold = dynamic_loss_threshold
 
         # rollout weights
 
@@ -234,16 +240,32 @@ class NextLatentWrapper(Module):
         weights = self.rollout_loss_weights[:num_rollouts]
         step_masks_expanded = rearrange(step_masks, '... -> ... 1')
 
+        # compute smooth l1 loss
+
+        step_smooth_l1 = F.smooth_l1_loss(
+            pred_loss_inputs,
+            step_targets.detach(),
+            reduction = 'none'
+        )
+
+        # dynamic rollout loss weight
+
+        dynamic_weights = 1.
+
+        if self.dynamic_rollout_loss_weight:
+            step_latent_loss = reduce(step_smooth_l1.detach(), 'r b n d -> r b n', 'mean')
+
+            cum_step_latent_loss = exclusive_cumsum(step_latent_loss, dim = 0)
+            dynamic_weights = torch.sigmoid(-self.dynamic_loss_decay * (cum_step_latent_loss - self.dynamic_loss_threshold))
+
         # smooth l1 with stop-gradient on target
 
         if self.has_next_latent_loss:
-            step_smooth_l1 = F.smooth_l1_loss(
-                pred_loss_inputs,
-                step_targets.detach(),
-                reduction = 'none'
-            )
-
             step_smooth_l1 = einx.multiply('r b n d, r -> r b n d', step_smooth_l1, weights)
+
+            if self.dynamic_rollout_loss_weight:
+                step_smooth_l1 = einx.multiply('r b n d, r b n -> r b n d', step_smooth_l1, dynamic_weights)
+
             next_latent_loss = masked_mean(step_smooth_l1, step_masks_expanded, dim = (1, 2, 3)).sum()
 
         # kl divergence
@@ -263,6 +285,9 @@ class NextLatentWrapper(Module):
 
             step_kl = einx.sum('... c -> ...', step_kl)
             step_kl = einx.multiply('r b n, r -> r b n', step_kl, weights)
+
+            if self.dynamic_rollout_loss_weight:
+                step_kl = step_kl * dynamic_weights
 
             kl_loss = masked_mean(step_kl, step_masks, dim = (1, 2)).sum()
 
