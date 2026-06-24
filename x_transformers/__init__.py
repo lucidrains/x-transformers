@@ -12,6 +12,7 @@ from x_transformers.x_transformers import (
     TransformerWrapper,
     ViTransformerWrapper,
     TransformerBlock,
+    layer_schedule
 )
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper

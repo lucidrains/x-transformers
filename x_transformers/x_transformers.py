@@ -132,7 +132,18 @@ class equals():
     def __call__(self, x, *args, **kwargs):
         return x == self.val
 
+# layer schedules
 
+def layer_schedule(start, end, depth, schedule = 'cosine'):
+    assert callable(schedule) or schedule in ('linear', 'cosine'), 'schedule must be a callable or one of linear or cosine'
+    assert depth > 1, 'depth must be greater than 1 for tapering'
+
+    if schedule == 'linear':
+        schedule = lambda start, end, t: start + (end - start) * t
+    elif schedule == 'cosine':
+        schedule = lambda start, end, t: start + (end - start) * 0.5 * (1 - math.cos(math.pi * t))
+
+    return tuple(schedule(start, end, l / (depth - 1)) for l in range(depth))
 
 # recurrent depth related
 
@@ -2822,6 +2833,7 @@ class AttentionLayers(Module):
 
         self.num_attn_layers = len(list(filter(equals('a'), layer_types)))
         self.num_cross_attn_layers = len(list(filter(equals('c'), layer_types)))
+        self.num_ff_layers = len(list(filter(equals('f'), layer_types)))
 
         # set the depth
 
@@ -2886,6 +2898,19 @@ class AttentionLayers(Module):
 
         cross_attn_inverted_attention_iter = iter(cross_attn_inverted_attentions)
 
+        # prepare kwargs iterators
+        # deferred until here so explicitly popped kwargs are removed
+
+        def create_layer_kwargs_iter(kwargs, length):
+            return iter([{k: (v[i] if isinstance(v, tuple) and len(v) == length else v) for k, v in kwargs.items()} for i in range(length)])
+
+        attn_kwargs_for_cross = {k: v for k, v in attn_kwargs.items() if not (isinstance(v, tuple) and len(v) == self.num_attn_layers)}
+        cross_attn_kwargs_merged = {**attn_kwargs_for_cross, **cross_attn_kwargs}
+
+        attn_kwargs_iter = create_layer_kwargs_iter(attn_kwargs, self.num_attn_layers)
+        cross_attn_kwargs_iter = create_layer_kwargs_iter(cross_attn_kwargs_merged, self.num_cross_attn_layers)
+        ff_kwargs_iter = create_layer_kwargs_iter(ff_kwargs, self.num_ff_layers)
+
         # iterate and construct layers
 
         for ind, (layer_type, layer_shift_tokens) in enumerate(zip(self.layer_types, shift_tokens)):
@@ -2896,8 +2921,6 @@ class AttentionLayers(Module):
             block_begin = divisible_by(ind, len_default_block)
             block_ind = ind // len_default_block
 
-            is_last_layer = ind == (len(self.layer_types) - 1)
-
             # attention, cross attention, feedforward
 
             layer_qkv_receives_diff_view = layer_type == 'a' and qkv_receive_diff_residuals and not (is_first_self_attn and integrate_layers)
@@ -2905,14 +2928,14 @@ class AttentionLayers(Module):
             if layer_type == 'a':
                 self_attn_learned_value_residual = learned_value_residual_mix and not is_first_self_attn
 
-                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, **attn_kwargs)
+                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, **next(attn_kwargs_iter))
                 is_first_self_attn = False
 
             elif layer_type == 'c':
-                layer = Attention(dim, heads = heads, inverted_attention = next(cross_attn_inverted_attention_iter), **{**attn_kwargs, **cross_attn_kwargs})
+                layer = Attention(dim, heads = heads, inverted_attention = next(cross_attn_inverted_attention_iter), **next(cross_attn_kwargs_iter))
 
             elif layer_type == 'f':
-                layer = FeedForward(dim, **ff_kwargs)
+                layer = FeedForward(dim, **next(ff_kwargs_iter))
                 layer = layer if not macaron else Scale(0.5, layer)
 
             else:

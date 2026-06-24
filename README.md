@@ -2764,4 +2764,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{bayat2026taperedlanguagemodels,
+    title   = {Tapered Language Models},
+    author  = {Reza Bayat and Ali Behrouz and Aaron Courville},
+    year    = {2026},
+    eprint  = {2606.23670},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2606.23670},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

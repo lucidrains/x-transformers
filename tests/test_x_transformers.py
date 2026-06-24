@@ -2110,3 +2110,66 @@ def test_next_latent(dynamics_type):
 
     assert loss.ndim == 0
     loss.backward()
+
+def test_layer_schedule():
+    from x_transformers import layer_schedule
+
+    x = torch.randn(1, 10, 256)
+
+    # 1. tapered feedforward multiplier
+    # smoothly decreasing cosine schedule for the expansion factor from 6 to 2 over 12 layers
+
+    ff_mult_schedule = layer_schedule(start = 6, end = 2, depth = 12, schedule = 'cosine')
+    assert len(ff_mult_schedule) == 12
+
+    decoder = Decoder(
+        dim = 256,
+        depth = 12,
+        heads = 8,
+        ff_mult = ff_mult_schedule
+    )
+
+    assert decoder(x).shape == (1, 10, 256)
+
+    # 2. varying attention dropout across depth
+    # increase attention dropout from 0.0 at first layer to 0.5 at last layer
+
+    attn_dropout_schedule = layer_schedule(start = 0.0, end = 0.5, depth = 12, schedule = 'linear')
+
+    decoder = Decoder(
+        dim = 256,
+        depth = 12,
+        heads = 8,
+        attn_dropout = attn_dropout_schedule
+    )
+
+    assert decoder(x).shape == (1, 10, 256)
+
+    # 3. progressive feedforward dropout with custom schedules
+    # custom exponential dropout increasing across depth
+
+    custom_dropout = lambda start, end, t: start + (end - start) * (t ** 2)
+    ff_dropout_schedule = layer_schedule(start = 0.0, end = 0.5, depth = 12, schedule = custom_dropout)
+
+    decoder = Decoder(
+        dim = 256,
+        depth = 12,
+        heads = 8,
+        ff_dropout = ff_dropout_schedule
+    )
+
+    assert decoder(x).shape == (1, 10, 256)
+
+    # 4. fine-grained manual specification
+    # bypass layer_schedule helper by passing a tuple of length depth
+
+    manual_ff_mult = (4, 4, 4, 8, 8, 8, 2, 2, 2, 1, 1, 1)
+
+    decoder = Decoder(
+        dim = 256,
+        depth = 12,
+        heads = 8,
+        ff_mult = manual_ff_mult
+    )
+
+    assert decoder(x).shape == (1, 10, 256)
