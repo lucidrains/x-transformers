@@ -1897,7 +1897,8 @@ def test_inverted_cross_attn(attn_sigmoid):
     assert out.shape == (2, 64, 512)
 
 @param('use_custom_loss', (False, True))
-def test_ttt_equivalency(use_custom_loss):
+@param('ttt_use_muon', (False, True))
+def test_ttt_equivalency(use_custom_loss, ttt_use_muon):
     import copy
     from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper, TTTModuleWrapper, TTTMetaLearningTargetKLLoss
 
@@ -1925,6 +1926,8 @@ def test_ttt_equivalency(use_custom_loss):
         tbptt_steps = 1000,
         ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
         ttt_lr = 0.,
+        ttt_use_muon = ttt_use_muon,
+        ttt_muon_lr = 0.,
         ttt_custom_loss_module = custom_loss
     )
 
@@ -1968,6 +1971,8 @@ def test_ttt_equivalency(use_custom_loss):
         tbptt_steps = 1000,
         ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
         ttt_lr = 1.0,
+        ttt_use_muon = ttt_use_muon,
+        ttt_muon_lr = 1.0,
         ttt_custom_loss_module = copy.deepcopy(custom_loss) if use_custom_loss else None
     )
 

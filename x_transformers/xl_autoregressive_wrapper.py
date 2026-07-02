@@ -12,7 +12,7 @@ from torch.func import functional_call, vmap
 from einops import rearrange, repeat, pack, unpack
 from x_transformers.autoregressive_wrapper import top_p, top_k, eval_decorator
 
-from torch_einops_utils import masked_mean, mask_after
+from torch_einops_utils import masked_mean, mask_after, maybe
 
 # helper functions
 
@@ -35,6 +35,51 @@ def set_module_by_path(model, path, new_mod):
     *parts, last = path.split('.')
     mod = reduce(getattr, parts, model)
     setattr(mod, last, new_mod)
+
+# tensor functions
+
+def pack_one_with_inverse(t, pattern):
+    packed, ps = pack([t], pattern)
+    def inverse(t_in):
+        return unpack(t_in, ps, pattern)[0]
+    return packed, inverse
+
+def transpose(t):
+    return rearrange(t, '... i j -> ... j i')
+
+# Muon update rule (Newton-Schulz) - Keller Jordan et al.
+
+def newtonschulz5(
+    t,
+    steps = 5,
+    eps = 1e-7,
+    coefs = (3.4445, -4.7750, 2.0315)
+):
+    if t.ndim < 3:
+        return t, False
+
+    rows, cols = t.shape[-2:]
+    should_transpose = rows > cols
+
+    if should_transpose:
+        t = transpose(t)
+
+    t, inv_pack = pack_one_with_inverse(t, '* i j')
+    t = t / t.norm(dim = (-1, -2), keepdim = True).clamp(min = eps)
+
+    a, b, c = coefs
+
+    for _ in range(steps):
+        A = t @ transpose(t)
+        B = b * A + c * A @ A
+        t = a * t + B @ t
+
+    t = inv_pack(t)
+
+    if should_transpose:
+        t = transpose(t)
+
+    return t, True
 
 # ttt module wrapper
 
@@ -115,6 +160,9 @@ class XLAutoregressiveWrapper(Module):
         ttt_module_paths = tuple(),
         ttt_lr = 1e-3,
         ttt_wd = 0.01,
+        ttt_use_muon = False,
+        ttt_muon_steps = 5,
+        ttt_muon_lr = 1e-2,
         ttt_custom_loss_module: Module | None = None
     ):
         super().__init__()
@@ -128,6 +176,9 @@ class XLAutoregressiveWrapper(Module):
         self.ttt_module_paths = ttt_module_paths
         self.ttt_lr = ttt_lr
         self.ttt_wd = ttt_wd
+        self.ttt_use_muon = ttt_use_muon
+        self.ttt_muon_steps = ttt_muon_steps
+        self.ttt_muon_lr = ttt_muon_lr
 
         self.ttt_custom_loss_module = ttt_custom_loss_module
 
@@ -203,21 +254,36 @@ class XLAutoregressiveWrapper(Module):
         # update test-time trained parameters
 
         grad_idx = 0
+
         for wrapper in self.ttt_wrappers:
             num_params = len(wrapper.batch_params)
             wrapper_grads = grads[grad_idx : grad_idx + num_params]
             grad_idx += num_params
 
-            wrapper.batch_params = {
-                name: (param - self.ttt_lr * grad - self.ttt_lr * self.ttt_wd * param) if exists(grad) else param
-                for (name, param), grad in zip(wrapper.batch_params.items(), wrapper_grads)
-            }
+            # maybe muon
 
-            if not create_graph:
-                wrapper.batch_params = {
-                    name: param.detach().requires_grad_()
-                    for name, param in wrapper.batch_params.items()
-                }
+            if self.ttt_use_muon:
+                muon_results = [newtonschulz5(g, steps = self.ttt_muon_steps) if exists(g) else (None, False) for g in wrapper_grads]
+                wrapper_grads, is_muon_grads = tuple(zip(*muon_results))
+            else:
+                is_muon_grads = (False,) * len(wrapper_grads)
+
+            # update test-time trained parameters
+
+            new_batch_params = dict()
+
+            for (name, param), grad, is_muon_grad in zip(wrapper.batch_params.items(), wrapper_grads, is_muon_grads):
+
+                if exists(grad):
+                    lr = self.ttt_muon_lr if is_muon_grad else self.ttt_lr
+                    param = param - lr * grad - lr * self.ttt_wd * param
+
+                if not create_graph:
+                    param = param.detach().requires_grad_()
+
+                new_batch_params[name] = param
+
+            wrapper.batch_params = new_batch_params
 
     @torch.no_grad()
     @eval_decorator
@@ -261,7 +327,7 @@ class XLAutoregressiveWrapper(Module):
                     continue
 
                 curr_pos = idx * max_seq_len
-                chunk_labels = start_tokens[:, curr_pos + 1 : curr_pos + max_seq_len + 1]
+                chunk_labels = start_tokens.narrow(1, curr_pos + 1, max_seq_len)
                 self.update_ttt(logits, chunk_labels, create_graph = False, intermediates = intermediates)
 
         # test-time train on the remainder of the prompt
