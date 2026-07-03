@@ -2068,7 +2068,8 @@ def test_ttt_sleep_phase():
     assert loss.ndim == 0
 
 @param('dynamics_type', ('residual', 'gru', 'custom'))
-def test_next_latent(dynamics_type):
+@param('loss_type', ('smooth_l1', 'mse_and_cosine_sim'))
+def test_next_latent(dynamics_type, loss_type):
     from x_transformers.next_latent_wrapper import NextLatentWrapper
 
     transformer = TransformerWrapper(
@@ -2103,6 +2104,7 @@ def test_next_latent(dynamics_type):
     model = NextLatentWrapper(
         transformer,
         dim = 384,
+        loss_type = loss_type,
         dynamics_type = dynamics_type,
         dynamics_network = dynamics_network,
         num_rollouts = 2,

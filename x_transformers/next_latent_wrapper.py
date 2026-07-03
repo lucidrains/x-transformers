@@ -105,6 +105,23 @@ class RolloutGRU(Module):
 
         return unpack_next_embeds(out, 'r * d')
 
+# loss modules
+
+class MSECosineSimLoss(Module):
+    def __init__(
+        self,
+        weight = 0.9
+    ):
+        super().__init__()
+        self.weight = weight
+
+    def forward(self, pred, target):
+        mse_loss = F.mse_loss(pred, target, reduction = 'none')
+        cos_loss = 1. - F.cosine_similarity(pred, target, dim = -1)
+        cos_loss = rearrange(cos_loss, '... -> ... 1')
+
+        return mse_loss.lerp(cos_loss, self.weight)
+
 # main next latent wrapper
 
 class NextLatentWrapper(Module):
@@ -140,6 +157,7 @@ class NextLatentWrapper(Module):
         *,
         dim,
         num_rollouts = 1,
+        loss_type: str | Module = 'smooth_l1',
         dynamics_type: str = 'residual',
         dynamics_network: Module | None = None,
         dynamics_hidden_dim = None,
@@ -167,7 +185,19 @@ class NextLatentWrapper(Module):
         assert num_rollouts > 0, 'num_rollouts must be greater than 0'
         self.num_rollouts = num_rollouts
 
-        # loss weights
+        self.loss_type = loss_type
+
+        if isinstance(loss_type, Module):
+            self.loss_fn = loss_type
+        elif loss_type == 'smooth_l1':
+            self.loss_fn = nn.SmoothL1Loss(reduction = 'none')
+        elif loss_type == 'mse':
+            self.loss_fn = nn.MSELoss(reduction = 'none')
+        elif loss_type == 'mse_and_cosine_sim':
+            # https://arxiv.org/abs/2606.30534
+            self.loss_fn = MSECosineSimLoss()
+        else:
+            raise ValueError(f'unknown loss type {loss_type}')
 
         self.next_latent_loss_weight = next_latent_loss_weight
         self.kl_loss_weight = kl_loss_weight
@@ -300,12 +330,11 @@ class NextLatentWrapper(Module):
         weights = self.rollout_loss_weights[:num_rollouts]
         step_masks_expanded = rearrange(rollout_masks, '... -> ... 1')
 
-        # compute smooth l1 loss
+        # compute latent loss
 
-        step_smooth_l1 = F.smooth_l1_loss(
+        step_latent_loss_unreduced = self.loss_fn(
             dynamics_out,
-            rollout_target_hiddens.detach(),
-            reduction = 'none'
+            rollout_target_hiddens.detach()
         )
 
         # dynamic rollout loss weight
@@ -313,7 +342,7 @@ class NextLatentWrapper(Module):
         dynamic_weights = 1.
 
         if self.dynamic_rollout_loss_weight:
-            step_latent_loss = reduce(step_smooth_l1.detach(), 'r b n d -> r b n', 'mean')
+            step_latent_loss = reduce(step_latent_loss_unreduced.detach(), 'r b n d -> r b n', 'mean')
 
             cum_step_latent_loss = exclusive_cumsum(step_latent_loss, dim = 0)
             dynamic_weights = torch.sigmoid(-self.dynamic_loss_decay * (cum_step_latent_loss - self.dynamic_loss_threshold))
@@ -321,12 +350,12 @@ class NextLatentWrapper(Module):
         # smooth l1 with stop-gradient on target
 
         if self.has_next_latent_loss:
-            step_smooth_l1 = einx.multiply('r b n d, r -> r b n d', step_smooth_l1, weights)
+            step_latent_loss_unreduced = einx.multiply('r b n d, r -> r b n d', step_latent_loss_unreduced, weights)
 
             if self.dynamic_rollout_loss_weight:
-                step_smooth_l1 = einx.multiply('r b n d, r b n -> r b n d', step_smooth_l1, dynamic_weights)
+                step_latent_loss_unreduced = einx.multiply('r b n d, r b n -> r b n d', step_latent_loss_unreduced, dynamic_weights)
 
-            next_latent_loss = masked_mean(step_smooth_l1, step_masks_expanded, dim = (1, 2, 3)).sum()
+            next_latent_loss = masked_mean(step_latent_loss_unreduced, step_masks_expanded, dim = (1, 2, 3)).sum()
 
         # kl divergence
 
