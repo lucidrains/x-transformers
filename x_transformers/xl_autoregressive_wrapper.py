@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.func import functional_call, vmap
 
 from einops import rearrange, repeat, pack, unpack
-from x_transformers.autoregressive_wrapper import top_p, top_k, eval_decorator
+from x_transformers.autoregressive_wrapper import top_p, top_k, eval_decorator, cast_tuple
 
 from torch_einops_utils import masked_mean, mask_after, maybe
 
@@ -179,28 +179,39 @@ class XLAutoregressiveWrapper(Module):
         self.ttt_use_muon = ttt_use_muon
         self.ttt_muon_steps = ttt_muon_steps
         self.ttt_muon_lr = ttt_muon_lr
-
         self.ttt_custom_loss_module = ttt_custom_loss_module
 
-        self.ttt_wrappers = []
-        for path in ttt_module_paths:
-            mod = get_module_by_path(net, path)
-            wrapper = TTTModuleWrapper(mod)
-            set_module_by_path(net, path, wrapper)
-            self.ttt_wrappers.append(wrapper)
+        # format ttt module paths to always be (source_path, target_path)
+
+        self.ttt_paths_map = tuple(cast_tuple(item, 2) for item in ttt_module_paths)
+
+        # gather all unique wrappers
+
+        self.ttt_wrappers = dict()
+
+        for source_path, target_path in self.ttt_paths_map:
+            for path in (source_path, target_path):
+                if path in self.ttt_wrappers:
+                    continue
+
+                mod = get_module_by_path(net, path)
+                wrapper = TTTModuleWrapper(mod)
+                set_module_by_path(net, path, wrapper)
+
+                self.ttt_wrappers[path] = wrapper
 
         if self.has_ttt:
             assert tbptt_steps > 1, 'tbptt_steps must be greater than 1 if ttt is turned on'
 
     @property
     def has_ttt(self):
-        return not is_empty(self.ttt_wrappers)
+        return len(self.ttt_wrappers) > 0
 
     def init_ttt(self, batch):
         if not self.has_ttt:
             return
 
-        for wrapper in self.ttt_wrappers:
+        for wrapper in self.ttt_wrappers.values():
             wrapper.batch_params = {
                 name: repeat(param, '... -> b ...', b = batch)
                 for name, param in wrapper.module.named_parameters()
@@ -235,10 +246,12 @@ class XLAutoregressiveWrapper(Module):
 
             loss_t_per_batch = masked_mean(loss_t, mask)
 
+        # gather all batch parameters for source modules
+
         all_batch_params = [
             param
-            for wrapper in self.ttt_wrappers
-            for param in wrapper.batch_params.values()
+            for source_path, _ in self.ttt_paths_map
+            for param in self.ttt_wrappers[source_path].batch_params.values()
         ]
 
         # compute gradients
@@ -251,14 +264,19 @@ class XLAutoregressiveWrapper(Module):
             allow_unused = True
         )
 
-        # update test-time trained parameters
+        # update target parameters with source gradients
 
         grad_idx = 0
 
-        for wrapper in self.ttt_wrappers:
-            num_params = len(wrapper.batch_params)
+        for source_path, target_path in self.ttt_paths_map:
+            source_wrapper = self.ttt_wrappers[source_path]
+            target_wrapper = self.ttt_wrappers[target_path]
+
+            num_params = len(source_wrapper.batch_params)
             wrapper_grads = grads[grad_idx : grad_idx + num_params]
             grad_idx += num_params
+
+            assert len(source_wrapper.batch_params) == len(target_wrapper.batch_params), f'source module {source_path} and target module {target_path} must have the same number of parameters'
 
             # maybe muon
 
@@ -272,18 +290,19 @@ class XLAutoregressiveWrapper(Module):
 
             new_batch_params = dict()
 
-            for (name, param), grad, is_muon_grad in zip(wrapper.batch_params.items(), wrapper_grads, is_muon_grads):
+            for (src_name, src_param), (tgt_name, tgt_param), grad, is_muon_grad in zip(source_wrapper.batch_params.items(), target_wrapper.batch_params.items(), wrapper_grads, is_muon_grads):
+                assert src_param.shape == tgt_param.shape, f'source parameter {source_path}.{src_name} (shape {src_param.shape}) and target parameter {target_path}.{tgt_name} (shape {tgt_param.shape}) must have the exact same shape'
 
                 if exists(grad):
                     lr = self.ttt_muon_lr if is_muon_grad else self.ttt_lr
-                    param = param - lr * grad - lr * self.ttt_wd * param
+                    tgt_param = tgt_param - lr * grad - lr * self.ttt_wd * tgt_param
 
                 if not create_graph:
-                    param = param.detach().requires_grad_()
+                    tgt_param = tgt_param.detach().requires_grad_()
 
-                new_batch_params[name] = param
+                new_batch_params[tgt_name] = tgt_param
 
-            wrapper.batch_params = new_batch_params
+            target_wrapper.batch_params = new_batch_params
 
     @torch.no_grad()
     @eval_decorator
@@ -480,11 +499,15 @@ class XLAutoregressiveWrapper(Module):
 
                     self.update_ttt(logits, chunk_labels, create_graph = self.training, intermediates = intermediates)
 
-                if should_detach:
-                    for wrapper in self.ttt_wrappers:
-                        wrapper.batch_params = {
-                            name: param.detach().requires_grad_(param.requires_grad)
-                            for name, param in wrapper.batch_params.items()
-                        }
+                if not should_detach:
+                    continue
+
+                # detach
+
+                for wrapper in self.ttt_wrappers.values():
+                    wrapper.batch_params = {
+                        name: param.detach().requires_grad_(param.requires_grad)
+                        for name, param in wrapper.batch_params.items()
+                    }
 
         return total_loss

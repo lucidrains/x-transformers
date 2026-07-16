@@ -1985,8 +1985,61 @@ def test_ttt_equivalency(use_custom_loss, ttt_use_muon):
 
     TTTModuleWrapper.reset_all(wrapper_ttt_actual)
 
-    for wrapper in wrapper_ttt_actual.ttt_wrappers:
+    for wrapper in wrapper_ttt_actual.ttt_wrappers.values():
         assert not exists(wrapper.batch_params)
+
+def test_ttt_source_target_mapping():
+    import copy
+    from einops import repeat
+    from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper
+    from x_transformers import Decoder, TransformerWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 32,
+        max_mem_len = 32,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    # feedforward from layer 2 (index 3) to layer 1 (index 1)
+
+    src_w1_path, tgt_w1_path = 'attn_layers.layers.3.1.ff.0.0', 'attn_layers.layers.1.1.ff.0.0'
+    src_w2_path, tgt_w2_path = 'attn_layers.layers.3.1.ff.2', 'attn_layers.layers.1.1.ff.2'
+
+    wrapper = XLAutoregressiveWrapper(
+        model,
+        tbptt_steps = 16,
+        ttt_module_paths = (
+            (src_w1_path, tgt_w1_path),
+            (src_w2_path, tgt_w2_path),
+        ),
+        ttt_lr = 1.0,
+        ttt_use_muon = False,
+    )
+
+    x = torch.randint(0, 256, (2, 65))
+
+    loss = wrapper(x)
+    loss.backward()
+
+    src_w1_wrapper = wrapper.ttt_wrappers[src_w1_path]
+    tgt_w1_wrapper = wrapper.ttt_wrappers[tgt_w1_path]
+
+    # target batch_params should be updated
+
+    target_weight = tgt_w1_wrapper.batch_params['weight']
+    tgt_base_weight = repeat(tgt_w1_wrapper.module.weight, '... -> b ...', b = x.shape[0])
+    assert not torch.allclose(target_weight, tgt_base_weight)
+
+    # source batch_params should not be updated
+
+    source_weight = src_w1_wrapper.batch_params['weight']
+    src_base_weight = repeat(src_w1_wrapper.module.weight, '... -> b ...', b = x.shape[0])
+    assert torch.allclose(source_weight, src_base_weight)
 
 def test_ttt_custom_loss_optimization():
     from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper, TTTMetaLearningTargetKLLoss
