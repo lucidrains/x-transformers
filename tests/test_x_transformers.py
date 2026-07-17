@@ -25,6 +25,14 @@ from x_transformers.multi_input import MultiInputTransformerWrapper
 def exists(v):
     return v is not None
 
+def with_seed(seed):
+    def decorator(fn):
+        def inner(*args, **kwargs):
+            torch.manual_seed(seed)
+            return fn(*args, **kwargs)
+        return inner
+    return decorator
+
 def test_readme():
     model = XTransformer(
         dim = 512,
@@ -1898,8 +1906,11 @@ def test_inverted_cross_attn(attn_sigmoid):
 
 @param('use_custom_loss', (False, True))
 @param('ttt_use_muon', (False, True))
-def test_ttt_equivalency(use_custom_loss, ttt_use_muon):
-    import copy
+@param('episodic_mem_len', (0, 16))
+def test_ttt_equivalency(use_custom_loss, ttt_use_muon, episodic_mem_len):
+    seed = 42
+
+    from copy import deepcopy
     from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper, TTTModuleWrapper, TTTMetaLearningTargetKLLoss
 
     model = TransformerWrapper(
@@ -1913,18 +1924,27 @@ def test_ttt_equivalency(use_custom_loss, ttt_use_muon):
         )
     )
 
-    model_clone = copy.deepcopy(model)
+    model_clone = deepcopy(model)
 
-    wrapper_base = XLAutoregressiveWrapper(model, tbptt_steps = 1000)
+    wrapper_base = with_seed(seed)(XLAutoregressiveWrapper)(
+        model,
+        tbptt_steps = 1000,
+        episodic_mem_len = episodic_mem_len
+    )
 
     custom_loss = None
     if use_custom_loss:
         custom_loss = TTTMetaLearningTargetKLLoss(dim = 256, num_classes = 256)
 
-    wrapper_ttt = XLAutoregressiveWrapper(
+    ttt_module_paths = ('attn_layers.layers.0.1.to_v',)
+    if episodic_mem_len > 0:
+        ttt_module_paths += ('episodic_mems',)
+
+    wrapper_ttt = with_seed(seed)(XLAutoregressiveWrapper)(
         model_clone,
         tbptt_steps = 1000,
-        ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
+        episodic_mem_len = episodic_mem_len,
+        ttt_module_paths = ttt_module_paths,
         ttt_lr = 0.,
         ttt_use_muon = ttt_use_muon,
         ttt_muon_lr = 0.,
@@ -1955,29 +1975,26 @@ def test_ttt_equivalency(use_custom_loss, ttt_use_muon):
 
     prompt = x[:, :100]
 
-    torch.manual_seed(42)
-    out_base = wrapper_base.generate(prompt, 10, temperature = 0.)
-
-    torch.manual_seed(42)
-    out_ttt = wrapper_ttt.generate(prompt, 10, temperature = 0.)
+    out_base = with_seed(seed)(wrapper_base.generate)(prompt, 10, temperature = 0.)
+    out_ttt = with_seed(seed)(wrapper_ttt.generate)(prompt, 10, temperature = 0.)
 
     # custom loss introduces slight numerical differences that can flip argmax on untrained nets
     # assert torch.all(out_base == out_ttt)
 
     # test that ttt > 0 actually changes the output
 
-    wrapper_ttt_actual = XLAutoregressiveWrapper(
-        copy.deepcopy(model),
+    wrapper_ttt_actual = with_seed(seed)(XLAutoregressiveWrapper)(
+        deepcopy(model),
         tbptt_steps = 1000,
-        ttt_module_paths = ('attn_layers.layers.0.1.to_v',),
+        episodic_mem_len = episodic_mem_len,
+        ttt_module_paths = ttt_module_paths,
         ttt_lr = 1.0,
         ttt_use_muon = ttt_use_muon,
         ttt_muon_lr = 1.0,
-        ttt_custom_loss_module = copy.deepcopy(custom_loss) if use_custom_loss else None
+        ttt_custom_loss_module = deepcopy(custom_loss) if use_custom_loss else None
     )
 
-    torch.manual_seed(42)
-    out_ttt_actual = wrapper_ttt_actual.generate(prompt, 10, temperature = 0.)
+    out_ttt_actual = with_seed(seed)(wrapper_ttt_actual.generate)(prompt, 10, temperature = 0.)
 
     assert not torch.all(out_base == out_ttt_actual)
 

@@ -12,7 +12,8 @@ from torch.func import functional_call, vmap
 from einops import rearrange, repeat, pack, unpack
 from x_transformers.autoregressive_wrapper import top_p, top_k, eval_decorator, cast_tuple
 
-from torch_einops_utils import masked_mean, mask_after, maybe
+from torch_einops_utils import masked_mean, mask_after, maybe, tree_map_tensor
+from torch_einops_utils.device import module_device
 
 # helper functions
 
@@ -24,6 +25,9 @@ def default(val, d):
 
 def is_empty(arr):
     return len(arr) == 0
+
+def first(it, default = None):
+    return next(iter(it), default)
 
 def divisible_by(numer, denom):
     return (numer % denom) == 0
@@ -37,6 +41,9 @@ def set_module_by_path(model, path, new_mod):
     setattr(mod, last, new_mod)
 
 # tensor functions
+
+def repeat_batch(t, batch_size):
+    return repeat(t, '... -> b ...', b = batch_size)
 
 def pack_one_with_inverse(t, pattern):
     packed, ps = pack([t], pattern)
@@ -80,6 +87,69 @@ def newtonschulz5(
         t = transpose(t)
 
     return t, True
+
+# episodic memories
+
+class EpisodicMemories(Module):
+    def __init__(
+        self,
+        depth,
+        heads,
+        seq_len,
+        dim_head
+    ):
+        super().__init__()
+        self.mem_kv = nn.Parameter(torch.randn(2, depth, heads, seq_len, dim_head))
+        nn.init.normal_(self.mem_kv, std = 0.02)
+
+    def forward(self):
+        return self.mem_kv
+
+class EpisodicMemoryWrapper(Module):
+    def __init__(
+        self,
+        net,
+        episodic_mem_len
+    ):
+        super().__init__()
+        self.net = net
+
+        with torch.no_grad():
+            mock_input = torch.zeros((1, 1), dtype = torch.long, device = module_device(net))
+            _, intermediates = net(mock_input, return_intermediates = True)
+
+        attn_intermediates = [interm for interm in intermediates.attn_intermediates if interm.layer_type == 'a']
+
+        assert not is_empty(attn_intermediates), 'no attention layers found for episodic memory wrapper'
+
+        first_cached_kv = first(attn_intermediates).cached_kv[0]
+        _, kv_heads, _, dim_head = first_cached_kv.shape
+        depth = len(attn_intermediates)
+
+        self.episodic_mems = EpisodicMemories(
+            depth = depth,
+            heads = kv_heads,
+            seq_len = episodic_mem_len,
+            dim_head = dim_head
+        )
+
+    def get_additional_kv(self, batch_size):
+        mem_kv = self.episodic_mems()
+
+        if mem_kv.ndim == 5:
+            mem_kv = repeat_batch(mem_kv, batch_size)
+
+        mem_k, mem_v = mem_kv.unbind(dim = 1)
+        return [(k, v) for k, v in zip(mem_k.unbind(dim = 1), mem_v.unbind(dim = 1))]
+
+    def forward(self, x, **kwargs):
+        batch = x.shape[0]
+
+        kwargs.update(
+            self_attn_additional_kv = self.get_additional_kv(batch)
+        )
+
+        return self.net(x, **kwargs)
 
 # ttt module wrapper
 
@@ -163,7 +233,8 @@ class XLAutoregressiveWrapper(Module):
         ttt_use_muon = False,
         ttt_muon_steps = 5,
         ttt_muon_lr = 1e-2,
-        ttt_custom_loss_module: Module | None = None
+        ttt_custom_loss_module: Module | None = None,
+        episodic_mem_len = 0
     ):
         super().__init__()
         self.pad_value = pad_value
@@ -172,6 +243,7 @@ class XLAutoregressiveWrapper(Module):
 
         self.net = net
         self.max_seq_len = net.max_seq_len
+        self.output_is_log_prob = net.output_is_log_prob
 
         self.ttt_module_paths = ttt_module_paths
         self.ttt_lr = ttt_lr
@@ -181,9 +253,29 @@ class XLAutoregressiveWrapper(Module):
         self.ttt_muon_lr = ttt_muon_lr
         self.ttt_custom_loss_module = ttt_custom_loss_module
 
+        self.has_episodic_mem = episodic_mem_len > 0
+
+        # maybe wrap network with episodic memory wrapper
+
+        if self.has_episodic_mem:
+            net = EpisodicMemoryWrapper(net, episodic_mem_len)
+
+        self.net = net
+
         # format ttt module paths to always be (source_path, target_path)
 
         self.ttt_paths_map = tuple(cast_tuple(item, 2) for item in ttt_module_paths)
+
+        # modify paths to have 'net.' prepended if wrapped
+
+        if self.has_episodic_mem:
+            prepended_paths_map = []
+            for src, tgt in self.ttt_paths_map:
+                src = f'net.{src}' if src != 'episodic_mems' else src
+                tgt = f'net.{tgt}' if tgt != 'episodic_mems' else tgt
+                prepended_paths_map.append((src, tgt))
+
+            self.ttt_paths_map = tuple(prepended_paths_map)
 
         # gather all unique wrappers
 
@@ -212,10 +304,10 @@ class XLAutoregressiveWrapper(Module):
             return
 
         for wrapper in self.ttt_wrappers.values():
-            wrapper.batch_params = {
-                name: repeat(param, '... -> b ...', b = batch)
-                for name, param in wrapper.module.named_parameters()
-            }
+            wrapper.batch_params = tree_map_tensor(
+                lambda t: repeat_batch(t, batch),
+                dict(wrapper.module.named_parameters())
+            )
 
     def update_ttt(
         self,
@@ -236,7 +328,7 @@ class XLAutoregressiveWrapper(Module):
             loss_t = self.ttt_custom_loss_module(intermediates, mask = mask)
             loss_t_per_batch = masked_mean(loss_t, mask) if loss_t.ndim > 1 else loss_t
         else:
-            loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+            loss_fn = F.cross_entropy if not self.output_is_log_prob else F.nll_loss
             loss_t = loss_fn(
                 rearrange(logits, 'b n c -> b c n'),
                 chunk_labels,
@@ -377,13 +469,27 @@ class XLAutoregressiveWrapper(Module):
 
         is_greedy = temperature == 0.
 
+        # unwrap episodic memory wrapper to avoid evaluating it per token
+
+        net = self.net
+        if self.has_episodic_mem:
+            kwargs.update(
+                self_attn_additional_kv = net.get_additional_kv(batch)
+            )
+            net = net.net
+
         for _ in range(seq_len):
             curr_segment_len = out.shape[-1]
             is_last_segment_tokens = divisible_by(curr_segment_len, max_seq_len)
 
+            if is_last_segment_tokens:
+                curr_pos = curr_segment_len
+                curr_mems = mems
+                cache = None
+
             x = out[:, curr_pos:]
 
-            logits, cache = self.net(
+            logits, cache = net(
                 x,
                 mems = curr_mems,
                 cache = cache,
@@ -451,7 +557,7 @@ class XLAutoregressiveWrapper(Module):
         split_labels = labels.split(max_seq_len, dim = -1)
         loss_weights = tuple((t.shape[-1] / seq_len) for t in split_x)
 
-        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+        loss_fn = F.cross_entropy if not self.output_is_log_prob else F.nll_loss
 
         # go through each chunk and derive weighted losses
 
@@ -505,9 +611,9 @@ class XLAutoregressiveWrapper(Module):
                 # detach
 
                 for wrapper in self.ttt_wrappers.values():
-                    wrapper.batch_params = {
-                        name: param.detach().requires_grad_(param.requires_grad)
-                        for name, param in wrapper.batch_params.items()
-                    }
+                    wrapper.batch_params = tree_map_tensor(
+                        lambda t: t.detach().requires_grad_(t.requires_grad),
+                        wrapper.batch_params
+                    )
 
         return total_loss
