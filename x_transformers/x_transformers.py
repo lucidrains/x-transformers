@@ -750,6 +750,49 @@ class PerRowDataDependentAlibi(Module):
 
         return forget_gates
 
+class RelativeProjPositionalBias(Module):
+    """
+    relative position bias via learned distance basis projection (Inkling model from Thinking Machines, no paper yet)
+    """
+
+    def __init__(
+        self,
+        dim,
+        heads,
+        num_distance_basis = 16,
+        max_dist = 1024
+    ):
+        super().__init__()
+        self.heads = heads
+        self.num_distance_basis = num_distance_basis
+        self.max_dist = max_dist
+
+        self.to_distance_weights = nn.Sequential(
+            nn.Linear(dim, heads * num_distance_basis),
+            Rearrange('b n (h d) -> b h n d', h = heads)
+        )
+
+        self.distance_bank = nn.Parameter(torch.randn(num_distance_basis, max_dist) * 0.02)
+
+    def forward(self, x, seq_len_k = None):
+        b, n, device, h = x.shape[0], x.shape[1], x.device, self.heads
+        seq_len_k = default(seq_len_k, n)
+
+        pos_q = torch.arange(n, device = device) + (seq_len_k - n)
+        pos_k = torch.arange(seq_len_k, device = device)
+
+        rel_dist = einx.subtract('i, j -> i j', pos_q, pos_k)
+
+        valid_mask = (rel_dist >= 0) & (rel_dist < self.max_dist)
+        clamped_dist = rel_dist.clamp(0, self.max_dist - 1)
+
+        weights = self.to_distance_weights(x)
+
+        curves = einsum('b h n d, d r -> b h n r', weights, self.distance_bank)
+
+        bias = curves.gather(-1, repeat(clamped_dist, 'i j -> b h i j', b = b, h = h))
+        return bias.masked_fill(~valid_mask, 0.)
+
 class RotaryEmbedding(Module):
     def __init__(
         self,
@@ -1727,6 +1770,9 @@ class Attention(Module):
         data_dependent_alibi_per_row = False,
         data_dependent_alibi_per_row_dim_head = 8,
         data_dependent_alibi_kwargs: dict = dict(),
+        use_rel_proj_pos_bias = False,
+        rel_proj_num_distance_basis = 16,
+        rel_proj_max_dist = 1024,
         use_cope = False,
         cope_max_pos = 16,
         cope_soft_onehot_pos = False,
@@ -1911,6 +1957,18 @@ class Attention(Module):
                 dda_kwargs.update(dim_head = data_dependent_alibi_per_row_dim_head)
 
             self.data_dependent_alibi = dda_klass(**dda_kwargs, **data_dependent_alibi_kwargs)
+
+        # relative projection positional bias (Inkling)
+
+        self.rel_proj_pos_bias = None
+
+        if use_rel_proj_pos_bias:
+            self.rel_proj_pos_bias = RelativeProjPositionalBias(
+                dim = dim,
+                heads = heads,
+                num_distance_basis = rel_proj_num_distance_basis,
+                max_dist = rel_proj_max_dist
+            )
 
         # attend class - includes core attention algorithm + talking heads
 
@@ -2367,6 +2425,17 @@ class Attention(Module):
             attn_bias = self.data_dependent_alibi(x)
 
             attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0))
+
+        # relative projection positional bias (Inkling)
+
+        if exists(self.rel_proj_pos_bias):
+            seq_len_k = k.shape[-2]
+            rel_proj_bias = self.rel_proj_pos_bias(q_input, seq_len_k = seq_len_k)
+            attn_bias = rel_proj_bias if not exists(attn_bias) else (attn_bias + rel_proj_bias)
+
+            attn_bias = pad_at_dim(attn_bias, (num_mem_kv, 0))
+
+        # laser
 
         if self.laser:
             v = softclamp(v, self.laser_softclamp_value)

@@ -2250,3 +2250,27 @@ def test_layer_schedule():
     )
 
     assert decoder(x).shape == (1, 10, 256)
+
+def test_relative_proj_positional_bias():
+    from x_transformers import TransformerWrapper, Encoder
+    from x_transformers.x_transformers import RelativeProjPositionalBias
+
+    rel_proj_bias = RelativeProjPositionalBias(dim = 256, heads = 4, num_distance_basis = 16, max_dist = 64)
+    x = torch.randn(2, 10, 256)
+    bias = rel_proj_bias(x)
+    assert bias.shape == (2, 4, 10, 10)
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Encoder(
+            dim = 256,
+            depth = 2,
+            heads = 4,
+            attn_use_rel_proj_pos_bias = True
+        )
+    )
+    tokens = torch.randint(0, 256, (2, 10))
+    out = model(tokens)
+    assert out.shape == (2, 10, 256)
+    out.sum().backward()
