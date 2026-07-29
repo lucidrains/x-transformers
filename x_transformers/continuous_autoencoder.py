@@ -42,7 +42,7 @@ class VariationalLatentBottleneck(Module):
             Rearrange('b (two d) -> two b d', two = 2)
         )
 
-    def forward(self, x):
+    def forward(self, x, return_unreduced_loss = False):
         mean, log_var = self.to_mean_log_var(x)
         std = (0.5 * log_var).exp()
 
@@ -52,8 +52,10 @@ class VariationalLatentBottleneck(Module):
             log_var.exp() + mean.square() - log_var - 1.
         )
 
-        kl_loss = F.relu(kl_loss - self.kl_div_floor)
-        kl_loss = kl_loss.sum(dim = -1).mean()
+        kl_loss = kl_loss.sum(dim = -1)
+
+        if not return_unreduced_loss:
+            kl_loss = kl_loss.mean()
 
         return latents, kl_loss
 
@@ -68,7 +70,7 @@ class DeterministicLatentBottleneck(Module):
         self.proj = nn.Linear(dim, dim_latent)
         self.activation = default(activation, nn.Identity())
 
-    def forward(self, x):
+    def forward(self, x, return_unreduced_loss = False):
         latents = self.activation(self.proj(x))
         return latents, None
 
@@ -152,14 +154,14 @@ class ContinuousTransformerAutoencoder(Module):
     def device(self):
         return next(self.parameters()).device
 
-    def encode(self, seq, lens = None, return_aux_loss = False):
+    def encode(self, seq, lens = None, return_aux_loss = False, return_unreduced_loss = False):
         mask = lens_to_mask(lens, max_len = seq.shape[1]) if exists(lens) else None
 
         encoded = self.encoder(seq, mask = mask, return_embeddings = True)
 
         pooled = masked_mean(encoded, mask, dim = 1)
 
-        latents, aux_loss = self.bottleneck(pooled)
+        latents, aux_loss = self.bottleneck(pooled, return_unreduced_loss = return_unreduced_loss)
 
         if not return_aux_loss:
             return latents
@@ -170,11 +172,12 @@ class ContinuousTransformerAutoencoder(Module):
         self,
         seq,
         lens = None,
-        return_all_losses = False
+        return_all_losses = False,
+        return_unreduced_loss = False
     ):
         batch, seq_len, device = *seq.shape[:2], seq.device
 
-        latents, aux_loss = self.encode(seq, lens = lens, return_aux_loss = True)
+        latents, aux_loss = self.encode(seq, lens = lens, return_aux_loss = True, return_unreduced_loss = return_unreduced_loss)
 
         # latent dropout
 
@@ -201,7 +204,8 @@ class ContinuousTransformerAutoencoder(Module):
 
         mask = lens_to_mask(lens, max_len = seq_len) if exists(lens) else None
 
-        recon_loss = masked_mean(recon_loss, mask, dim = 1).mean()
+        dim = slice(1, None) if return_unreduced_loss else None
+        recon_loss = masked_mean(recon_loss, mask, dim = dim)
 
         # total loss
 

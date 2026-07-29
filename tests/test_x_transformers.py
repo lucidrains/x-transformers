@@ -1871,6 +1871,10 @@ def test_continuous_autoencoder(
 
     assert recon_loss.ndim == 0
 
+    unreduced_loss, (unreduced_recon_loss, _) = model(x, lens = lens, return_all_losses = True, return_unreduced_loss = True)
+    assert unreduced_loss.shape == (2,)
+    assert unreduced_recon_loss.shape == (2,)
+
     # getting latents
 
     latents = model.encode(x, lens = lens)
