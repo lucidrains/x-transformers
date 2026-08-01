@@ -2278,3 +2278,58 @@ def test_relative_proj_positional_bias():
     out = model(tokens)
     assert out.shape == (2, 10, 256)
     out.sum().backward()
+
+def test_xm_induced_latent_decoder():
+    from x_transformers.xm_induced_latent_decoder import XMInducedLatentDecoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    decoder = XMInducedLatentDecoder(
+        net = model,
+        num_latents = 4,
+        candidates = 2,
+        always_latent_proj = True
+    )
+
+    assert isinstance(decoder.latent_proj, torch.nn.Linear)
+
+    x = torch.randint(0, 256, (2, 32))
+
+    # test forward loss calculation
+    loss = decoder(x)
+    assert loss.ndim == 0
+    assert not torch.isnan(loss)
+
+    # test loss with different candidates
+    loss_k1 = decoder(x, candidates = 1)
+    loss_k4 = decoder(x, candidates = 4)
+    assert loss_k1.ndim == 0 and loss_k4.ndim == 0
+
+    # test custom latents
+    custom_latents = torch.randn(2, 2, 4, 64)
+    loss_latents = decoder(x, latents = custom_latents)
+    assert loss_latents.ndim == 0
+    assert not torch.isnan(loss_latents)
+
+    # test latent_drop_prob
+    loss_dropped = decoder(x, latent_drop_prob = 1.0)
+    assert loss_dropped.ndim == 0
+    assert not torch.isnan(loss_dropped)
+
+    # test unconditioned generate
+    start_tokens = x[:, :4]
+    gen = decoder.generate(start_tokens, seq_len = 8)
+    assert gen.shape == (2, 8)
+
+    # test conditioned generate with custom latents
+    latents_input = torch.randn(2, 4, 64)
+    gen_cond = decoder.generate(start_tokens, seq_len = 8, latents = latents_input)
+    assert gen_cond.shape == (2, 8)

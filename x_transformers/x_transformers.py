@@ -3981,6 +3981,7 @@ class TransformerWrapper(Module):
         pos = None,
         prepend_embeds = None,
         prepend_mask = None,
+        excise_prepend_embeds = False,
         embed_ids: dict[str, Tensor] = dict(),
         sum_embeds = None,
         return_attn_z_loss = False,
@@ -4369,6 +4370,15 @@ class TransformerWrapper(Module):
 
             if not self.has_multiple_heads:
                 logits = first(logits)
+
+        # maybe excise prepended embeddings
+
+        if exists(prepend_embeds) and excise_prepend_embeds and not exists(cache):
+            prepend_len = prepend_embeds.shape[1]
+            if exists(logits):
+                logits = logits[:, prepend_len:]
+            if exists(x):
+                x = x[:, prepend_len:]
 
         # different returns
 
