@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from random import random
+from typing import Callable
+
 import torch
 from torch import nn, Tensor, cat
 import torch.nn.functional as F
 from torch.nn import Module
 
 from einops import rearrange, repeat, reduce
-from torch_einops_utils import temp_eval
+from torch_einops_utils import temp_eval, batched_index_select
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
@@ -20,6 +22,18 @@ def default(*args):
     for arg in args:
         if exists(arg):
             return arg
+
+# winner callback helpers
+
+def lowest_entropy_winner_fn(logits: Tensor) -> Tensor:
+    """
+    Given candidate logits of shape (batch, candidates, seq_len, vocab_size),
+    returns candidate index with lowest mean token entropy across the sequence for each batch item.
+    """
+    probs = F.softmax(logits, dim = -1)
+    log_probs = F.log_softmax(logits, dim = -1)
+    entropy = - (probs * log_probs).sum(dim = -1).mean(dim = -1)
+    return entropy.argmin(dim = -1)
 
 # main class
 
@@ -82,6 +96,46 @@ class XMInducedLatentDecoder(Module):
 
         auto_wrapper = AutoregressiveWrapper(self.net)
         return auto_wrapper.generate(start_tokens, seq_len, prepend_embeds = latent_cond, excise_prepend_embeds = True, **kwargs)
+
+    @temp_eval
+    @torch.no_grad()
+    def generate_with_candidate_latents(
+        self,
+        start_tokens: Tensor,
+        seq_len: int,
+        candidates: int | None = None,
+        latents: Tensor | None = None,
+        winner_fn: Callable = lowest_entropy_winner_fn,
+        return_best_latents = False,
+        **kwargs
+    ) -> Tensor | tuple[Tensor, tuple[Tensor, Tensor]]:
+
+        candidate_logits, latents = self(
+            start_tokens,
+            latents = latents,
+            candidates = candidates,
+            return_loss = False,
+            **kwargs
+        )
+
+        winner = winner_fn(candidate_logits)
+
+        if winner.ndim <= 1:
+            best_latents = batched_index_select(latents, winner, dim = 1)
+        else:
+            best_latents = winner
+
+        out = self.generate(
+            start_tokens = start_tokens,
+            seq_len = seq_len,
+            latents = best_latents,
+            **kwargs
+        )
+
+        if not return_best_latents:
+            return out
+
+        return out, (latents, winner)
 
     def forward(
         self,
@@ -165,7 +219,8 @@ class XMInducedLatentDecoder(Module):
 
         if not return_loss:
             raw_logits = cat(all_logits, dim = 0)
-            return rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)[:, 0]
+            candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
+            return candidate_logits, latents
 
         # winner-takes-all candidate selection (Forward XM)
 

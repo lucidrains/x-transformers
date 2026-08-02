@@ -2304,32 +2304,59 @@ def test_xm_induced_latent_decoder():
     x = torch.randint(0, 256, (2, 32))
 
     # test forward loss calculation
+
     loss = decoder(x)
     assert loss.ndim == 0
     assert not torch.isnan(loss)
 
     # test loss with different candidates
+
     loss_k1 = decoder(x, candidates = 1)
     loss_k4 = decoder(x, candidates = 4)
     assert loss_k1.ndim == 0 and loss_k4.ndim == 0
 
     # test custom latents
+
     custom_latents = torch.randn(2, 2, 4, 64)
     loss_latents = decoder(x, latents = custom_latents)
     assert loss_latents.ndim == 0
     assert not torch.isnan(loss_latents)
 
     # test latent_drop_prob
+
     loss_dropped = decoder(x, latent_drop_prob = 1.0)
     assert loss_dropped.ndim == 0
     assert not torch.isnan(loss_dropped)
 
     # test unconditioned generate
+
     start_tokens = x[:, :4]
     gen = decoder.generate(start_tokens, seq_len = 8)
     assert gen.shape == (2, 8)
 
     # test conditioned generate with custom latents
+
     latents_input = torch.randn(2, 4, 64)
     gen_cond = decoder.generate(start_tokens, seq_len = 8, latents = latents_input)
     assert gen_cond.shape == (2, 8)
+
+    # test candidate latents generate
+
+    gen_candidates = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3)
+    assert gen_candidates.shape == (2, 8)
+
+    # test returning best latents
+
+    gen_cand, (all_latents, winner_indices) = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, return_best_latents = True)
+    assert gen_cand.shape == (2, 8)
+    assert all_latents.shape == (2, 3, 4, 64)
+    assert winner_indices.shape == (2,)
+
+    # test custom winner_fn callback
+
+    def max_confidence(logits):
+        top2 = logits.softmax(dim = -1).topk(2, dim = -1).values
+        return (top2[..., 0] - top2[..., 1]).mean(dim = -1).argmax(dim = -1)
+
+    gen_custom = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, winner_fn = max_confidence)
+    assert gen_custom.shape == (2, 8)
