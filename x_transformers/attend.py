@@ -467,7 +467,7 @@ class Attend(Module):
 
         # for a row that is entirely masked out, should zero out the output of that row token
 
-        if exists(row_is_entirely_masked) and row_is_entirely_masked.any():
+        if exists(row_is_entirely_masked):
             out = out.masked_fill(row_is_entirely_masked[..., None], 0.)
 
         return out, Intermediates()
@@ -643,7 +643,7 @@ class Attend(Module):
             post_softmax_attn = post_softmax_attn
         )
 
-        if exists(row_is_entirely_masked) and row_is_entirely_masked.any():
+        if exists(row_is_entirely_masked):
             out = out.masked_fill(row_is_entirely_masked[..., None], 0.)
 
         return out, intermediates
