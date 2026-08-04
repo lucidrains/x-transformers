@@ -2364,3 +2364,13 @@ def test_xm_latent_decoder(
 
     gen_custom = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, winner_fn = max_confidence)
     assert gen_custom.shape == (2, 8)
+
+    # test sequence mask & variable lengths
+
+    x_padded = torch.randint(0, 256, (2, 32))
+    mask = torch.ones((2, 32), dtype = torch.bool)
+    mask[0, 20:] = False
+    mask[1, 25:] = False
+
+    loss_masked = decoder(x_padded, mask = mask, candidates = 3)
+    assert loss_masked.ndim == 0 and not torch.isnan(loss_masked)

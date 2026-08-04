@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn import Module
 
 from einops import rearrange, repeat, reduce
-from torch_einops_utils import temp_eval, batched_index_select, masked_mean
+from torch_einops_utils import temp_eval, batched_index_select, masked_mean, and_masks
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
@@ -149,6 +149,7 @@ class XMLatentDecoder(Module):
         latent_drop_prob = None,
         return_loss = True,
         repulsive_loss_weight = None,
+        mask: Tensor | None = None,
         **kwargs
     ):
         candidates = default(candidates, self.candidates)
@@ -164,19 +165,27 @@ class XMLatentDecoder(Module):
         if return_loss:
             seq, labels = seq[:, :-1], seq[:, 1:]
 
+        seq_mask = mask[:, 1:] if (exists(mask) and return_loss) else mask
+        ignore_mask = (labels != self.ignore_index) if return_loss else (seq != self.ignore_index)
+
+        loss_mask = and_masks((seq_mask, ignore_mask))
+
         # check if latents are dropped during training
 
         if self.training and latent_drop_prob > 0. and random() < latent_drop_prob:
-            logits = self.net(seq, **kwargs)
+            logits = self.net(seq, mask = mask, **kwargs)
 
             if not return_loss:
                 return logits
 
-            return F.cross_entropy(
+            loss = F.cross_entropy(
                 rearrange(logits, 'b n c -> (b n) c'),
                 rearrange(labels, 'b n -> (b n)'),
+                reduction = 'none',
                 ignore_index = self.ignore_index
             )
+
+            return masked_mean(rearrange(loss, '(b n) -> b n', b = batch), loss_mask)
 
         total = batch * candidates
         chunk_size = default(max_batch_size, total)
@@ -197,18 +206,25 @@ class XMLatentDecoder(Module):
         if return_loss:
             labels_candidates = repeat(labels, 'b ... -> (b k) ...', k = candidates)
 
+        mask_candidates = repeat(loss_mask, 'b ... -> (b k) ...', k = candidates)
+
         losses = []
         all_logits = []
 
         calc_repulsion = repulsive_loss_weight > 0. and candidates > 1
 
         for start in range(0, total, chunk_size):
-            end = min(start + chunk_size, total)
+            chunk_batch_size = min(total - start, chunk_size)
+            chunk = slice(start, start + chunk_batch_size)
 
-            chunk_seq = seq_candidates[start:end]
-            chunk_latents = latent_cond[start:end]
+            chunk_seq = seq_candidates[chunk]
+            chunk_latents = latent_cond[chunk]
 
-            logits = self.net(chunk_seq, prepend_embeds = chunk_latents, excise_prepend_embeds = True, **kwargs)
+            chunk_kwargs = kwargs.copy()
+            if exists(mask):
+                chunk_kwargs['mask'] = mask_candidates[chunk]
+
+            logits = self.net(chunk_seq, prepend_embeds = chunk_latents, excise_prepend_embeds = True, **chunk_kwargs)
 
             if not return_loss:
                 all_logits.append(logits)
@@ -217,7 +233,8 @@ class XMLatentDecoder(Module):
             if calc_repulsion:
                 all_logits.append(logits)
 
-            chunk_labels = labels_candidates[start:end]
+            chunk_labels = labels_candidates[chunk]
+            chunk_mask = mask_candidates[chunk]
 
             loss = F.cross_entropy(
                 rearrange(logits, 'b n c -> (b n) c'),
@@ -226,14 +243,15 @@ class XMLatentDecoder(Module):
                 ignore_index = self.ignore_index
             )
 
-            losses.append(reduce(loss, '(b n) -> b', 'mean', b = end - start))
+            loss = rearrange(loss, '(b n) -> b n', b = chunk_batch_size)
+            losses.append(masked_mean(loss, mask = chunk_mask, dim = -1))
 
         if not return_loss:
             raw_logits = cat(all_logits, dim = 0)
             candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
             return candidate_logits, latents
 
-        # winner-takes-all candidate selection (Forward XM)
+        # selection (winner-takes-all candidate selection - Forward XM)
 
         candidate_losses = reduce(cat(losses, dim = 0), '(b k) -> b k', 'mean', b = batch, k = candidates)
         winner_loss = candidate_losses.amin(dim = -1).mean()
@@ -241,7 +259,7 @@ class XMLatentDecoder(Module):
         if not calc_repulsion:
             return winner_loss
 
-        # repulsive loss (jensen-shannon divergence)
+        # diversity (repulsive loss via jensen-shannon divergence)
 
         raw_logits = cat(all_logits, dim = 0)
         candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
@@ -253,6 +271,6 @@ class XMLatentDecoder(Module):
         kl = F.kl_div(log_mixture, log_prob, log_target = True, reduction = 'none').sum(dim = -1)
         kl = reduce(kl, 'b k n -> b n', 'mean')
 
-        repulsive_kl = masked_mean(kl, mask = labels != self.ignore_index)
+        repulsive_kl = masked_mean(kl, mask = loss_mask)
 
         return winner_loss - repulsive_loss_weight * repulsive_kl
