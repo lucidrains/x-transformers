@@ -22,7 +22,7 @@ import fire
 import wandb
 
 from x_transformers import TransformerWrapper, Decoder
-from x_transformers.xm_induced_latent_decoder import XMInducedLatentDecoder
+from x_transformers.xm_latent_decoder import XMLatentDecoder
 
 # helpers
 
@@ -134,7 +134,7 @@ def train(
         )
     )
 
-    model = XMInducedLatentDecoder(
+    model = XMLatentDecoder(
         net = model,
         num_latents = num_latents,
         candidates = candidates

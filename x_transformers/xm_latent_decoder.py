@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from random import random
 from typing import Callable
 
@@ -9,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn import Module
 
 from einops import rearrange, repeat, reduce
-from torch_einops_utils import temp_eval, batched_index_select
+from torch_einops_utils import temp_eval, batched_index_select, masked_mean
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
@@ -26,18 +27,15 @@ def default(*args):
 # winner callback helpers
 
 def lowest_entropy_winner_fn(logits: Tensor) -> Tensor:
-    """
-    Given candidate logits of shape (batch, candidates, seq_len, vocab_size),
-    returns candidate index with lowest mean token entropy across the sequence for each batch item.
-    """
-    probs = F.softmax(logits, dim = -1)
-    log_probs = F.log_softmax(logits, dim = -1)
+    """ returns candidate index with lowest mean token entropy """
+    probs = logits.softmax(dim = -1)
+    log_probs = logits.log_softmax(dim = -1)
     entropy = - (probs * log_probs).sum(dim = -1).mean(dim = -1)
     return entropy.argmin(dim = -1)
 
 # main class
 
-class XMInducedLatentDecoder(Module):
+class XMLatentDecoder(Module):
     """
     Latent Variable Decoder based on Explorative Modeling (Forward XM)
     by Alexi Gladstone et al. (https://arxiv.org/abs/2607.27372).
@@ -52,7 +50,8 @@ class XMInducedLatentDecoder(Module):
         max_batch_size = None,
         ignore_index = -100,
         latent_drop_prob = 0.,
-        always_latent_proj = False
+        always_latent_proj = False,
+        repulsive_loss_weight = 0.
     ):
         super().__init__()
         self.net = net
@@ -73,6 +72,10 @@ class XMInducedLatentDecoder(Module):
         has_latent_proj = self.latent_dim != self.dim or always_latent_proj
 
         self.latent_proj = nn.Linear(self.latent_dim, self.dim) if has_latent_proj else nn.Identity()
+
+        # repulsive loss force between candidate distributions
+
+        self.repulsive_loss_weight = repulsive_loss_weight
 
     @property
     def max_seq_len(self):
@@ -145,11 +148,14 @@ class XMInducedLatentDecoder(Module):
         max_batch_size = None,
         latent_drop_prob = None,
         return_loss = True,
+        repulsive_loss_weight = None,
         **kwargs
     ):
         candidates = default(candidates, self.candidates)
         max_batch_size = default(max_batch_size, self.max_batch_size)
         latent_drop_prob = default(latent_drop_prob, self.latent_drop_prob)
+
+        repulsive_loss_weight = default(repulsive_loss_weight, self.repulsive_loss_weight)
 
         batch, device = seq.shape[0], seq.device
 
@@ -194,6 +200,8 @@ class XMInducedLatentDecoder(Module):
         losses = []
         all_logits = []
 
+        calc_repulsion = repulsive_loss_weight > 0. and candidates > 1
+
         for start in range(0, total, chunk_size):
             end = min(start + chunk_size, total)
 
@@ -205,6 +213,9 @@ class XMInducedLatentDecoder(Module):
             if not return_loss:
                 all_logits.append(logits)
                 continue
+
+            if calc_repulsion:
+                all_logits.append(logits)
 
             chunk_labels = labels_candidates[start:end]
 
@@ -225,5 +236,23 @@ class XMInducedLatentDecoder(Module):
         # winner-takes-all candidate selection (Forward XM)
 
         candidate_losses = reduce(cat(losses, dim = 0), '(b k) -> b k', 'mean', b = batch, k = candidates)
+        winner_loss = candidate_losses.amin(dim = -1).mean()
 
-        return candidate_losses.amin(dim = -1).mean()
+        if not calc_repulsion:
+            return winner_loss
+
+        # repulsive loss (jensen-shannon divergence)
+
+        raw_logits = cat(all_logits, dim = 0)
+        candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
+        log_prob = candidate_logits.log_softmax(dim = -1)
+
+        log_mixture = log_prob.logsumexp(dim = 1) - math.log(candidates)
+        log_mixture = repeat(log_mixture, 'b n c -> b k n c', k = candidates)
+
+        kl = F.kl_div(log_mixture, log_prob, log_target = True, reduction = 'none').sum(dim = -1)
+        kl = reduce(kl, 'b k n -> b n', 'mean')
+
+        repulsive_kl = masked_mean(kl, mask = labels != self.ignore_index)
+
+        return winner_loss - repulsive_loss_weight * repulsive_kl

@@ -2279,8 +2279,11 @@ def test_relative_proj_positional_bias():
     assert out.shape == (2, 10, 256)
     out.sum().backward()
 
-def test_xm_induced_latent_decoder():
-    from x_transformers.xm_induced_latent_decoder import XMInducedLatentDecoder
+@param('repulsive_loss_weight', (0., 0.1))
+def test_xm_latent_decoder(
+    repulsive_loss_weight
+):
+    from x_transformers.xm_latent_decoder import XMLatentDecoder
 
     model = TransformerWrapper(
         num_tokens = 256,
@@ -2292,11 +2295,12 @@ def test_xm_induced_latent_decoder():
         )
     )
 
-    decoder = XMInducedLatentDecoder(
+    decoder = XMLatentDecoder(
         net = model,
         num_latents = 4,
         candidates = 2,
-        always_latent_proj = True
+        always_latent_proj = True,
+        repulsive_loss_weight = repulsive_loss_weight
     )
 
     assert isinstance(decoder.latent_proj, torch.nn.Linear)
