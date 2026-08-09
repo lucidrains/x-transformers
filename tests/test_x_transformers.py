@@ -310,15 +310,18 @@ def test_mos():
     eval_logits = model(x)
 
 @param('attn_one_kv_head', (True, False))
-def test_l2_distance(attn_one_kv_head):
+@param('attn_qk_norm_dim_scale', (False, True))
+def test_l2_distance(attn_one_kv_head, attn_qk_norm_dim_scale):
 
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
         attn_layers = Decoder(
             dim = 512,
-            depth = 12,
+            depth = 2,
             heads = 8,
+            attn_qk_norm = True,
+            attn_qk_norm_dim_scale = attn_qk_norm_dim_scale,
             attn_l2_distance = True,
             attn_one_kv_head = attn_one_kv_head,
         )

@@ -1901,16 +1901,20 @@ class Attention(Module):
 
         self.qk_norm = qk_norm
         self.qk_norm_groups = qk_norm_groups
-        self.qk_norm_scale = qk_norm_scale
 
         # whether to use the rmsnorm (equivalent to cosine sim attention when scale is equal to 1) - https://arxiv.org/abs/2302.05442
 
         self.qk_norm_dim_scale = qk_norm_dim_scale
 
         self.qk_norm_q_scale = self.qk_norm_k_scale = 1
+
         if qk_norm and qk_norm_dim_scale:
-            self.qk_norm_q_scale = nn.Parameter(torch.ones(heads, 1, dim_head))
-            self.qk_norm_k_scale = nn.Parameter(torch.ones(kv_heads, 1, dim_head))
+            init_scale = dim_head ** 0.25
+            self.qk_norm_q_scale = nn.Parameter(torch.ones(heads, 1, dim_head) * init_scale)
+            self.qk_norm_k_scale = nn.Parameter(torch.ones(kv_heads, 1, dim_head) * init_scale)
+            qk_norm_scale = self.scale
+
+        self.qk_norm_scale = qk_norm_scale
 
         assert (not qk_norm) or divisible_by(dim_head, qk_norm_groups), 'dimension per attention head must be divisible by the qk norm groups'
         assert not (qk_norm and (dim_head // qk_norm_groups) <= 2), 'the group dimension may be too small (2 was too small in my tests, but 4 still works, surprisingly)'
@@ -2251,10 +2255,9 @@ class Attention(Module):
         if self.qk_norm:
             qk_l2norm = partial(l2norm, groups = self.qk_norm_groups)
             q, k = map(qk_l2norm, (q, k))
-            scale = self.qk_norm_scale
 
-            q = q * scale
-            k = k * scale
+            q = q * self.qk_norm_q_scale
+            k = k * self.qk_norm_k_scale
 
         # maybe qk rmsnorm
 
@@ -2341,7 +2344,7 @@ class Attention(Module):
             mem_k, mem_v = tuple(repeat(t, 'h n d -> b h n d', b = b) for t in (self.mem_k, self.mem_v))
 
             if self.qk_norm:
-                mem_k = l2norm(mem_k)
+                mem_k = qk_l2norm(mem_k)
                 mem_k = mem_k * self.qk_norm_k_scale
 
             k = cat((mem_k, k), dim = -2)
