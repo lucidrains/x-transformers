@@ -122,7 +122,7 @@ class ContinuousTransformerWrapper(Module):
         has_project_in = exists(dim_in) and (not use_identity_if_same_dim or dim_in != dim)
         self.project_in = default(project_in, lambda: nn.Linear(dim_in, dim, bias = False) if has_project_in else nn.Identity())
 
-        # output is multipled by 2 for outputting mean and log variance
+        # output is multiplied by 2 for outputting mean and log variance
 
         self.probabilistic = probabilistic
 
@@ -362,7 +362,7 @@ class ContinuousAutoregressiveWrapper(Module):
 
         mask = kwargs.pop('mask', None)
 
-        # pick a random range for each batch sample and aligh the sequence to the right for rollout loss
+        # pick a random range for each batch sample and align the sequence to the right for rollout loss
 
         valid_tokens_for_rollout = (lens - steps).clamp(min = 0)
         valid_sample = valid_tokens_for_rollout > 0
