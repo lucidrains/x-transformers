@@ -922,9 +922,9 @@ def apply_polar_pos_emb(t, freqs):
     return out.type(orig_dtype)
 
 class LoRALinear(Module):
-    """ low-rank linear projection, or a bias-less linear when no rank is given """
+    """ low-rank linear projection with optional activation in the middle (silu for the HyGA gates), or a bias-less linear when no rank is given """
 
-    def __new__(cls, dim_in, dim_out = None, dim = None):
+    def __new__(cls, dim_in, dim_out = None, dim = None, activation = None):
         dim_out = default(dim_out, dim_in)
 
         if not exists(dim):
@@ -938,7 +938,8 @@ class LoRALinear(Module):
         self,
         dim_in,
         dim_out = None,
-        dim = None
+        dim = None,
+        activation = None
     ):
         super().__init__()
         dim_out = default(dim_out, dim_in)
@@ -946,9 +947,10 @@ class LoRALinear(Module):
         self.down = LinearNoBias(dim_in, dim)
         self.up = LinearNoBias(dim, dim_out)
         init_zero_(self.up)
+        self.maybe_activation = activation if exists(activation) else identity
 
     def forward(self, x):
-        return self.up(self.down(x))
+        return self.up(self.maybe_activation(self.down(x)))
 
 # norms
 
@@ -1771,6 +1773,7 @@ class Attention(Module):
         output_gate = False,                # hybrid gated attention - https://arxiv.org/abs/2608.11805v1
         output_gate_rank = None,            # bottleneck dim for low-rank output gate (h); None = bias-less linear
         output_gate_headwise = False,       # per-head output gate (h); one gate logit per head, broadcasting over the head dimension
+        low_rank_silu_gates = True,         # siLU activation in the middle of the low-rank x and h gates, as in HyGA
         zero_init_output = False,
         hard = False,
         max_attend_past = None,
@@ -1926,8 +1929,10 @@ class Attention(Module):
 
         self.to_v_gate_activation = F.silu if swiglu_values else F.sigmoid
 
-        self.to_v_gate = LoRALinear(dim, heads if gate_values_headwise else out_dim, dim = gate_values_rank) if gate_values else None
-        self.to_output_gate = LoRALinear(out_dim, heads if output_gate_headwise else out_dim, dim = output_gate_rank) if output_gate else None
+        gate_activation = F.silu if low_rank_silu_gates else None
+
+        self.to_v_gate = LoRALinear(dim, heads if gate_values_headwise else out_dim, dim = gate_values_rank, activation = gate_activation) if gate_values else None
+        self.to_output_gate = LoRALinear(out_dim, heads if output_gate_headwise else out_dim, dim = output_gate_rank, activation = gate_activation) if output_gate else None
 
         self.to_head_space_headwise = Rearrange('b n h -> b h n 1')
         self.to_head_space_dimwise = Rearrange('b n (h d) -> b h n d', h = heads)
