@@ -1970,8 +1970,18 @@ def test_ttt_equivalency(use_custom_loss, ttt_use_muon, episodic_mem_len):
     loss_base.backward()
     loss_ttt.backward()
 
-    for (name_base, p_base), (name_ttt, p_ttt) in zip(model.named_parameters(), model_clone.named_parameters()):
-        assert exists(p_base.grad) and exists(p_ttt.grad)
+    params_base = dict(model.named_parameters())
+    params_ttt = dict(model_clone.named_parameters())
+
+    for name_base, p_base in params_base.items():
+        assert exists(p_base.grad)
+
+        if name_base not in params_ttt:
+            continue
+
+        p_ttt = params_ttt[name_base]
+
+        assert exists(p_ttt.grad)
         assert torch.allclose(p_base.grad, p_ttt.grad, atol = 1e-4)
 
     if use_custom_loss:
@@ -2011,6 +2021,80 @@ def test_ttt_equivalency(use_custom_loss, ttt_use_muon, episodic_mem_len):
 
     for wrapper in wrapper_ttt_actual.ttt_wrappers.values():
         assert not exists(wrapper.batch_params)
+
+@param('episodic_mem_len', (0, 16))
+def test_ttt_low_rank(episodic_mem_len):
+    from x_transformers.xl_autoregressive_wrapper import XLAutoregressiveWrapper, LowRankLinear
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        max_mem_len = 512,
+        attn_layers = Decoder(
+            dim = 256,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    to_v_path = 'attn_layers.layers.0.1.to_v'
+    low_rank_dim = 32
+
+    wrapper_ttt = XLAutoregressiveWrapper(
+        model,
+        tbptt_steps = 1000,
+        episodic_mem_len = episodic_mem_len,
+        ttt_module_paths = (to_v_path,),
+        ttt_low_rank_paths = ((to_v_path, low_rank_dim),),
+        ttt_lr = 1e-2
+    )
+
+    net_prefix = 'net.' if episodic_mem_len > 0 else ''
+    wrapped_path = f'{net_prefix}{to_v_path}'
+
+    # the weight is replaced with two low rank matrices, which hold the ttt memories
+
+    to_v_wrapper = wrapper_ttt.ttt_wrappers[wrapped_path]
+
+    assert isinstance(to_v_wrapper.module, LowRankLinear)
+    assert to_v_wrapper.module.weight_a.shape == (256, low_rank_dim)
+    assert to_v_wrapper.module.weight_b.shape == (low_rank_dim, 256)
+
+    # the low rank matrices are both the source and target of the ttt update
+
+    assert (wrapped_path, wrapped_path) in wrapper_ttt.ttt_paths_map
+
+    x = torch.randint(0, 256, (2, 1025))
+
+    loss = wrapper_ttt(x)
+
+    assert exists(loss)
+
+    # the ttt memories are stored in the low rank matrices, no full weight
+
+    batch_params = to_v_wrapper.batch_params
+
+    assert 'weight' not in batch_params
+    assert batch_params['weight_a'].shape == (2, 256, low_rank_dim)
+    assert batch_params['weight_b'].shape == (2, low_rank_dim, 256)
+
+    # gradients flow into the low rank matrices
+
+    loss.backward()
+
+    for name in ('weight_a', 'weight_b'):
+        assert exists(getattr(to_v_wrapper.module, name).grad)
+
+    # the low rank matrices are updated at test time
+
+    params_before = {name: p.clone() for name, p in batch_params.items()}
+
+    wrapper_ttt(torch.randint(0, 256, (2, 1025)))
+
+    batch_params = to_v_wrapper.batch_params
+
+    for name in ('weight_a', 'weight_b'):
+        assert not torch.allclose(batch_params[name], params_before[name])
 
 def test_ttt_source_target_mapping():
     import copy

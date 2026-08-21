@@ -151,6 +151,40 @@ class EpisodicMemoryWrapper(Module):
 
         return self.net(x, **kwargs)
 
+# low rank linear module
+
+class LowRankLinear(Module):
+    """ replace a module's weight matrix with two low rank matrices, which hold the ttt memories instead of the weight itself """
+
+    def __init__(
+        self,
+        module,
+        low_rank_dim
+    ):
+        super().__init__()
+
+        assert module.weight.ndim == 2, 'low rank only supported for 2 dimensional weight matrices'
+
+        out_dim, in_dim = module.weight.shape
+
+        assert low_rank_dim < min(out_dim, in_dim), f'low rank dim ({low_rank_dim}) must be less than the minimum of the input ({in_dim}) and output ({out_dim}) dimensions of the weight matrix'
+
+        # two low rank matrices, no weight matrix, the memories will be stored in these
+
+        self.weight_a = nn.Parameter(torch.randn(out_dim, low_rank_dim))
+        self.weight_b = nn.Parameter(torch.randn(low_rank_dim, in_dim))
+
+        # carry over the bias, if it exists
+
+        self.bias = None
+
+        if exists(module.bias):
+            self.bias = nn.Parameter(module.bias.detach().clone())
+
+    def forward(self, x):
+        weight = self.weight_a @ self.weight_b
+        return F.linear(x, weight, self.bias)
+
 # ttt module wrapper
 
 class TTTModuleWrapper(Module):
@@ -233,6 +267,7 @@ class XLAutoregressiveWrapper(Module):
         ttt_use_muon = False,
         ttt_muon_steps = 5,
         ttt_muon_lr = 1e-2,
+        ttt_low_rank_paths = tuple(),
         ttt_custom_loss_module: Module | None = None,
         episodic_mem_len = 0
     ):
@@ -245,7 +280,8 @@ class XLAutoregressiveWrapper(Module):
         self.max_seq_len = net.max_seq_len
         self.output_is_log_prob = net.output_is_log_prob
 
-        self.ttt_module_paths = ttt_module_paths
+        self.loss_fn = F.cross_entropy if not self.output_is_log_prob else F.nll_loss
+
         self.ttt_lr = ttt_lr
         self.ttt_wd = ttt_wd
         self.ttt_use_muon = ttt_use_muon
@@ -266,16 +302,33 @@ class XLAutoregressiveWrapper(Module):
 
         self.ttt_paths_map = tuple(cast_tuple(item, 2) for item in ttt_module_paths)
 
-        # modify paths to have 'net.' prepended if wrapped
+        # low rank paths, specifying the path to a weight and the low rank dim, the weight will be replaced with two low rank matrices that hold the ttt memories
+
+        self.ttt_low_rank_paths_map = dict()
+
+        for item in ttt_low_rank_paths:
+            path, low_rank_dim = item
+            self.ttt_low_rank_paths_map[path] = low_rank_dim
+
+        # modify paths to have 'net.' prepended if wrapped, with the exception of the episodic memories which live at the top level of the wrapper
 
         if self.has_episodic_mem:
-            prepended_paths_map = []
-            for src, tgt in self.ttt_paths_map:
-                src = f'net.{src}' if src != 'episodic_mems' else src
-                tgt = f'net.{tgt}' if tgt != 'episodic_mems' else tgt
-                prepended_paths_map.append((src, tgt))
+            self.ttt_paths_map = tuple(
+                (f'net.{src}' if src != 'episodic_mems' else src, f'net.{tgt}' if tgt != 'episodic_mems' else tgt)
+                for src, tgt in self.ttt_paths_map
+            )
 
-            self.ttt_paths_map = tuple(prepended_paths_map)
+            self.ttt_low_rank_paths_map = dict(
+                (f'net.{path}', low_rank_dim)
+                for path, low_rank_dim in self.ttt_low_rank_paths_map.items()
+            )
+
+        # the low rank matrices are both the source and target of the ttt update, as the memories are stored in them
+
+        self.ttt_paths_map = self.ttt_paths_map + tuple(
+            (path, path)
+            for path in self.ttt_low_rank_paths_map.keys()
+        )
 
         # gather all unique wrappers
 
@@ -287,6 +340,13 @@ class XLAutoregressiveWrapper(Module):
                     continue
 
                 mod = get_module_by_path(net, path)
+
+                # maybe replace the weight at this path with two low rank matrices to hold the ttt memories
+
+                if path in self.ttt_low_rank_paths_map:
+                    mod = LowRankLinear(mod, self.ttt_low_rank_paths_map[path])
+                    set_module_by_path(net, path, mod)
+
                 wrapper = TTTModuleWrapper(mod)
                 set_module_by_path(net, path, wrapper)
 
@@ -328,8 +388,7 @@ class XLAutoregressiveWrapper(Module):
             loss_t = self.ttt_custom_loss_module(intermediates, mask = mask)
             loss_t_per_batch = masked_mean(loss_t, mask) if loss_t.ndim > 1 else loss_t
         else:
-            loss_fn = F.cross_entropy if not self.output_is_log_prob else F.nll_loss
-            loss_t = loss_fn(
+            loss_t = self.loss_fn(
                 rearrange(logits, 'b n c -> b c n'),
                 chunk_labels,
                 ignore_index = self.ignore_index,
@@ -557,8 +616,6 @@ class XLAutoregressiveWrapper(Module):
         split_labels = labels.split(max_seq_len, dim = -1)
         loss_weights = tuple((t.shape[-1] / seq_len) for t in split_x)
 
-        loss_fn = F.cross_entropy if not self.output_is_log_prob else F.nll_loss
-
         # go through each chunk and derive weighted losses
 
         total_loss = 0.
@@ -587,7 +644,7 @@ class XLAutoregressiveWrapper(Module):
                     if is_last_recurrent_step:
                         mems = intermediates.mems
 
-                    loss = loss_fn(
+                    loss = self.loss_fn(
                         rearrange(logits, 'b n c -> b c n'),
                         chunk_labels,
                         ignore_index = ignore_index,
