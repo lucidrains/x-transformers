@@ -921,6 +921,35 @@ def apply_polar_pos_emb(t, freqs):
 
     return out.type(orig_dtype)
 
+class LoRALinear(Module):
+    """ low-rank linear projection, or a bias-less linear when no rank is given """
+
+    def __new__(cls, dim_in, dim_out = None, dim = None):
+        dim_out = default(dim_out, dim_in)
+
+        if not exists(dim):
+            linear = LinearNoBias(dim_in, dim_out)
+            init_zero_(linear)
+            return linear
+
+        return super().__new__(cls)
+
+    def __init__(
+        self,
+        dim_in,
+        dim_out = None,
+        dim = None
+    ):
+        super().__init__()
+        dim_out = default(dim_out, dim_in)
+        assert dim < dim_in or dim < dim_out, f'rank ({dim}) must be less than either input ({dim_in}) or output ({dim_out}) dimension'
+        self.down = LinearNoBias(dim_in, dim)
+        self.up = LinearNoBias(dim, dim_out)
+        init_zero_(self.up)
+
+    def forward(self, x):
+        return self.up(self.down(x))
+
 # norms
 
 class Scale(Module):
@@ -1737,6 +1766,9 @@ class Attention(Module):
         gate_value_heads = False,
         swiglu_values = False,
         gate_values = False,
+        gate_values_rank = None,            # bottleneck dim for low-rank input gate (x); None = bias-less linear
+        output_gate = False,                # hybrid gated attention - https://arxiv.org/abs/2608.11805v1
+        output_gate_rank = None,            # bottleneck dim for low-rank output gate (h); None = bias-less linear
         zero_init_output = False,
         hard = False,
         max_attend_past = None,
@@ -1883,11 +1915,17 @@ class Attention(Module):
         # add GLU gating for aggregated values, from alphafold2
 
         self.to_v_gate = None
+        self.to_v_gate_activation = F.silu if swiglu_values else F.sigmoid
         if gate_values:
-            self.to_v_gate = nn.Linear(dim, out_dim)
-            self.to_v_gate_activation = F.silu if swiglu_values else F.sigmoid
-            nn.init.constant_(self.to_v_gate.weight, 0)
-            nn.init.constant_(self.to_v_gate.bias, 10)
+            self.to_v_gate = LoRALinear(dim, out_dim, dim = gate_values_rank)
+
+        # hybrid gated attention (HyGA) - https://arxiv.org/abs/2608.11805v1
+        # output gate (h): zero-initialized projection on the sdpa output, fused additively with the input gate (x) logits
+        # note: the output gate is concatenated headwise - a single projection across all heads, not per head
+
+        self.to_output_gate = None
+        if output_gate:
+            self.to_output_gate = LoRALinear(out_dim, dim = output_gate_rank)
 
         # add per head gating of the output values, from 'Attend to nothing' paper
 
@@ -2536,11 +2574,23 @@ class Attention(Module):
         if exists(o_delta):
             out = out + o_delta
 
-        # alphafold2 styled gating of the values
+        # hybrid gated attention (HyGA) - https://arxiv.org/abs/2608.11805v1
+        # x gate (input gate) and h gate (output gate) fused additively
 
-        if exists(self.to_v_gate):
-            gates = self.to_v_gate(x)
-            out = out * self.to_v_gate_activation(gates)
+        if exists(self.to_v_gate) or exists(self.to_output_gate):
+            gate_logits = 0.
+
+            if exists(self.to_v_gate):
+                gate_logits = gate_logits + self.to_v_gate(x)
+
+            if exists(self.to_output_gate):
+                gate_logits = gate_logits + self.to_output_gate(out)
+
+            out = einx.multiply(
+                'b n (h d), b n (h d) -> b n (h d)',
+                out,
+                self.to_v_gate_activation(gate_logits)
+            )
 
         # maybe orthogonal projected weighted values - "belief" attention
 

@@ -2788,4 +2788,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{zhou2026hybridgatedattention,
+    title   = {Hybrid Gated Attention},
+    author  = {Zekun Zhou and Ruobing Xie and Lanrui Wang and Weixuan Sun},
+    year    = {2026},
+    eprint  = {2608.11805},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL},
+    url     = {https://arxiv.org/abs/2608.11805},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
