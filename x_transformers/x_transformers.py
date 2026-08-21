@@ -1767,8 +1767,10 @@ class Attention(Module):
         swiglu_values = False,
         gate_values = False,
         gate_values_rank = None,            # bottleneck dim for low-rank input gate (x); None = bias-less linear
+        gate_values_headwise = False,       # per-head input gate (x); one gate logit per head, broadcasting over the head dimension
         output_gate = False,                # hybrid gated attention - https://arxiv.org/abs/2608.11805v1
         output_gate_rank = None,            # bottleneck dim for low-rank output gate (h); None = bias-less linear
+        output_gate_headwise = False,       # per-head output gate (h); one gate logit per head, broadcasting over the head dimension
         zero_init_output = False,
         hard = False,
         max_attend_past = None,
@@ -1912,20 +1914,26 @@ class Attention(Module):
         self.laser = laser
         self.laser_softclamp_value = laser_softclamp_value
 
-        # add GLU gating for aggregated values, from alphafold2
-
-        self.to_v_gate = None
-        self.to_v_gate_activation = F.silu if swiglu_values else F.sigmoid
-        if gate_values:
-            self.to_v_gate = LoRALinear(dim, out_dim, dim = gate_values_rank)
-
         # hybrid gated attention (HyGA) - https://arxiv.org/abs/2608.11805v1
-        # output gate (h): zero-initialized projection on the sdpa output, fused additively with the input gate (x) logits
-        # note: the output gate is concatenated headwise - a single projection across all heads, not per head
+        # x gate (input gate) and h gate (output gate) fused additively into the shared gate logits
+        # each gate projects to one logit per head (b n h) when headwise, or per dimension (b n (h d)) otherwise
 
-        self.to_output_gate = None
-        if output_gate:
-            self.to_output_gate = LoRALinear(out_dim, dim = output_gate_rank)
+        self.gate_values_headwise = gate_values_headwise
+        self.output_gate_headwise = output_gate_headwise
+
+        assert not (gate_values_headwise and exists(gate_values_rank)), 'gate_values_rank cannot be set when gate_values_headwise is enabled - the headwise gate projects to heads directly'
+        assert not (output_gate_headwise and exists(output_gate_rank)), 'output_gate_rank cannot be set when output_gate_headwise is enabled - the headwise gate projects to heads directly'
+
+        self.to_v_gate_activation = F.silu if swiglu_values else F.sigmoid
+
+        self.to_v_gate = LoRALinear(dim, heads if gate_values_headwise else out_dim, dim = gate_values_rank) if gate_values else None
+        self.to_output_gate = LoRALinear(out_dim, heads if output_gate_headwise else out_dim, dim = output_gate_rank) if output_gate else None
+
+        self.to_head_space_headwise = Rearrange('b n h -> b h n 1')
+        self.to_head_space_dimwise = Rearrange('b n (h d) -> b h n d', h = heads)
+
+        self.to_v_gate_head_space = self.to_head_space_headwise if gate_values_headwise else self.to_head_space_dimwise
+        self.to_output_gate_head_space = self.to_head_space_headwise if output_gate_headwise else self.to_head_space_dimwise
 
         # add per head gating of the output values, from 'Attend to nothing' paper
 
@@ -2576,21 +2584,21 @@ class Attention(Module):
 
         # hybrid gated attention (HyGA) - https://arxiv.org/abs/2608.11805v1
         # x gate (input gate) and h gate (output gate) fused additively
+        # each gate can be per-head (b n h) or per-dimension (b n (h d)); both are normalized to the
+        # head space, where a per-head gate (b h n 1) broadcasts over the head dimension of the other
 
         if exists(self.to_v_gate) or exists(self.to_output_gate):
             gate_logits = 0.
 
             if exists(self.to_v_gate):
-                gate_logits = gate_logits + self.to_v_gate(x)
+                gate_logits = gate_logits + self.to_v_gate_head_space(self.to_v_gate(x))
 
             if exists(self.to_output_gate):
-                gate_logits = gate_logits + self.to_output_gate(out)
+                gate_logits = gate_logits + self.to_output_gate_head_space(self.to_output_gate(out))
 
-            out = einx.multiply(
-                'b n (h d), b n (h d) -> b n (h d)',
-                out,
-                self.to_v_gate_activation(gate_logits)
-            )
+            out = self.to_head_space_dimwise(out) * self.to_v_gate_activation(gate_logits)
+
+            out = self.merge_heads(out)
 
         # maybe orthogonal projected weighted values - "belief" attention
 

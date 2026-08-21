@@ -2377,3 +2377,29 @@ def test_xm_latent_decoder(
 
     loss_masked = decoder(x_padded, mask = mask, candidates = 3)
     assert loss_masked.ndim == 0 and not torch.isnan(loss_masked)
+
+@param('x_config', ((False, None), (False, 8), (True, None)))
+@param('h_config', ((False, None), (False, 8), (True, None)))
+@param('swiglu_values', (False, True))
+def test_attn_gating(x_config, h_config, swiglu_values):
+    x_headwise, x_rank = x_config
+    h_headwise, h_rank = h_config
+
+    attn = Attention(
+        dim = 128,
+        heads = 4,
+        dim_head = 32,
+        causal = True,
+        gate_values = True,
+        gate_values_headwise = x_headwise,
+        gate_values_rank = x_rank,
+        output_gate = True,
+        output_gate_headwise = h_headwise,
+        output_gate_rank = h_rank,
+        swiglu_values = swiglu_values
+    )
+
+    x = torch.randn(2, 32, 128)
+    out = attn(x)
+
+    out.sum().backward()
