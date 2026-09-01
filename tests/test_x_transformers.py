@@ -1191,6 +1191,44 @@ def test_beam_search(stochastic):
     assert beams.shape == (4, 2, 10)
     assert scores.shape == (4, 2)
 
+def test_beam_search_kv_cache_parity():
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    torch.manual_seed(0)
+
+    model = TransformerWrapper(
+        num_tokens = 11,
+        max_seq_len = 32,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 2,
+            heads = 2,
+            rotary_pos_emb = True
+        )
+    )
+
+    wrapper = AutoregressiveWrapper(model)
+    prompts = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+    uncached_beams, uncached_scores = wrapper.beam_search(
+        prompts,
+        seq_len = 5,
+        beams = 3,
+        cache_kv = False,
+        return_beams_and_scores = True
+    )
+
+    cached_beams, cached_scores = wrapper.beam_search(
+        prompts,
+        seq_len = 5,
+        beams = 3,
+        cache_kv = True,
+        return_beams_and_scores = True
+    )
+
+    assert torch.equal(cached_beams, uncached_beams)
+    assert torch.allclose(cached_scores, uncached_scores, atol = 1e-5)
+
 
 @param('num_pooled_tokens', (1, 3))
 @param('attn_pool_depth', (1, 3))

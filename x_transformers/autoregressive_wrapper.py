@@ -330,6 +330,10 @@ class AutoregressiveWrapper(Module):
 
                 out = out[flattened_beam_indices]
 
+                if should_cache:
+                    parent_beam_indices = flattened_beam_indices // beams
+                    modify_cached_kv(cache, lambda t: t[parent_beam_indices])
+
             scores = rearrange(scores, 'b beams -> (b beams)')
 
             if not exists(eos_token):
