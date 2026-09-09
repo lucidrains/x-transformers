@@ -42,7 +42,7 @@ def sample_from_mean_variance(
     std = variance.clamp(min = eps).sqrt()
     return torch.normal(mean, std * temperature)
 
-def masked_mean(t, mask):
+def batch_masked_mean(t, mask):
     t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
 
     num = reduce(t, 'b n d -> b', 'sum')
@@ -221,7 +221,7 @@ class ContinuousTransformerWrapper(Module):
             intermediates.memory_tokens = m
 
         if self.average_pool_embed:
-            x = masked_mean(x, mask = orig_mask)
+            x = masked_mean(x, mask = orig_mask, dim = 1)
 
         # maybe linear project out
 
@@ -466,7 +466,7 @@ class ContinuousAutoregressiveWrapper(Module):
             assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
 
             if self.equal_loss_weight_batch:
-                loss = masked_mean(loss, mask)
+                loss = batch_masked_mean(loss, mask)
             else:
                 loss = loss[mask]
 
