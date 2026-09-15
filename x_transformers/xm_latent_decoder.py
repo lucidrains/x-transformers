@@ -26,12 +26,8 @@ def default(*args):
 
 # winner callback helpers
 
-def lowest_entropy_winner_fn(logits: Tensor) -> Tensor:
-    """ returns candidate index with lowest mean token entropy """
-    probs = logits.softmax(dim = -1)
-    log_probs = logits.log_softmax(dim = -1)
-    entropy = - (probs * log_probs).sum(dim = -1).mean(dim = -1)
-    return entropy.argmin(dim = -1)
+def lowest_loss_winner_fn(losses: Tensor, intermediates = None) -> Tensor:
+    return losses.argmin(dim = -1)
 
 # main class
 
@@ -51,7 +47,8 @@ class XMLatentDecoder(Module):
         ignore_index = -100,
         latent_drop_prob = 0.,
         always_latent_proj = False,
-        repulsive_loss_weight = 0.
+        repulsive_loss_weight = 0.,
+        winner_fn: Callable = lowest_loss_winner_fn
     ):
         super().__init__()
         self.net = net
@@ -76,6 +73,7 @@ class XMLatentDecoder(Module):
         # repulsive loss force between candidate distributions
 
         self.repulsive_loss_weight = repulsive_loss_weight
+        self.winner_fn = winner_fn
 
     @property
     def max_seq_len(self):
@@ -106,9 +104,9 @@ class XMLatentDecoder(Module):
         self,
         start_tokens: Tensor,
         seq_len: int,
+        winner_fn: Callable,
         candidates: int | None = None,
         latents: Tensor | None = None,
-        winner_fn: Callable = lowest_entropy_winner_fn,
         return_best_latents = False,
         **kwargs
     ) -> Tensor | tuple[Tensor, tuple[Tensor, Tensor]]:
@@ -123,10 +121,10 @@ class XMLatentDecoder(Module):
 
         winner = winner_fn(candidate_logits)
 
-        if winner.ndim <= 1:
-            best_latents = batched_index_select(latents, winner, dim = 1)
-        else:
-            best_latents = winner
+        if winner.ndim > 1:
+            winner = winner.argmax(dim = -1)
+
+        best_latents = batched_index_select(latents, winner, dim = 1) if winner.ndim <= 1 else winner
 
         out = self.generate(
             start_tokens = start_tokens,
@@ -150,6 +148,7 @@ class XMLatentDecoder(Module):
         return_loss = True,
         repulsive_loss_weight = None,
         mask: Tensor | None = None,
+        winner_fn: Callable | None = None,
         **kwargs
     ):
         candidates = default(candidates, self.candidates)
@@ -157,6 +156,7 @@ class XMLatentDecoder(Module):
         latent_drop_prob = default(latent_drop_prob, self.latent_drop_prob)
 
         repulsive_loss_weight = default(repulsive_loss_weight, self.repulsive_loss_weight)
+        winner_fn = default(winner_fn, self.winner_fn)
 
         batch, device = seq.shape[0], seq.device
 
@@ -210,8 +210,11 @@ class XMLatentDecoder(Module):
 
         losses = []
         all_logits = []
+        all_intermediates = []
 
         calc_repulsion = repulsive_loss_weight > 0. and candidates > 1
+        needs_intermediates = winner_fn is not lowest_loss_winner_fn
+        collect_logits = calc_repulsion or needs_intermediates
 
         for start in range(0, total, chunk_size):
             chunk_batch_size = min(total - start, chunk_size)
@@ -224,13 +227,24 @@ class XMLatentDecoder(Module):
             if exists(mask):
                 chunk_kwargs['mask'] = mask_candidates[chunk]
 
-            logits = self.net(chunk_seq, prepend_embeds = chunk_latents, excise_prepend_embeds = True, **chunk_kwargs)
+            net_out = self.net(
+                chunk_seq,
+                prepend_embeds = chunk_latents,
+                excise_prepend_embeds = True,
+                return_intermediates = needs_intermediates,
+                **chunk_kwargs
+            )
+
+            logits, intermediates = net_out if needs_intermediates else (net_out, None)
+
+            if needs_intermediates:
+                all_intermediates.append(intermediates)
 
             if not return_loss:
                 all_logits.append(logits)
                 continue
 
-            if calc_repulsion:
+            if collect_logits:
                 all_logits.append(logits)
 
             chunk_labels = labels_candidates[chunk]
@@ -251,18 +265,35 @@ class XMLatentDecoder(Module):
             candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
             return candidate_logits, latents
 
+        if collect_logits:
+            raw_logits = cat(all_logits, dim = 0)
+            candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
+
         # selection (winner-takes-all candidate selection - Forward XM)
 
         candidate_losses = reduce(cat(losses, dim = 0), '(b k) -> b k', 'mean', b = batch, k = candidates)
-        winner_loss = candidate_losses.amin(dim = -1).mean()
+
+        intermediates = None
+
+        if needs_intermediates:
+            intermediates = all_intermediates[0] if len(all_intermediates) == 1 else all_intermediates
+            intermediates.logits = candidate_logits
+
+        try:
+            winner = winner_fn(candidate_losses, intermediates)
+        except TypeError:
+            winner = winner_fn(candidate_losses)
+
+        if winner.ndim > 1:
+            winner = winner.argmax(dim = -1)
+
+        winner_loss = batched_index_select(candidate_losses, winner, dim = 1).mean()
 
         if not calc_repulsion:
             return winner_loss
 
         # diversity (repulsive loss via jensen-shannon divergence)
 
-        raw_logits = cat(all_logits, dim = 0)
-        candidate_logits = rearrange(raw_logits, '(b k) ... -> b k ...', b = batch, k = candidates)
         log_prob = candidate_logits.log_softmax(dim = -1)
 
         log_mixture = log_prob.logsumexp(dim = 1) - math.log(candidates)

@@ -2569,24 +2569,19 @@ def test_xm_latent_decoder(
 
     # test candidate latents generate
 
-    gen_candidates = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3)
-    assert gen_candidates.shape == (2, 8)
-
-    # test returning best latents
-
-    gen_cand, (all_latents, winner_indices) = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, return_best_latents = True)
-    assert gen_cand.shape == (2, 8)
-    assert all_latents.shape == (2, 3, 4, 64)
-    assert winner_indices.shape == (2,)
-
-    # test custom winner_fn callback
-
     def max_confidence(logits):
         top2 = logits.softmax(dim = -1).topk(2, dim = -1).values
         return (top2[..., 0] - top2[..., 1]).mean(dim = -1).argmax(dim = -1)
 
-    gen_custom = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, winner_fn = max_confidence)
-    assert gen_custom.shape == (2, 8)
+    gen_candidates = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, winner_fn = max_confidence)
+    assert gen_candidates.shape == (2, 8)
+
+    # test returning best latents
+
+    gen_cand, (all_latents, winner_indices) = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, candidates = 3, winner_fn = max_confidence, return_best_latents = True)
+    assert gen_cand.shape == (2, 8)
+    assert all_latents.shape == (2, 3, 4, 64)
+    assert winner_indices.shape == (2,)
 
     # test sequence mask & variable lengths
 
@@ -2597,6 +2592,18 @@ def test_xm_latent_decoder(
 
     loss_masked = decoder(x_padded, mask = mask, candidates = 3)
     assert loss_masked.ndim == 0 and not torch.isnan(loss_masked)
+
+    # test custom winner_fn (ex. highest entropy)
+
+    def highest_entropy_winner(losses, intermediates):
+        logits = intermediates.logits
+        probs = logits.softmax(dim = -1)
+        log_probs = logits.log_softmax(dim = -1)
+        return - (probs * log_probs).sum(dim = -1).mean(dim = -1)
+
+    loss = decoder(x, winner_fn = highest_entropy_winner)
+    assert not torch.isnan(loss)
+    loss.backward()
 
 @param('x_config', ((False, None), (False, 8), (True, None)))
 @param('h_config', ((False, None), (False, 8), (True, None)))
