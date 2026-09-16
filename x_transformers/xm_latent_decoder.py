@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import math
-from random import random
-from typing import Callable
+from random import random, randrange
+from typing import Callable, Sequence
 
 import torch
 from torch import nn, Tensor, cat
@@ -48,7 +48,8 @@ class XMLatentDecoder(Module):
         latent_drop_prob = 0.,
         always_latent_proj = False,
         repulsive_loss_weight = 0.,
-        winner_fn: Callable = lowest_loss_winner_fn
+        winner_fn: Callable | Sequence[Callable] = lowest_loss_winner_fn,
+        winner_fns: Sequence[Callable] | None = None
     ):
         super().__init__()
         self.net = net
@@ -73,7 +74,21 @@ class XMLatentDecoder(Module):
         # repulsive loss force between candidate distributions
 
         self.repulsive_loss_weight = repulsive_loss_weight
-        self.winner_fn = winner_fn
+
+        winner_fns = default(winner_fns, winner_fn)
+        if not isinstance(winner_fns, (tuple, list)):
+            winner_fns = (winner_fns,) * num_latents
+
+        assert len(winner_fns) == num_latents, f'winner_fns length ({len(winner_fns)}) must match num_latents ({num_latents})'
+        self.winner_fns = tuple(winner_fns)
+
+    @property
+    def winner_fn(self):
+        return self.winner_fns[0]
+
+    @winner_fn.setter
+    def winner_fn(self, fn: Callable):
+        self.winner_fns = (fn,) * self.num_latents
 
     @property
     def max_seq_len(self):
@@ -104,39 +119,66 @@ class XMLatentDecoder(Module):
         self,
         start_tokens: Tensor,
         seq_len: int,
-        winner_fn: Callable,
+        winner_fn: Callable | Sequence[Callable] | None = None,
+        winner_fns: Sequence[Callable] | None = None,
         candidates: int | None = None,
         latents: Tensor | None = None,
+        active_latent_index: int | None = None,
         return_best_latents = False,
         **kwargs
     ) -> Tensor | tuple[Tensor, tuple[Tensor, Tensor]]:
 
-        candidate_logits, latents = self(
-            start_tokens,
-            latents = latents,
-            candidates = candidates,
-            return_loss = False,
-            **kwargs
-        )
+        winner_fns = default(winner_fns, winner_fn, self.winner_fns)
+        is_seq_winners = isinstance(winner_fns, (tuple, list))
 
-        winner = winner_fn(candidate_logits)
+        if not is_seq_winners:
+            winner_fns = (winner_fns,) * self.num_latents
 
-        if winner.ndim > 1:
-            winner = winner.argmax(dim = -1)
+        batch, device = start_tokens.shape[0], start_tokens.device
 
-        best_latents = batched_index_select(latents, winner, dim = 1) if winner.ndim <= 1 else winner
+        if not exists(latents):
+            latents = torch.randn(batch, self.num_latents, self.latent_dim, device = device)
+
+        latent_indices = [active_latent_index] if exists(active_latent_index) else (range(self.num_latents) if is_seq_winners else [0])
+
+        all_winners = []
+        last_candidate_latents = None
+
+        for latent_idx in latent_indices:
+            curr_winner_fn = winner_fns[latent_idx]
+
+            candidate_logits, candidate_latents = self(
+                start_tokens,
+                latents = latents,
+                candidates = candidates,
+                active_latent_index = latent_idx,
+                return_loss = False,
+                **kwargs
+            )
+
+            last_candidate_latents = candidate_latents
+
+            winner = curr_winner_fn(candidate_logits)
+
+            while winner.ndim > 1:
+                winner = winner.argmax(dim = -1)
+
+            all_winners.append(winner)
+
+            latents = batched_index_select(candidate_latents, winner, dim = 1) if winner.ndim <= 1 else winner
 
         out = self.generate(
             start_tokens = start_tokens,
             seq_len = seq_len,
-            latents = best_latents,
+            latents = latents,
             **kwargs
         )
 
         if not return_best_latents:
             return out
 
-        return out, (latents, winner)
+        winner_result = all_winners[0] if len(all_winners) == 1 else torch.stack(all_winners, dim = -1)
+        return out, (last_candidate_latents, winner_result)
 
     def forward(
         self,
@@ -148,7 +190,9 @@ class XMLatentDecoder(Module):
         return_loss = True,
         repulsive_loss_weight = None,
         mask: Tensor | None = None,
-        winner_fn: Callable | None = None,
+        winner_fn: Callable | Sequence[Callable] | None = None,
+        winner_fns: Sequence[Callable] | None = None,
+        active_latent_index: int | None = None,
         **kwargs
     ):
         candidates = default(candidates, self.candidates)
@@ -156,7 +200,15 @@ class XMLatentDecoder(Module):
         latent_drop_prob = default(latent_drop_prob, self.latent_drop_prob)
 
         repulsive_loss_weight = default(repulsive_loss_weight, self.repulsive_loss_weight)
-        winner_fn = default(winner_fn, self.winner_fn)
+
+        winner_fns = default(winner_fns, winner_fn, self.winner_fns)
+        if not isinstance(winner_fns, (tuple, list)):
+            winner_fns = (winner_fns,) * self.num_latents
+
+        active_latent_index = default(active_latent_index, randrange(self.num_latents))
+        assert 0 <= active_latent_index < self.num_latents
+
+        winner_fn = winner_fns[active_latent_index]
 
         batch, device = seq.shape[0], seq.device
 
@@ -193,9 +245,11 @@ class XMLatentDecoder(Module):
         # handle custom or random Gaussian noise latent candidates
 
         if not exists(latents):
-            latents = torch.randn(batch, candidates, self.num_latents, self.latent_dim, device = device)
-        elif latents.ndim == 3:
-            latents = repeat(latents, 'b n d -> b k n d', k = candidates)
+            latents = torch.randn(batch, self.num_latents, self.latent_dim, device = device)
+
+        if latents.ndim == 3:
+            latents = repeat(latents, 'b n d -> b k n d', k = candidates).clone()
+            latents[:, :, active_latent_index] = torch.randn(batch, candidates, self.latent_dim, device = device, dtype = latents.dtype)
 
         latent_cond = self.latent_proj(rearrange(latents, 'b k n d -> (b k) n d'))
 

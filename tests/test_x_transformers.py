@@ -2605,6 +2605,66 @@ def test_xm_latent_decoder(
     assert not torch.isnan(loss)
     loss.backward()
 
+def test_xm_factorized_latent_decoder():
+    from x_transformers.xm_latent_decoder import XMLatentDecoder, lowest_loss_winner_fn
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    def highest_entropy(losses, intermediates):
+        logits = intermediates.logits
+        probs = logits.softmax(dim = -1)
+        log_probs = logits.log_softmax(dim = -1)
+        return - (probs * log_probs).sum(dim = -1).mean(dim = -1)
+
+    winner_fns = (
+        lowest_loss_winner_fn,
+        highest_entropy
+    )
+
+    decoder = XMLatentDecoder(
+        net = model,
+        num_latents = 2,
+        candidates = 3,
+        winner_fns = winner_fns
+    )
+
+    x = torch.randint(0, 256, (2, 32))
+
+    # forward loss (stochastically selects one latent to explore while holding others constant)
+
+    loss = decoder(x)
+    assert not torch.isnan(loss)
+    loss.backward()
+
+    # researcher can also explicitly specify which latent to explore
+
+    loss_latent_1 = decoder(x, active_latent_index = 1)
+    assert not torch.isnan(loss_latent_1)
+
+    # factorized generation with candidate latents
+
+    start_tokens = x[:, :4]
+
+    def max_confidence(logits):
+        top2 = logits.softmax(dim = -1).topk(2, dim = -1).values
+        return (top2[..., 0] - top2[..., 1]).mean(dim = -1).argmax(dim = -1)
+
+    gen = decoder.generate_with_candidate_latents(
+        start_tokens,
+        seq_len = 8,
+        winner_fn = max_confidence
+    )
+
+    assert gen.shape == (2, 8)
+
 @param('x_config', ((False, None), (False, 8), (True, None)))
 @param('h_config', ((False, None), (False, 8), (True, None)))
 @param('swiglu_values', (False, True))
