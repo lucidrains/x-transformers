@@ -38,7 +38,9 @@ class XMLatentDecoder(Module):
     """
     Latent Variable Decoder based on Explorative Modeling (Forward XM)
     by Alexi Gladstone et al. (https://arxiv.org/abs/2607.27372).
+    and Lei Yang (https://arxiv.org/abs/2401.00036)
     """
+
     def __init__(
         self,
         net: Module,
