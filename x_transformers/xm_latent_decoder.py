@@ -89,19 +89,41 @@ class XMLatentDecoder(Module):
     def max_seq_len(self):
         return self.net.max_seq_len
 
+    def init_latents(
+        self,
+        latents: Tensor | Sequence[Tensor | None] | None,
+        batch: int,
+        device = None
+    ) -> Tensor:
+        if not exists(latents):
+            return torch.randn(batch, self.num_latents, self.latent_dim, device = device)
+
+        # a specific latent or None can be given for each slot, with None randomly initialized
+
+        if not isinstance(latents, (tuple, list)):
+            return latents
+
+        assert len(latents) == self.num_latents, f'latents length ({len(latents)}) must match num_latents ({self.num_latents})'
+
+        ref = default(*latents)
+        device, dtype = (ref.device, ref.dtype) if exists(ref) else (device, None)
+
+        latents = [default(latent, torch.randn(batch, self.latent_dim, device = device, dtype = dtype)) for latent in latents]
+
+        return torch.stack(latents, dim = 1)
+
     @temp_eval
     @torch.no_grad()
     def generate(
         self,
         start_tokens: Tensor,
         seq_len: int,
-        latents: Tensor | None = None,
+        latents: Tensor | Sequence[Tensor | None] | None = None,
         **kwargs
     ) -> Tensor:
         batch, device = start_tokens.shape[0], start_tokens.device
 
-        if not exists(latents):
-            latents = torch.randn(batch, self.num_latents, self.latent_dim, device = device)
+        latents = self.init_latents(latents, batch, device = device)
 
         latent_cond = self.latent_proj(latents)
 
@@ -117,7 +139,7 @@ class XMLatentDecoder(Module):
         winner_fn: Callable | Sequence[Callable] | None = None,
         winner_fns: Sequence[Callable] | None = None,
         candidates: int | None = None,
-        latents: Tensor | None = None,
+        latents: Tensor | Sequence[Tensor | None] | None = None,
         active_latent_index: int | None = None,
         return_best_latents = False,
         **kwargs
@@ -130,8 +152,7 @@ class XMLatentDecoder(Module):
 
         batch, device = start_tokens.shape[0], start_tokens.device
 
-        if not exists(latents):
-            latents = torch.randn(batch, self.num_latents, self.latent_dim, device = device)
+        latents = self.init_latents(latents, batch, device = device)
 
         # a single winner fn selects winners for the first latent, while a sequence of winner fns sweeps all latents
 
@@ -174,7 +195,7 @@ class XMLatentDecoder(Module):
     def forward(
         self,
         seq: Tensor,
-        latents: Tensor | None = None,
+        latents: Tensor | Sequence[Tensor | None] | None = None,
         candidates = None,
         max_batch_size = None,
         latent_drop_prob = None,
@@ -233,8 +254,7 @@ class XMLatentDecoder(Module):
 
         # handle custom or random Gaussian noise latent candidates
 
-        if not exists(latents):
-            latents = torch.randn(batch, self.num_latents, self.latent_dim, device = device)
+        latents = self.init_latents(latents, batch, device = device)
 
         # only the active latent is explored, all other latents held constant across candidates
 

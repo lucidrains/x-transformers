@@ -2678,6 +2678,66 @@ def test_xm_factorized_latent_decoder():
 
     assert gen.shape == (2, 8)
 
+def test_xm_flexible_slot_latents():
+    from x_transformers.xm_latent_decoder import XMLatentDecoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4
+        )
+    )
+
+    decoder = XMLatentDecoder(
+        net = model,
+        num_latents = 4,
+        candidates = 3
+    )
+
+    x = torch.randint(0, 256, (2, 32))
+    start_tokens = x[:, :4]
+
+    z0, z1, z2, z3 = (torch.randn(2, 64) for _ in range(4))
+
+    # a specific latent can be passed for one of the slots, multiple, or all, with None for random
+
+    _, cand_latents = decoder(x, latents = (z0, None, None, None), active_latent_index = 1, return_loss = False)
+    assert cand_latents.shape == (2, 3, 4, 64)
+    assert torch.allclose(cand_latents[:, 0, 0], z0)
+
+    _, cand_latents = decoder(x, latents = (z0, None, z2, None), active_latent_index = 1, return_loss = False)
+    assert torch.allclose(cand_latents[:, 0, 0], z0)
+    assert torch.allclose(cand_latents[:, 0, 2], z2)
+
+    _, cand_latents = decoder(x, latents = (z0, z1, z2, z3), active_latent_index = 0, return_loss = False)
+    assert torch.allclose(cand_latents[:, 0, 1], z1)
+    assert torch.allclose(cand_latents[:, 0, 2], z2)
+    assert torch.allclose(cand_latents[:, 0, 3], z3)
+
+    # one latent per slot must be given
+
+    with pytest.raises(AssertionError):
+        decoder(x, latents = (z0, z1))
+
+    # forward loss, generation, and candidate generation accept the same
+
+    loss = decoder(x, latents = (z0, None, z2, None), active_latent_index = 1)
+    assert not torch.isnan(loss)
+    loss.backward()
+
+    gen = decoder.generate(start_tokens, seq_len = 8, latents = (z0, None, None, None))
+    assert gen.shape == (2, 8)
+
+    def max_confidence(logits):
+        top2 = logits.softmax(dim = -1).topk(2, dim = -1).values
+        return (top2[..., 0] - top2[..., 1]).mean(dim = -1).argmax(dim = -1)
+
+    gen = decoder.generate_with_candidate_latents(start_tokens, seq_len = 8, winner_fn = max_confidence, latents = (None, None, z2, None), active_latent_index = 1)
+    assert gen.shape == (2, 8)
+
 @param('x_config', ((False, None), (False, 8), (True, None)))
 @param('h_config', ((False, None), (False, 8), (True, None)))
 @param('swiglu_values', (False, True))
