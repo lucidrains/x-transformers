@@ -2638,6 +2638,19 @@ def test_xm_factorized_latent_decoder():
 
     x = torch.randint(0, 256, (2, 32))
 
+    # verify that when exploring one latent, other latents are held constant across candidates
+    # while the transformer is conditioned on both latents
+
+    _, cand_latents_0 = decoder(x, active_latent_index = 0, return_loss = False)
+    assert cand_latents_0.shape == (2, 3, 2, 64)
+    assert torch.allclose(cand_latents_0[:, 0, 1], cand_latents_0[:, 1, 1])
+    assert not torch.allclose(cand_latents_0[:, 0, 0], cand_latents_0[:, 1, 0])
+
+    _, cand_latents_1 = decoder(x, active_latent_index = 1, return_loss = False)
+    assert cand_latents_1.shape == (2, 3, 2, 64)
+    assert torch.allclose(cand_latents_1[:, 0, 0], cand_latents_1[:, 1, 0])
+    assert not torch.allclose(cand_latents_1[:, 0, 1], cand_latents_1[:, 1, 1])
+
     # forward loss (stochastically selects one latent to explore while holding others constant)
 
     loss = decoder(x)
