@@ -203,7 +203,7 @@ loss = pali(
     prompt,
     output_text,
     mask = prompt_mask,
-    src_prepend_embeds = img_embeds             # will preprend image embeddings to encoder text embeddings before attention
+    src_prepend_embeds = img_embeds             # will prepend image embeddings to encoder text embeddings before attention
 )
 
 loss.backward()
