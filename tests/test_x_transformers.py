@@ -13,7 +13,8 @@ from x_transformers.x_transformers import (
     LinearNoBias,
     AttentionLayers,
     Attention,
-    Attend
+    Attend,
+    disable_autocast
 )
 
 from x_transformers.neo_mlp import (
@@ -32,6 +33,30 @@ def with_seed(seed):
             return fn(*args, **kwargs)
         return inner
     return decorator
+
+def test_disable_autocast_uses_tensor_device():
+    @disable_autocast
+    def matrix_multiply(x, y):
+        return x @ y
+
+    x = torch.randn(4, 4)
+
+    with torch.autocast('cpu', dtype = torch.bfloat16):
+        out = matrix_multiply(x, x)
+
+    assert out.dtype == torch.float32
+
+@pytest.mark.skipif(
+    not hasattr(torch, 'xpu') or not torch.xpu.is_available(),
+    reason = 'XPU is not available'
+)
+def test_flash_attention_on_xpu():
+    q = torch.randn(2, 4, 8, 16, device = 'xpu')
+    out, _ = Attend(flash = True)(q, q, q)
+
+    assert out.device.type == 'xpu'
+    assert out.shape == q.shape
+    assert torch.isfinite(out).all()
 
 def test_readme():
     model = XTransformer(

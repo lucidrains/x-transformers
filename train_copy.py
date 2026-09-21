@@ -12,7 +12,11 @@ GENERATE_EVERY  = 100
 NUM_TOKENS = 16 + 2
 ENC_SEQ_LEN = 32
 DEC_SEQ_LEN = 64 + 1
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+DEVICE = torch.device(
+    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
+    else 'cuda' if torch.cuda.is_available()
+    else 'cpu'
+)
 
 # helpers
 

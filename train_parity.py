@@ -19,6 +19,12 @@ MEET_CRITERIA_THRES_INCREASE_LEN = 10
 
 HYBRIDIZE_WITH_RNN = True
 
+DEVICE = torch.device(
+    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
+    else 'cuda' if torch.cuda.is_available()
+    else 'cpu'
+)
+
 # rnn for fully resolving state tracking by hybridization
 # but will also look into gated delta net + negative eigenvalues (Songlin Yang et al) as a parallel solution
 
@@ -49,7 +55,7 @@ model = TransformerWrapper(
         shift_tokens = 1, # helps a lot with parity training, but not able to generalize on its own
         **decoder_kwargs
     )
-).cuda()
+).to(DEVICE)
 
 # optimizer
 
@@ -61,7 +67,7 @@ optimizer = Lion(model.parameters(), lr = LEARNING_RATE, cautious_factor = 0.1)
 
 def cycle(length):
     while True:
-        seq = torch.randint(0, 2, (BATCH_SIZE, length)).cuda()
+        seq = torch.randint(0, 2, (BATCH_SIZE, length), device = DEVICE)
         labels = (seq.cumsum(dim = -1) % 2)
         yield (seq, labels)
 

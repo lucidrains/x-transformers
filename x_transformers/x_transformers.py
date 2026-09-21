@@ -77,6 +77,24 @@ LinearNoBias = partial(nn.Linear, bias = False)
 def exists(val):
     return val is not None
 
+def disabled_autocast_context(device_type):
+    try:
+        return autocast(device_type, enabled = False)
+    except RuntimeError:
+        return nullcontext()
+
+def disable_autocast(fn):
+    @wraps(fn)
+    def inner(*args, **kwargs):
+        flattened_args, _ = tree_flatten((args, kwargs))
+        tensor_arg = next((arg for arg in flattened_args if is_tensor(arg)), None)
+        autocast_context = disabled_autocast_context(tensor_arg.device.type) if exists(tensor_arg) else nullcontext()
+
+        with autocast_context:
+            return fn(*args, **kwargs)
+
+    return inner
+
 def default(*args):
     for arg in args:
         if exists(arg):
@@ -831,7 +849,7 @@ class RotaryEmbedding(Module):
         t = arange(seq_len, device = device)
         return self.forward(t)
 
-    @autocast('cuda', enabled = False)
+    @disable_autocast
     def forward(self, t, offset = 0):
         max_pos = t.max() + 1
 
@@ -858,7 +876,7 @@ def rotate_half(x):
     x = stack((-x2, x1), dim = -1)
     return rearrange(x, '... d r -> ... (d r)')
 
-@autocast('cuda', enabled = False)
+@disable_autocast
 def apply_rotary_pos_emb(t, freqs, scale = 1):
     rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
 
@@ -897,7 +915,7 @@ class PolarEmbedding(Module):
         if bias_uniform_init:
             self.learned_bias.uniform_(-2. * math.pi, 0.)
 
-    @autocast('cuda', enabled = False)
+    @disable_autocast
     def forward(self, t, offset = 0):
         max_pos = t.max() + 1
 
@@ -910,7 +928,7 @@ class PolarEmbedding(Module):
 
         return freqs, bias
 
-@autocast('cuda', enabled = False)
+@disable_autocast
 def apply_polar_pos_emb(t, freqs):
     rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
     freqs = freqs[:, -seq_len:]
@@ -4537,7 +4555,7 @@ class TransformerWrapper(Module):
         # handle maybe combine mixture
 
         if exists(combine_mixture):
-            with autocast('cuda', enabled = False):
+            with disabled_autocast_context(logits.device.type):
                 prob = logits.softmax(dim = -1)
                 mos = einsum('... k d, ... k -> ... d', prob, combine_mixture)
                 logits = log(mos)
