@@ -133,7 +133,6 @@ def train(
     num_rollouts: int = 2,
     dynamic_rollout_loss_weight: bool = True,
     dynamic_loss_decay: float = 1.0,
-    dynamic_loss_threshold: float = 0.5,
     max_grad_norm: float | None = 100.0
 ):
     wandb.init(project = wandb_project, name = wandb_run_name, config = locals())
@@ -186,8 +185,7 @@ def train(
             ignore_index = PAD_TOKEN,
             pad_value = PAD_TOKEN,
             dynamic_rollout_loss_weight = dynamic_rollout_loss_weight,
-            dynamic_loss_decay = dynamic_loss_decay,
-            dynamic_loss_threshold = dynamic_loss_threshold
+            dynamic_loss_decay = dynamic_loss_decay
         )
     else:
         model = AutoregressiveWrapper(

@@ -22,6 +22,16 @@ def default(val, d):
 def l2norm(t, dim = -1):
     return F.normalize(t, p = 2, dim = dim)
 
+# dynamic rollout loss weighting
+# weight each rollout step by exp(-decay * cumulative loss of preceding steps), as errors compound through the dynamics model
+
+def dynamic_rollout_loss_weights(
+    step_losses, # (r b n)
+    decay = 1.
+):
+    cum_step_losses = exclusive_cumsum(step_losses, dim = 0)
+    return (-decay * cum_step_losses).exp()
+
 # constants
 
 Losses = namedtuple('Losses', ['ce', 'next_latent', 'kl', 'sigreg'])
@@ -174,8 +184,7 @@ class NextLatentWrapper(Module):
             num_knots = 17
         ),
         dynamic_rollout_loss_weight = True,
-        dynamic_loss_decay = 1.0,
-        dynamic_loss_threshold = 0.5
+        dynamic_loss_decay = 1.0
     ):
         super().__init__()
         self.net = net
@@ -210,7 +219,6 @@ class NextLatentWrapper(Module):
 
         self.dynamic_rollout_loss_weight = dynamic_rollout_loss_weight
         self.dynamic_loss_decay = dynamic_loss_decay
-        self.dynamic_loss_threshold = dynamic_loss_threshold
 
         # rollout weights
 
@@ -343,9 +351,7 @@ class NextLatentWrapper(Module):
 
         if self.dynamic_rollout_loss_weight:
             step_latent_loss = reduce(step_latent_loss_unreduced.detach(), 'r b n d -> r b n', 'mean')
-
-            cum_step_latent_loss = exclusive_cumsum(step_latent_loss, dim = 0)
-            dynamic_weights = torch.sigmoid(-self.dynamic_loss_decay * (cum_step_latent_loss - self.dynamic_loss_threshold))
+            dynamic_weights = dynamic_rollout_loss_weights(step_latent_loss, self.dynamic_loss_decay)
 
         # smooth l1 with stop-gradient on target
 
