@@ -889,10 +889,11 @@ class PolarEmbedding(Module):
         base = 10000,
     ):
         super().__init__()
-        inv_freq = 1. / (base ** (arange(0, dim).float() / dim))
+        half_dim = dim // 2
+        inv_freq = 1. / (base ** (arange(0, half_dim).float() / half_dim))
         self.register_buffer('inv_freq', inv_freq)
 
-        self.learned_bias = nn.Parameter(torch.zeros(heads, 1, dim))
+        self.learned_bias = nn.Parameter(torch.zeros(heads, 1, half_dim))
 
         if bias_uniform_init:
             self.learned_bias.uniform_(-2. * math.pi, 0.)
