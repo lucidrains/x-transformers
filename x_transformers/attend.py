@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from functools import partial
 from typing import Tuple, Callable
-from contextlib import nullcontext
 
 import torch
 from torch.nn import Module, Parameter
@@ -315,9 +314,6 @@ class Attend(Module):
 
         self.flash = flash
         self.flash_pack_seq = flash_pack_seq
-        self.sdp_context_manager = nullcontext
-        self.sdp_context_manager_is_cuda_only = False
-        self.sdp_kwargs = sdp_kwargs
 
         torch_version = version.parse(torch.__version__)
         assert not (flash and torch_version < version.parse('2.0.0')), 'in order to use flash attention, you must be using pytorch 2.0 or above'
@@ -345,7 +341,7 @@ class Attend(Module):
 
                 self.sdp_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
             else:
-                self.sdp_context_manager_is_cuda_only = True
+                self.sdp_context_manager = partial(torch.backends.cuda.sdp_kernel, **sdp_kwargs)
 
     def flash_attn(
         self,
@@ -463,12 +459,7 @@ class Attend(Module):
 
             out = rearrange(out, 'n h d -> 1 h n d')
         else:
-            sdp_context_manager = self.sdp_context_manager
-
-            if self.sdp_context_manager_is_cuda_only and device.type == 'cuda':
-                sdp_context_manager = partial(torch.backends.cuda.sdp_kernel, **self.sdp_kwargs)
-
-            with sdp_context_manager():
+            with self.sdp_context_manager():
                 out = F.scaled_dot_product_attention(
                     q, k, v,
                     attn_mask = mask,
