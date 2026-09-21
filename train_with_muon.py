@@ -29,6 +29,11 @@ VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
 GENERATE_LENGTH = 1024
 SEQ_LEN = 1024
+DEVICE = torch.device(
+    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
+    else 'cuda' if torch.cuda.is_available()
+    else 'cpu'
+)
 
 # helpers
 
@@ -57,7 +62,7 @@ model = TransformerWrapper(
 )
 
 ar_wrapper = AutoregressiveWrapper(model)
-model.cuda()
+model.to(DEVICE)
 
 # prepare enwik8 data
 
@@ -75,7 +80,7 @@ class TextSamplerDataset(Dataset):
     def __getitem__(self, index):
         rand_start = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
         full_seq = self.data[rand_start: rand_start + self.seq_len + 1].long()
-        return full_seq.cuda()
+        return full_seq.to(DEVICE)
 
     def __len__(self):
         return self.data.size(0) // self.seq_len

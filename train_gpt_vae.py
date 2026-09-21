@@ -22,6 +22,11 @@ VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
+DEVICE = torch.device(
+    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
+    else 'cuda' if torch.cuda.is_available()
+    else 'cpu'
+)
 
 # helpers
 
@@ -48,9 +53,9 @@ model = GPTVAE(
     enc_depth = 3,
     vae_kl_loss_weight = 1.,
     dim_latent = 1 # compress to 1 as an example
-).cuda()
+).to(DEVICE)
 
-latents = tensor([1.]).cuda()
+latents = tensor([1.], device = DEVICE)
 
 # prepare enwik8 data
 
@@ -68,7 +73,7 @@ class TextSamplerDataset(Dataset):
     def __getitem__(self, index):
         rand_start = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
         full_seq = self.data[rand_start: rand_start + self.seq_len + 1].long()
-        return full_seq.cuda()
+        return full_seq.to(DEVICE)
 
     def __len__(self):
         return self.data.size(0) // self.seq_len

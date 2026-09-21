@@ -72,7 +72,12 @@ def main(
     pad_id = num_fillers + 1
     num_tokens = num_fillers + 2
 
-    device = 'mps' if torch.backends.mps.is_available() else ('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(
+        'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
+        else 'mps' if torch.backends.mps.is_available()
+        else 'cuda' if torch.cuda.is_available()
+        else 'cpu'
+    )
     torch.manual_seed(seed)
 
     decoder = TransformerWrapper(

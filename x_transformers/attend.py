@@ -325,8 +325,6 @@ class Attend(Module):
                     self.flash_attn_varlen_func = flash_attn_varlen_func
                 except ImportError:
                     raise ImportError("block masking with Flash Attention requires the flash-attn package. Please install it with `pip install flash-attn`.")
-                major, minor = torch.cuda.get_device_capability()
-                assert major >= 8, f"block masking with Flash Attention requires SM80+ (Ampere or newer) GPUs, but your GPU has SM{major}{minor}."
 
             # torch 2.3 uses new backend and context manager
             if torch_version >= version.parse('2.3'):
@@ -353,7 +351,7 @@ class Attend(Module):
         flash_pack_seq_kwargs = None,
         causal = None,
     ):
-        batch, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
+        batch, heads, q_len, _, k_len, device = *q.shape, k.shape[-2], q.device
 
         if k.ndim == 3:
             k = repeat(k, 'b ... -> b h ...', h = q.shape[1])
@@ -443,6 +441,10 @@ class Attend(Module):
             assert exists(flash_pack_seq_kwargs), 'flash_pack_seq_kwargs must be provided'
             assert not exists(mask), 'mask cannot be passed for block masking'
             assert q.shape[0] == k.shape[0] == v.shape[0] == 1, 'batch size must be 1 for sequence packing'
+            assert device.type == 'cuda', 'flash-attn packed sequence masking is only available on CUDA devices'
+
+            major, minor = torch.cuda.get_device_capability(device)
+            assert major >= 8, f"block masking with Flash Attention requires SM80+ (Ampere or newer) GPUs, but your GPU has SM{major}{minor}."
 
             dropout_p = self.dropout if self.training else 0.
 
