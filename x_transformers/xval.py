@@ -20,6 +20,7 @@ from x_transformers.x_transformers import (
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
     always,
+    pad_at_dim,
     slice_right_at_dim
 )
 

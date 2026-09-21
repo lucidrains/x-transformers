@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn, Tensor
 from torch.nn import Module, ModuleDict
@@ -7,15 +9,17 @@ import torch.nn.functional as F
 
 from typing import Dict
 
-from einops import pack, repeat, unpack
+from einops import pack, rearrange, repeat, unpack
 
 from x_transformers.x_transformers import (
     AttentionLayers,
+    Decoder,
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
     LayerIntermediates,
     LayerNorm,
     always,
+    calc_z_loss,
     pad_at_dim,
     slice_right_at_dim,
     is_empty,
