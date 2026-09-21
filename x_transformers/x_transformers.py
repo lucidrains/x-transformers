@@ -77,20 +77,12 @@ LinearNoBias = partial(nn.Linear, bias = False)
 def exists(val):
     return val is not None
 
-def disabled_autocast_context(device_type):
-    try:
-        return autocast(device_type, enabled = False)
-    except RuntimeError:
-        return nullcontext()
-
 def disable_autocast(fn):
     @wraps(fn)
     def inner(*args, **kwargs):
-        flattened_args, _ = tree_flatten((args, kwargs))
-        tensor_arg = next((arg for arg in flattened_args if is_tensor(arg)), None)
-        autocast_context = disabled_autocast_context(tensor_arg.device.type) if exists(tensor_arg) else nullcontext()
+        tensor_arg = next(arg for arg in (*args, *kwargs.values()) if is_tensor(arg))
 
-        with autocast_context:
+        with autocast(tensor_arg.device.type, enabled = False):
             return fn(*args, **kwargs)
 
     return inner
@@ -4555,7 +4547,7 @@ class TransformerWrapper(Module):
         # handle maybe combine mixture
 
         if exists(combine_mixture):
-            with disabled_autocast_context(logits.device.type):
+            with autocast(logits.device.type, enabled = False):
                 prob = logits.softmax(dim = -1)
                 mos = einsum('... k d, ... k -> ... d', prob, combine_mixture)
                 logits = log(mos)
