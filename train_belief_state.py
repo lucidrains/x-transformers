@@ -1,4 +1,4 @@
-from x_transformers import TransformerWrapper, Decoder, BeliefStateWrapper
+from x_transformers import TransformerWrapper, Decoder, BeliefStateWrapper, default_device
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
 import random
@@ -22,11 +22,7 @@ GENERATE_LENGTH = 256
 SEQ_LEN = 256
 
 FORWARD_BACKWARD_SAME_MODEL = True
-DEVICE = torch.device(
-    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
-    else 'cuda' if torch.cuda.is_available()
-    else 'cpu'
-)
+DEVICE = default_device()
 
 # helpers
 

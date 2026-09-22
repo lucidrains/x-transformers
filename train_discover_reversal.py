@@ -16,7 +16,7 @@ import torch
 
 import einx
 
-from x_transformers.x_transformers import TransformerWrapper, Decoder
+from x_transformers.x_transformers import TransformerWrapper, Decoder, default_device
 from x_transformers.discover_wrapper import (
     DiscoverDecoder,
     TPREncoder,
@@ -72,12 +72,7 @@ def main(
     pad_id = num_fillers + 1
     num_tokens = num_fillers + 2
 
-    device = torch.device(
-        'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
-        else 'mps' if torch.backends.mps.is_available()
-        else 'cuda' if torch.cuda.is_available()
-        else 'cpu'
-    )
+    device = default_device()
     torch.manual_seed(seed)
 
     decoder = TransformerWrapper(

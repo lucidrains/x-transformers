@@ -87,6 +87,21 @@ LinearNoBias = partial(nn.Linear, bias = False)
 def exists(val):
     return val is not None
 
+def default_device(device = None):
+    if exists(device):
+        return torch.device(device)
+
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        return torch.device('xpu')
+
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return torch.device('mps')
+
+    return torch.device('cpu')
+
 def disable_autocast(fn):
     @wraps(fn)
     def inner(*args, **kwargs):

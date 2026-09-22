@@ -1,5 +1,6 @@
 
 from x_transformers.gpt_vae import GPTVAE
+from x_transformers import default_device
 
 import random
 import tqdm
@@ -22,11 +23,7 @@ VALIDATE_EVERY  = 100
 GENERATE_EVERY  = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
-DEVICE = torch.device(
-    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
-    else 'cuda' if torch.cuda.is_available()
-    else 'cpu'
-)
+DEVICE = default_device()
 
 # helpers
 

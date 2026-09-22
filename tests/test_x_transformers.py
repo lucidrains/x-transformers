@@ -2997,3 +2997,24 @@ def test_full_bandwidth():
 
     loss.backward()
     assert exists(model.token_emb.emb.weight.grad)
+
+    # generate
+ 
+    prompts = torch.randint(0, 256, (2, 5))
+
+    sampled = fb.generate(prompts, seq_len = 10)
+    assert sampled.shape == (2, 10)
+
+    # 1d prompt
+
+    sampled_1d = fb.generate(prompts[0], seq_len = 10)
+    assert sampled_1d.shape == (10,)
+
+    # generate with selective latent fusion
+
+    sampled_selective = fb.generate(
+        prompts,
+        seq_len = 10,
+        should_fuse_latent = lambda step: step < 5
+    )
+    assert sampled_selective.shape == (2, 10)

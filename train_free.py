@@ -6,6 +6,7 @@
 # ///
 
 from x_transformers.free_transformer import FreeTransformer
+from x_transformers import default_device
 
 from math import log
 import random
@@ -33,11 +34,7 @@ SEQ_LEN = 512
 
 LATENT_BITS = 8
 NAT = log(2)
-DEVICE = torch.device(
-    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
-    else 'cuda' if torch.cuda.is_available()
-    else 'cpu'
-)
+DEVICE = default_device()
 
 # helpers
 

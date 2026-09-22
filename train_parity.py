@@ -3,7 +3,7 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-from x_transformers import TransformerWrapper, Decoder
+from x_transformers import TransformerWrapper, Decoder, default_device
 
 # constants
 
@@ -19,11 +19,7 @@ MEET_CRITERIA_THRES_INCREASE_LEN = 10
 
 HYBRIDIZE_WITH_RNN = True
 
-DEVICE = torch.device(
-    'xpu' if hasattr(torch, 'xpu') and torch.xpu.is_available()
-    else 'cuda' if torch.cuda.is_available()
-    else 'cpu'
-)
+DEVICE = default_device()
 
 # rnn for fully resolving state tracking by hybridization
 # but will also look into gated delta net + negative eigenvalues (Songlin Yang et al) as a parallel solution
