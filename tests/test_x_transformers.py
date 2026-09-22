@@ -2945,3 +2945,20 @@ def test_discover():
     outputs = model.surgery(row, edited, role_ids_old, role_ids_new, tpr_mlp)
     assert approx_encodings.shape == (256, model.dim)
     assert outputs.shape == (1, 3)
+
+@param('depth_scale_residual', (False, True, 0.5))
+def test_depth_scale_residual(depth_scale_residual):
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 512,
+            depth = 4,
+            heads = 8,
+            depth_scale_residual = depth_scale_residual
+        )
+    )
+
+    x = torch.randint(0, 256, (2, 1024))
+    logits = model(x)
+    logits.sum().backward()

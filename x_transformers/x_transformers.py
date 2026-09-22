@@ -25,7 +25,16 @@ from x_transformers.attend import Attend, Intermediates, pack_one, unpack_one, l
 import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, reduce, pack, unpack
-from torch_einops_utils import masked_mean, pad_at_dim, safe_cat, slice_right_at_dim, tree_map_tensor
+
+from torch_einops_utils import (
+    masked_mean,
+    pad_at_dim,
+    safe_cat,
+    slice_right_at_dim,
+    tree_flatten_with_inverse,
+    tree_map_tensor
+)
+
 from torch_einops_utils.nn import Sequential, Lambda, Identity
 
 # einstein notation
@@ -966,22 +975,26 @@ class LoRALinear(Module):
     def forward(self, x):
         return self.up(self.maybe_activation(self.down(x)))
 
-# norms
+# helper modules
 
 class Scale(Module):
-    def __init__(self, value, fn):
+    def __init__(self, scale, fn: Module | None = None):
         super().__init__()
-        self.value = value
-        self.fn = fn
+        self.scale = scale
+        self.fn = fn if exists(fn) else nn.Identity()
 
-    def forward(self, x, **kwargs):
-        out = self.fn(x, **kwargs)
-        scale_fn = lambda t: t * self.value
+    def forward(self, *args, **kwargs):
+        out = self.fn(*args, **kwargs)
 
-        if not isinstance(out, tuple):
-            return scale_fn(out)
+        if not exists(self.scale) or self.scale == 1.:
+            return out
 
-        return (scale_fn(out[0]), *out[1:])
+        tensors, inverse = tree_flatten_with_inverse(out)
+        first, *rest = tensors
+
+        return inverse([first * self.scale, *rest])
+
+# norms
 
 class LayerNorm(Module):
     def __init__(
@@ -2749,7 +2762,6 @@ class AttentionLayers(Module):
         pre_norm_has_final_norm = True,
         pre_and_post_norm = False,
         attn_aggregated_residuals = False, # https://www.youtube.com/watch?v=iw1VF8HOCrk
-        attn_residuals_last_output_as_query = False,
         attn_aggregated_residual_kwargs: dict = dict(),
         gate_residual = False,
         orthog_residual = False,
@@ -2757,6 +2769,7 @@ class AttentionLayers(Module):
         gated_multi_residual = False,
         scale_residual = False,
         scale_residual_constant = 1.,
+        depth_scale_residual = False,
         shift_tokens = 0,
         sandwich_norm = False,
         softclamp_output = False,
@@ -3048,6 +3061,23 @@ class AttentionLayers(Module):
         depth = default(depth, len(self.layers_execute_order))
         self.depth = depth
 
+        # depth scaling for residuals (Yang et al. / Noci et al.)
+
+        residual_scale = None
+
+        if attn_aggregated_residuals:
+            residual_scale = 1.
+        elif isinstance(depth_scale_residual, bool):
+            residual_scale = (depth ** -0.5) if depth_scale_residual else None
+        elif isinstance(depth_scale_residual, (int, float)):
+            residual_scale = float(depth_scale_residual)
+        elif isinstance(scale_residual, (int, float)) and not isinstance(scale_residual, bool):
+            residual_scale = float(scale_residual)
+
+        self.residual_scale = residual_scale
+
+        maybe_scale_output = (lambda m: Scale(residual_scale, m) if exists(m) else None) if (exists(residual_scale) and residual_scale != 1.) else identity
+
         # stochastic depth
 
         self.layer_dropouts = cast_tuple(layer_dropout, len(layer_types))
@@ -3160,6 +3190,8 @@ class AttentionLayers(Module):
 
             if exists(post_branch_fn):
                 layer = post_branch_fn(layer)
+
+            layer = maybe_scale_output(layer)
 
             layer_integrate = None
 
