@@ -39,6 +39,21 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
+def default_device(device = None):
+    if exists(device):
+        return torch.device(device)
+
+    if hasattr(torch, 'xpu') and torch.xpu.is_available():
+        return torch.device('xpu')
+
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return torch.device('mps')
+
+    return torch.device('cpu')
+
 def at_most_one_of(*bools):
     return sum([*map(int, bools)]) <= 1
 
