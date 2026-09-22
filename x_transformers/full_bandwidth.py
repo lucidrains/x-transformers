@@ -41,6 +41,14 @@ def default(v, d):
 def uniform_like(t, low = -1., high = 1.):
     return torch.empty_like(t).uniform_(low, high)
 
+# shift and fuse latent feedback into token embeddings (Eq. 8)
+
+def shift_and_fuse_latents(latents, token_embeds, transition):
+    shifted_latents = pad_left_at_dim(latents[:, :-1], 1, dim = -2)
+    fused = transition(shifted_latents, token_embeds)
+    # first position has no previous latent, fall back to plain token embedding
+    return torch.cat((token_embeds[:, :1], fused[:, 1:]), dim = -2)
+
 # dynamic rollout loss weighting
 # weight each rollout step by exp(-decay * cumulative loss of preceding steps), as errors compound through the dynamics model
 # threshold accounts for the irreducible entropy floor of language (~1.0 nat), penalizing only excess modeling error
@@ -75,12 +83,11 @@ class GLUCrossTransition(Module):
     def forward(
         self,
         latents,
-        encoded_token_ids
+        token_embeds
     ):
-        # they use this scheme to encourage using the previous latent state
         # rmsnorm the gate token embeddings, and the fused state before feeding back into the stack
 
-        fused = self.to_state(latents) * self.to_gate(self.token_norm(encoded_token_ids)).sigmoid()
+        fused = self.to_state(latents) * self.to_gate(self.token_norm(token_embeds)).sigmoid()
         return self.norm(fused)
 
 # main class
@@ -115,6 +122,8 @@ class FullBandwidth(Module):
 
         dim = net.attn_layers.dim
         self.transition = default(transition, GLUCrossTransition(dim))
+
+        self.register_buffer('zero', torch.tensor(0.), persistent = False)
 
     # generate
 
@@ -155,7 +164,6 @@ class FullBandwidth(Module):
         prompt_len = prompts.shape[-1]
 
         out = prompts
-        cache = None
 
         # prefill, with optional temporal parallel passes
 
@@ -165,16 +173,9 @@ class FullBandwidth(Module):
             latents = intermediates.last_hidden
 
             for _ in range(temporal_parallel_passes - 1):
-                shifted_latents = pad_left_at_dim(latents[:, :-1], 1, dim = -2)
-
-                def transform_token_embeds(token_embeds, shifted_latents = shifted_latents):
-                    fused = transition(shifted_latents, token_embeds)
-                    # first position has no previous latent, fall back to plain token embedding (eq. 8)
-                    return torch.cat((token_embeds[:, :1], fused[:, 1:]), dim = -2)
-
                 logits, intermediates = net(
                     out,
-                    transform_token_embeds = transform_token_embeds,
+                    transform_token_embeds = lambda embeds, latents = latents: shift_and_fuse_latents(latents, embeds, transition),
                     return_intermediates = True,
                     **kwargs
                 )
@@ -208,10 +209,7 @@ class FullBandwidth(Module):
 
             if temporal_parallel_passes > 1 and should_fuse_latent(step):
                 last_latent = intermediates.last_hidden[:, -1:]
-
-                def transform_token_embeds(token_embeds, last_latent = last_latent):
-                    fused = transition(last_latent, token_embeds[:, -1:])
-                    return torch.cat((token_embeds[:, :-1], fused), dim = -2)
+                transform_token_embeds = lambda embeds, last_latent = last_latent: torch.cat((embeds[:, :-1], transition(last_latent, embeds[:, -1:])), dim = -2)
 
             logits, intermediates = net(
                 out,
@@ -256,6 +254,15 @@ class FullBandwidth(Module):
         dynamic_loss_decay = default(dynamic_loss_decay, self.dynamic_loss_decay)
         dynamic_loss_threshold = default(dynamic_loss_threshold, self.dynamic_loss_threshold)
 
+        # cross entropy helper
+
+        def ce_loss(logits, target):
+            return F.cross_entropy(
+                rearrange(logits, 'b n l -> (b n) l'),
+                rearrange(target, 'b n -> (b n)'),
+                ignore_index = self.ignore_index
+            )
+
         # split for next token prediction
 
         if return_loss:
@@ -269,16 +276,8 @@ class FullBandwidth(Module):
 
         latents = intermediates.last_hidden
         all_logits = [logits]
-
-        first_pass_loss = None
+        first_pass_loss = ce_loss(logits, target) if return_loss else None
         feedback_pass_losses = []
-
-        if return_loss:
-            first_pass_loss = F.cross_entropy(
-                rearrange(logits, 'b n l -> (b n) l'),
-                rearrange(target, 'b n -> (b n)'),
-                ignore_index = self.ignore_index
-            )
 
         # feedback passes (temporal parallel)
 
@@ -286,20 +285,11 @@ class FullBandwidth(Module):
             if self.training and self.jitter_noise_delta > 0.:
                 latents = latents + uniform_like(latents, -self.jitter_noise_delta, self.jitter_noise_delta)
 
-            # shift previous top-layer latents rightward by one position, then fuse with the token embeddings
-
-            shifted_latents = pad_left_at_dim(latents[:, :-1], 1, dim = -2)
-
-            def transform_token_embeds(token_embeds, shifted_latents = shifted_latents):
-                fused = transition(shifted_latents, token_embeds)
-                # first position has no previous latent, fall back to plain token embedding (eq. 8)
-                return torch.cat((token_embeds[:, :1], fused[:, 1:]), dim = -2)
-
             # feed fused state back into the stack in place of token embeddings
 
             logits, intermediates = self.net(
                 inp,
-                transform_token_embeds = transform_token_embeds,
+                transform_token_embeds = lambda embeds, latents = latents: shift_and_fuse_latents(latents, embeds, transition),
                 return_intermediates = True,
                 **kwargs
             )
@@ -315,40 +305,34 @@ class FullBandwidth(Module):
             feedback_logits = logits[:, 1:] if logits.shape[1] > 1 else logits
             feedback_target = target[:, 1:] if target.shape[1] > 1 else target
 
-            feedback_pass_losses.append(F.cross_entropy(
-                rearrange(feedback_logits, 'b n l -> (b n) l'),
-                rearrange(feedback_target, 'b n -> (b n)'),
-                ignore_index = self.ignore_index
-            ))
+            feedback_pass_losses.append(ce_loss(feedback_logits, feedback_target))
 
-        # returns
+        # if not returning loss, return final logits (and maybe all pass logits)
 
         if not return_loss:
             return all_logits[-1], dict(all_pass_logits = all_logits)
 
-        # combine first pass loss with the feedback pass losses
-        # optionally applying dynamic rollout loss weighting as a continuous curriculum across passes
+        # combine first pass loss with feedback pass losses
+        # optionally applying dynamic rollout loss weighting across passes
 
         all_pass_losses = [first_pass_loss, *feedback_pass_losses]
+        all_losses = torch.stack(all_pass_losses)
 
-        loss = first_pass_loss
+        if len(feedback_pass_losses) == 0:
+            feedback_loss = self.zero
+        elif dynamic_rollout_loss_weight:
+            weights = dynamic_rollout_loss_weights(
+                all_losses.detach(),
+                decay = dynamic_loss_decay,
+                threshold = dynamic_loss_threshold
+            )[1:]
 
-        if len(feedback_pass_losses) > 0:
-            all_losses = torch.stack(all_pass_losses)
             feedback_losses = all_losses[1:]
+            feedback_loss = (feedback_losses * weights).sum() / weights.sum().clamp(min = 1e-8)
+        else:
+            feedback_loss = all_losses[1:].mean()
 
-            if dynamic_rollout_loss_weight:
-                weights = dynamic_rollout_loss_weights(
-                    all_losses.detach(),
-                    decay = dynamic_loss_decay,
-                    threshold = dynamic_loss_threshold
-                )[1:]
-
-                feedback_pass_loss = (feedback_losses * weights).sum() / weights.sum().clamp(min = 1e-8)
-            else:
-                feedback_pass_loss = feedback_losses.mean()
-
-            loss = loss + feedback_pass_loss * self.feedback_pass_weight
+        loss = first_pass_loss + feedback_loss * self.feedback_pass_weight
 
         loss_breakdown = LossBreakdown(
             first_pass_loss = first_pass_loss,
