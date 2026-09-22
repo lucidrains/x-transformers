@@ -4160,6 +4160,7 @@ class TransformerWrapper(Module):
         excise_prepend_embeds = False,
         embed_ids: dict[str, Tensor] = dict(),
         sum_embeds = None,
+        transform_token_embeds = None,
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
         seq_start_pos = None,
@@ -4196,7 +4197,15 @@ class TransformerWrapper(Module):
 
         external_pos_emb = exists(pos) and pos.dtype != torch.long
         pos_emb = self.pos_emb(x, pos = pos, seq_start_pos = seq_start_pos, offset = seq_pos_offset) if not external_pos_emb else pos
-        x = self.token_emb(x, **token_emb_kwargs) + pos_emb
+
+        # token embeddings, with optional transform callable (e.g. latent fusion in FullBandwidth)
+
+        token_embeds = self.token_emb(x, **token_emb_kwargs)
+
+        if exists(transform_token_embeds):
+            token_embeds = transform_token_embeds(token_embeds)
+
+        x = token_embeds + pos_emb
 
         # add additional embeddings
 

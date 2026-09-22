@@ -52,7 +52,8 @@ model = TransformerWrapper(
 
 model = FullBandwidth(
     model,
-    temporal_parallel_passes = 2
+    temporal_parallel_passes = 2,
+    dynamic_rollout_loss_weight = True
 ).to(DEVICE)
 
 # prepare enwik8 data

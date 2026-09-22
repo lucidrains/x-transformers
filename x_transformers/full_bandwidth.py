@@ -16,7 +16,8 @@ from torch_einops_utils import (
     maybe_return,
     temp_eval,
     pack_with_inverse,
-    cast_tensor
+    cast_tensor,
+    exclusive_cumsum
 )
 
 from x_transformers.x_transformers import (
@@ -40,6 +41,19 @@ def default(v, d):
 def uniform_like(t, low = -1., high = 1.):
     return torch.empty_like(t).uniform_(low, high)
 
+# dynamic rollout loss weighting
+# weight each rollout step by exp(-decay * cumulative loss of preceding steps), as errors compound through the dynamics model
+# threshold accounts for the irreducible entropy floor of language (~1.0 nat), penalizing only excess modeling error
+
+def dynamic_rollout_loss_weights(
+    step_losses,
+    decay = 1.,
+    threshold = 1.
+):
+    excess_losses = (step_losses - threshold).clamp(min = 0.)
+    cum_step_losses = exclusive_cumsum(excess_losses, dim = 0)
+    return (-decay * cum_step_losses).exp()
+
 # loss breakdown
 
 LossBreakdown = namedtuple('LossBreakdown', [
@@ -55,6 +69,7 @@ class GLUCrossTransition(Module):
         super().__init__()
         self.to_state = LinearNoBias(dim, dim)
         self.to_gate = LinearNoBias(dim, dim)
+        self.token_norm = RMSNorm(dim)
         self.norm = RMSNorm(dim)
 
     def forward(
@@ -63,7 +78,9 @@ class GLUCrossTransition(Module):
         encoded_token_ids
     ):
         # they use this scheme to encourage using the previous latent state
-        fused = self.to_state(latents) * self.to_gate(encoded_token_ids).sigmoid()
+        # rmsnorm the gate token embeddings, and the fused state before feeding back into the stack
+
+        fused = self.to_state(latents) * self.to_gate(self.token_norm(encoded_token_ids)).sigmoid()
         return self.norm(fused)
 
 # main class
@@ -77,6 +94,9 @@ class FullBandwidth(Module):
         feedback_pass_weight = 1.,
         ignore_index = -100,
         jitter_noise_delta = 0.02, # paper used sigma = 0.02
+        dynamic_rollout_loss_weight = False,
+        dynamic_loss_decay = 0.5,
+        dynamic_loss_threshold = 1.,
     ):
         super().__init__()
         assert isinstance(net.attn_layers, Decoder), 'must be a decoder'
@@ -89,6 +109,9 @@ class FullBandwidth(Module):
         self.ignore_index = ignore_index
         self.jitter_noise_delta = jitter_noise_delta
         self.feedback_pass_weight = feedback_pass_weight
+        self.dynamic_rollout_loss_weight = dynamic_rollout_loss_weight
+        self.dynamic_loss_decay = dynamic_loss_decay
+        self.dynamic_loss_threshold = dynamic_loss_threshold
 
         dim = net.attn_layers.dim
         self.transition = default(transition, GLUCrossTransition(dim))
@@ -139,13 +162,22 @@ class FullBandwidth(Module):
         logits, intermediates = net(out, return_intermediates = True, **kwargs)
 
         if process_prompt and temporal_parallel_passes > 1:
-            encoded_prompt = net.token_emb(out)
             latents = intermediates.last_hidden
 
             for _ in range(temporal_parallel_passes - 1):
                 shifted_latents = pad_left_at_dim(latents[:, :-1], 1, dim = -2)
-                fused = transition(shifted_latents, encoded_prompt)
-                logits, intermediates = net(out, sum_embeds = fused, return_intermediates = True, **kwargs)
+
+                def transform_token_embeds(token_embeds, shifted_latents = shifted_latents):
+                    fused = transition(shifted_latents, token_embeds)
+                    # first position has no previous latent, fall back to plain token embedding (eq. 8)
+                    return torch.cat((token_embeds[:, :1], fused[:, 1:]), dim = -2)
+
+                logits, intermediates = net(
+                    out,
+                    transform_token_embeds = transform_token_embeds,
+                    return_intermediates = True,
+                    **kwargs
+                )
                 latents = intermediates.last_hidden
 
         cache = intermediates
@@ -172,16 +204,18 @@ class FullBandwidth(Module):
 
             # fuse the last top layer latent with the just sampled token
 
-            sum_embeds = None
+            transform_token_embeds = None
 
             if temporal_parallel_passes > 1 and should_fuse_latent(step):
                 last_latent = intermediates.last_hidden[:, -1:]
-                fused = transition(last_latent, net.token_emb(out[:, -1:]))
-                sum_embeds = pad_left_at_dim(fused, out.shape[-1] - 1, dim = -2)
+
+                def transform_token_embeds(token_embeds, last_latent = last_latent):
+                    fused = transition(last_latent, token_embeds[:, -1:])
+                    return torch.cat((token_embeds[:, :-1], fused), dim = -2)
 
             logits, intermediates = net(
                 out,
-                sum_embeds = sum_embeds,
+                transform_token_embeds = transform_token_embeds,
                 cache = cache,
                 return_intermediates = True,
                 **kwargs
@@ -209,12 +243,18 @@ class FullBandwidth(Module):
         return_loss_breakdown = False,
         return_all_pass_logits = False,
         transition: Callable | None = None,
+        dynamic_rollout_loss_weight: bool | None = None,
+        dynamic_loss_decay: float | None = None,
+        dynamic_loss_threshold: float | None = None,
         **kwargs
     ):
         temporal_parallel_passes = default(temporal_parallel_passes, self.temporal_parallel_passes)
         assert temporal_parallel_passes >= 1, 'must have at least 1 pass'
 
         transition = default(transition, self.transition)
+        dynamic_rollout_loss_weight = default(dynamic_rollout_loss_weight, self.dynamic_rollout_loss_weight)
+        dynamic_loss_decay = default(dynamic_loss_decay, self.dynamic_loss_decay)
+        dynamic_loss_threshold = default(dynamic_loss_threshold, self.dynamic_loss_threshold)
 
         # split for next token prediction
 
@@ -222,10 +262,6 @@ class FullBandwidth(Module):
             inp, target = token_ids[:, :-1], token_ids[:, 1:]
         else:
             inp, target = token_ids, None
-
-        # initial token embeddings
-
-        encoded_token_ids = self.net.token_emb(inp)
 
         # first pass (standard)
 
@@ -253,11 +289,20 @@ class FullBandwidth(Module):
             # shift previous top-layer latents rightward by one position, then fuse with the token embeddings
 
             shifted_latents = pad_left_at_dim(latents[:, :-1], 1, dim = -2)
-            fused = transition(shifted_latents, encoded_token_ids)
 
-            # feed fused representation back into the stack
+            def transform_token_embeds(token_embeds, shifted_latents = shifted_latents):
+                fused = transition(shifted_latents, token_embeds)
+                # first position has no previous latent, fall back to plain token embedding (eq. 8)
+                return torch.cat((token_embeds[:, :1], fused[:, 1:]), dim = -2)
 
-            logits, intermediates = self.net(inp, sum_embeds = fused, return_intermediates = True, **kwargs)
+            # feed fused state back into the stack in place of token embeddings
+
+            logits, intermediates = self.net(
+                inp,
+                transform_token_embeds = transform_token_embeds,
+                return_intermediates = True,
+                **kwargs
+            )
 
             latents = intermediates.last_hidden
             all_logits.append(logits)
@@ -281,18 +326,34 @@ class FullBandwidth(Module):
         if not return_loss:
             return all_logits[-1], dict(all_pass_logits = all_logits)
 
-        # combine first pass loss with the average of the feedback pass losses, as in eq. 12 of the paper
+        # combine first pass loss with the feedback pass losses
+        # optionally applying dynamic rollout loss weighting as a continuous curriculum across passes
+
+        all_pass_losses = [first_pass_loss, *feedback_pass_losses]
 
         loss = first_pass_loss
 
         if len(feedback_pass_losses) > 0:
-            feedback_pass_loss = sum(feedback_pass_losses) / len(feedback_pass_losses)
+            all_losses = torch.stack(all_pass_losses)
+            feedback_losses = all_losses[1:]
+
+            if dynamic_rollout_loss_weight:
+                weights = dynamic_rollout_loss_weights(
+                    all_losses.detach(),
+                    decay = dynamic_loss_decay,
+                    threshold = dynamic_loss_threshold
+                )[1:]
+
+                feedback_pass_loss = (feedback_losses * weights).sum() / weights.sum().clamp(min = 1e-8)
+            else:
+                feedback_pass_loss = feedback_losses.mean()
+
             loss = loss + feedback_pass_loss * self.feedback_pass_weight
 
         loss_breakdown = LossBreakdown(
             first_pass_loss = first_pass_loss,
             feedback_pass_losses = feedback_pass_losses,
-            all_pass_losses = [first_pass_loss, *feedback_pass_losses]
+            all_pass_losses = all_pass_losses
         )
 
         return loss, dict(

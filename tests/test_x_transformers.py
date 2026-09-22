@@ -2987,6 +2987,9 @@ def test_full_bandwidth():
     assert loss.item() > 0
     assert len(all_logits) == 3
 
+    loss_single = fb(tokens, temporal_parallel_passes = 1)
+    assert loss_single.item() > 0
+
     logits = fb(tokens, temporal_parallel_passes = 3, return_loss = False)
     assert logits.shape == (2, 16, 256)
 
@@ -2997,6 +3000,12 @@ def test_full_bandwidth():
 
     loss.backward()
     assert exists(model.token_emb.emb.weight.grad)
+
+    # dynamic rollout loss weight
+
+    loss_dynamic = fb(tokens, temporal_parallel_passes = 3, dynamic_rollout_loss_weight = True)
+    assert loss_dynamic.item() > 0
+    loss_dynamic.backward()
 
     # generate
  
