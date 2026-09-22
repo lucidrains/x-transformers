@@ -24,13 +24,13 @@ from x_transformers import TransformerWrapper, Decoder, FullBandwidth, default_d
 BATCH_SIZE = 128
 LEARNING_RATE = 3e-4
 
-TRAIN_MAX_LENGTH = 32
-EVAL_LENGTHS = (8, 16, 32, 64)
+TRAIN_MAX_LENGTH = 16
+EVAL_LENGTHS = (8, 16, 24, 32, 48, 64)
 EVAL_SAMPLES = 512
 
 NUM_STEPS = 6000
-TEMPORAL_PARALLEL_PASSES = 3
-EVAL_PASSES = (1, 2, 3)
+TEMPORAL_PARALLEL_PASSES = 4
+EVAL_PASSES = (1, 2, 3, 4)
 
 MASTERY_LOSS_THRESHOLD = 0.01
 MASTERY_STEPS = 10
@@ -59,6 +59,7 @@ def make_model(full_bandwidth = False):
             depth = 3,
             heads = 4,
             attn_dim_head = 32,
+            polar_pos_emb = True,
             shift_tokens = 1,
             depth_scale_residual = True
         )
@@ -129,13 +130,16 @@ def report(model):
             pred = logits[:, -1].argmax(dim = -1)
             accuracies.append((pred == labels[:, -1]).float().mean().item() * 100)
 
-        print(f'  length {length:>3} | ' + '  '.join(f'{p} pass: {acc:5.1f}%' for p, acc in zip(passes, accuracies)))
+        extrap = f'({length / TRAIN_MAX_LENGTH:.1f}x)' if length > TRAIN_MAX_LENGTH else '(in-dist)'
+        print(f'  length {length:>3} {extrap:>10} | ' + '  '.join(f'{p} pass: {acc:5.1f}%' for p, acc in zip(passes, accuracies)))
 
     model.train()
 
 # main
 
 if __name__ == '__main__':
+    torch.manual_seed(42)
+
     print('\nstandard transformer')
     standard = train(make_model(full_bandwidth = False))
     report(standard)
@@ -153,6 +157,7 @@ if __name__ == '__main__':
         sample = full_bandwidth.generate(
             prompts = prompt,
             seq_len = GENERATE_LENGTH,
+            temperature = 0.,
             should_fuse_latent = (lambda step: True) if fuse_latent else (lambda step: False)
         )
-        print(f'  fuse latent = {fuse_latent}: {sample[0].tolist()}')
+        print(f'  fuse latent = {str(fuse_latent):<5}: {sample[0].tolist()}')

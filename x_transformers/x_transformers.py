@@ -2846,7 +2846,7 @@ class AttentionLayers(Module):
 
         assert rotary_emb_dim <= dim_head, f'rotary emb dim {rotary_emb_dim} must be less than or equal to attention head dimension {dim_head}'
 
-        if verbose and rotary_emb_dim < 32:
+        if verbose and rotary_pos_emb and rotary_emb_dim < 32:
             logger.warning('when training language model, rotary embedding dimension should be at least 32')
 
         assert at_most_one_of(rotary_pos_emb, polar_pos_emb), f'either rotary positional embedding or polar positional embedding can be turned on'
