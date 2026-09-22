@@ -3076,7 +3076,7 @@ class AttentionLayers(Module):
 
         self.residual_scale = residual_scale
 
-        maybe_scale_output = (lambda m: Scale(residual_scale, m) if exists(m) else None) if (exists(residual_scale) and residual_scale != 1.) else identity
+        maybe_scale_output = maybe(partial(Scale, residual_scale)) if (exists(residual_scale) and residual_scale != 1.) else identity
 
         # stochastic depth
 

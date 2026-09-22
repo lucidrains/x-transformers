@@ -2962,3 +2962,38 @@ def test_depth_scale_residual(depth_scale_residual):
     x = torch.randint(0, 256, (2, 1024))
     logits = model(x)
     logits.sum().backward()
+
+def test_full_bandwidth():
+    from x_transformers import FullBandwidth, LossBreakdown
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        tie_embedding = True,
+        post_emb_norm = True,
+        attn_layers = Decoder(
+            dim = 128,
+            depth = 2,
+            heads = 4,
+            depth_scale_residual = True
+        )
+    )
+
+    fb = FullBandwidth(model, temporal_parallel_passes = 2)
+
+    tokens = torch.randint(0, 256, (2, 16))
+
+    loss, all_logits = fb(tokens, temporal_parallel_passes = 3, return_all_pass_logits = True)
+    assert loss.item() > 0
+    assert len(all_logits) == 3
+
+    logits = fb(tokens, temporal_parallel_passes = 3, return_loss = False)
+    assert logits.shape == (2, 16, 256)
+
+    loss, loss_breakdown = fb(tokens, temporal_parallel_passes = 3, return_loss_breakdown = True)
+    assert exists(loss_breakdown.first_pass_loss)
+    assert len(loss_breakdown.feedback_pass_losses) == 2
+    assert len(loss_breakdown.all_pass_losses) == 3
+
+    loss.backward()
+    assert exists(model.token_emb.emb.weight.grad)
