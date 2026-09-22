@@ -1745,32 +1745,19 @@ def test_continuous_transformer_external_projects():
 
     assert logits.shape == (1, 16, 16)
 
-@param('pos_emb_type', ('rotary', 'polar', 'none'))
 @param('qkv_receive_diff_residuals', (False, True))
-@param('last_layer_as_query', (False, True))
 def test_attn_aggregated_residuals(
-    pos_emb_type,
-    qkv_receive_diff_residuals,
-    last_layer_as_query
+    qkv_receive_diff_residuals
 ):
-
-    kwargs = dict()
-    if pos_emb_type == 'rotary':
-        kwargs = dict(rotary_pos_emb = True)
-    elif pos_emb_type == 'polar':
-        kwargs = dict(polar_pos_emb = True)
-
     model = TransformerWrapper(
         num_tokens = 256,
         max_seq_len = 1024,
         attn_layers = Decoder(
             dim = 512,
-            depth = 6,
+            depth = 4,
             heads = 8,
             attn_aggregated_residuals = True,
-            qkv_receive_diff_residuals = qkv_receive_diff_residuals,
-            attn_residuals_last_output_as_query = last_layer_as_query,
-            **kwargs
+            qkv_receive_diff_residuals = qkv_receive_diff_residuals
         )
     )
 

@@ -39,6 +39,7 @@ from torch_einops_utils.nn import Sequential, Lambda, Identity
 # constants
 
 DEFAULT_DIM_HEAD = 64
+DEFAULT_ATTN_RESIDUAL_LORA_RANK = 64
 
 @dataclass
 class LayerIntermediates:
@@ -932,6 +933,8 @@ def apply_polar_pos_emb(t, freqs):
 
     return out.type(orig_dtype)
 
+# lora
+
 class LoRALinear(Module):
     """ low-rank linear projection with optional activation in the middle (silu for the HyGA gates), or a bias-less linear when no rank is given """
 
@@ -1254,7 +1257,9 @@ class MVSplitResidualUpdate(Module):
 
         return residual + centered_x * beta + (mean_x - mean_residual) * alpha
 
-class AttentionAggregatedResidual(Module):
+# attention residual
+
+class AttentionResidual(Module):
     """
     https://arxiv.org/abs/2601.21582
     https://arxiv.org/abs/2603.15031
@@ -1264,97 +1269,52 @@ class AttentionAggregatedResidual(Module):
         self,
         dim,
         num_views = 1,
-        heads = 4,
-        dim_head = 64,
-        rotary_pos_emb = True,
-        polar_pos_emb = False,
-        last_layer_hiddens_as_query = True,
-        attn_kwargs: dict = dict(),
+        lora_rank = DEFAULT_ATTN_RESIDUAL_LORA_RANK,
         **kwargs
     ):
         super().__init__()
-        assert at_most_one_of(rotary_pos_emb, polar_pos_emb), 'either rotary or polar positional embedding can be used, not both'
-
-        attn_kwargs = dict(
-            k_rmsnorm = True,
-            **attn_kwargs
-        )
+        self.scale = dim ** -0.5
 
         self.num_views = num_views
         self.multiple_views = num_views > 1
-        self.last_layer_hiddens_as_query = last_layer_hiddens_as_query
 
-        self.attn_pool = AttentionPool(
-            dim = dim,
-            dim_context = dim,
-            num_pooled_tokens = num_views if not last_layer_hiddens_as_query else 0,
-            use_transformer_blocks = False,
-            heads = heads,
-            dim_head = dim_head,
-            attn_kwargs = attn_kwargs
+        lora_rank = default(lora_rank, DEFAULT_ATTN_RESIDUAL_LORA_RANK)
+        assert lora_rank < dim, f'lora_rank ({lora_rank}) must be less than dim ({dim})'
+
+        self.pseudo_query = nn.Parameter(torch.zeros(num_views, dim))
+        self.to_keys = nn.Sequential(
+            nn.RMSNorm(dim),
+            LoRALinear(dim, dim = lora_rank),
+            nn.RMSNorm(dim)
         )
-
-        self.to_queries = None
-
-        if last_layer_hiddens_as_query:
-            self.to_queries = nn.Sequential(
-                nn.RMSNorm(dim),
-                nn.Linear(dim, dim * num_views, bias = False),
-                Rearrange('b n (v d) -> (b n) v d', v = num_views)
-            )
-
-        self.use_rotary = rotary_pos_emb
-        self.use_polar = polar_pos_emb
-
-        if polar_pos_emb:
-            self.pos_emb = PolarEmbedding(dim_head, heads)
-        elif rotary_pos_emb:
-            self.pos_emb = RotaryEmbedding(dim_head)
-        else:
-            self.pos_emb = None
 
     def forward(
         self,
-        x,
-        hiddens: list[Tensor] | None = None,
-        **kwargs
+        past_deltas: list[Tensor] | Tensor | None = None,
+        *args,
+        hiddens: list[Tensor] | Tensor | None = None
     ):
-        assert exists(hiddens), 'hiddens must be passed to AttentionAggregatedResidual'
+        if exists(hiddens):
+            past_deltas = hiddens
+        elif len(args) > 0:
+            past_deltas = args[0]
 
-        hiddens = stack(hiddens, dim = 1)
-
-        hiddens = rearrange(hiddens, 'b l n d -> b n l d')
-        hiddens, packed_shape = pack_one(hiddens, '* l d')
-
-        # positional embeddings for layer depth distance
-
-        attn_kwargs = dict()
-
-        if exists(self.pos_emb):
-            num_layers = hiddens.shape[-2]
-            positions = arange(num_layers, device = x.device)
-            pos_emb = self.pos_emb(positions)
-
-            if self.use_polar:
-                attn_kwargs.update(polar_pos_emb = pos_emb)
-            else:
-                attn_kwargs.update(rotary_pos_emb = pos_emb, context_rotary_pos_emb = pos_emb)
-
-        queries = None
-
-        if self.last_layer_hiddens_as_query:
-            queries = self.to_queries(x)
-
-        pooled = self.attn_pool(hiddens, queries = queries, **attn_kwargs)
-
-        if self.multiple_views:
-            pooled = rearrange(pooled, '... v d -> v ... d', v = self.num_views)
-            pooled = unpack_one(pooled, packed_shape, 'v * d')
+        if not is_tensor(past_deltas):
+            stacked = torch.stack(list(past_deltas), dim = 0)
         else:
-            pooled = rearrange(pooled, '... 1 d -> ... d')
-            pooled = unpack_one(pooled, packed_shape, '* d')
+            stacked = past_deltas
 
-        return pooled
+        keys = self.to_keys(stacked)
+
+        logits = einsum('v d, l b ... d -> v l b ...', self.pseudo_query, keys) * self.scale
+        weights = logits.softmax(dim = 1)
+
+        out = einsum('v l b ..., l b ... d -> v b ... d', weights, stacked)
+
+        if not self.multiple_views:
+            out = rearrange(out, '1 ... -> ...')
+
+        return out
 
 # hyper connections
 
@@ -3211,15 +3171,10 @@ class AttentionLayers(Module):
 
             elif attn_aggregated_residuals:
                 layer_integrate_num_view = 3 if layer_qkv_receives_diff_view else 1
-                layer_integrate = AttentionAggregatedResidual(
+                layer_integrate = AttentionResidual(
                     dim,
                     num_views = layer_integrate_num_view,
-                    heads = heads,
-                    dim_head = dim_head,
-                    rotary_pos_emb = rotary_pos_emb,
-                    polar_pos_emb = polar_pos_emb,
-                    last_layer_hiddens_as_query = attn_residuals_last_output_as_query,
-                    attn_kwargs = attn_aggregated_residual_kwargs
+                    **attn_aggregated_residual_kwargs
                 )
 
             if gated_multi_residual:
