@@ -68,6 +68,7 @@ class LayerIntermediates:
     all_pred_logits:        list[Tensor] | None = None
     exit_indices:           Tensor | None = None
     looped_prompt_kv_cache: tuple[Tensor, Tensor] | None = None
+    block_hiddens:          list[Tensor] | None = None
     cache_length:           int = 0
 
     def __copy__(self):
@@ -75,6 +76,9 @@ class LayerIntermediates:
 
         if exists(self.attn_intermediates):
             out.attn_intermediates = [copy(inter) for inter in self.attn_intermediates]
+
+        if exists(self.block_hiddens):
+            out.block_hiddens = copy(self.block_hiddens)
 
         return out
 
@@ -3331,7 +3335,8 @@ class AttentionLayers(Module):
         cross_attn_kv_residuals: Tensor | None = None,
         flash_pack_seq_kwargs = None,
         flash_pack_seq_context_kwargs = None,
-        causal = None
+        causal = None,
+        transform_block_inputs: dict[int, Callable] | Callable | None = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
@@ -3559,8 +3564,23 @@ class AttentionLayers(Module):
 
         # go through the attention and feedforward layers
 
+        block_hiddens = []
+
         for ind, (layer_type, skip_combine, (norm, block, residual_fn), layer_dropout, layer_integrator) in enumerate(zip(*layer_variables)):
             is_last = ind == (len(self.layers) - 1)
+
+            block_begin = divisible_by(ind, self.len_default_block)
+            block_ind = ind // self.len_default_block
+            block_depth = block_ind + 1
+            block_end = divisible_by(ind + 1, self.len_default_block) or is_last
+
+            # maybe transform block inputs (for depths > 1)
+
+            if block_begin and block_depth > 1 and exists(transform_block_inputs):
+                if isinstance(transform_block_inputs, dict) and block_depth in transform_block_inputs:
+                    x = transform_block_inputs[block_depth](x)
+                elif callable(transform_block_inputs):
+                    x = transform_block_inputs(block_depth, x)
 
             # handle skip connections
 
@@ -3656,6 +3676,9 @@ class AttentionLayers(Module):
             if exists(post_main_norm):
                 x = post_main_norm(x)
 
+            if block_end:
+                block_hiddens.append(x)
+
         if return_hiddens:
             layer_hiddens.append(x)
 
@@ -3677,6 +3700,9 @@ class AttentionLayers(Module):
         if not return_hiddens:
             return x
 
+        if len(block_hiddens) > 0:
+            block_hiddens[-1] = x
+
         if return_gumbel_log_probs:
             for intermeds in intermediates:
                 if (
@@ -3692,6 +3718,7 @@ class AttentionLayers(Module):
             last_hidden = x,
             attn_intermediates = intermediates,
             layer_hiddens = layer_hiddens,
+            block_hiddens = block_hiddens,
             cache_length = next_cache_length + prev_cache_length
         )
 
@@ -3908,6 +3935,7 @@ class TransformerWrapper(Module):
         num_memory_tokens = None,
         memory_tokens_interspersed_every = None,
         tie_embedding = False,
+        tie_embedding_scale: float | None = None,
         logits_dim = None,
         return_only_embed = False,
         num_output_heads = 1,
@@ -4074,7 +4102,8 @@ class TransformerWrapper(Module):
             self.to_logits = None
         elif tie_embedding:
             assert isinstance(token_emb, TokenEmbedding), 'can only tie embedding if using `TokenEmbedding`'
-            self.to_logits = lambda t: t @ self.token_emb.emb.weight.t()
+            self.tie_embedding_scale = default(tie_embedding_scale, dim ** -0.5)
+            self.to_logits = lambda t: (t @ self.token_emb.emb.weight.t()) * self.tie_embedding_scale
         elif num_output_heads > 1:
             self.to_logits = ModuleList([LinearNoBias(dim, logits_dim) for _ in range(num_output_heads)])
         else:
@@ -4161,6 +4190,7 @@ class TransformerWrapper(Module):
         embed_ids: dict[str, Tensor] = dict(),
         sum_embeds = None,
         transform_token_embeds = None,
+        transform_block_inputs: dict[int, Callable] | Callable | None = None,
         return_attn_z_loss = False,
         attn_z_loss_weight = 1e-4,
         seq_start_pos = None,
@@ -4204,6 +4234,11 @@ class TransformerWrapper(Module):
 
         if exists(transform_token_embeds):
             token_embeds = transform_token_embeds(token_embeds)
+        elif exists(transform_block_inputs):
+            if isinstance(transform_block_inputs, dict) and 1 in transform_block_inputs:
+                token_embeds = transform_block_inputs[1](token_embeds)
+            elif callable(transform_block_inputs):
+                token_embeds = transform_block_inputs(1, token_embeds)
 
         x = token_embeds + pos_emb
 
@@ -4320,7 +4355,7 @@ class TransformerWrapper(Module):
         # the attention layers forward
 
         def _attn_layers_forward(inp, cache = None, **kwargs):
-            return self.attn_layers(inp, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embeds_and_ids = deep_embed_and_ids, return_hiddens = True, **kwargs)
+            return self.attn_layers(inp, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embeds_and_ids = deep_embed_and_ids, return_hiddens = True, transform_block_inputs = transform_block_inputs, **kwargs)
 
         # maybe recycling
 

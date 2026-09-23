@@ -2964,7 +2964,7 @@ def test_depth_scale_residual(depth_scale_residual):
     logits.sum().backward()
 
 def test_full_bandwidth():
-    from x_transformers import FullBandwidth, LossBreakdown
+    from x_transformers.full_bandwidth import FullBandwidth, LossBreakdown
 
     model = TransformerWrapper(
         num_tokens = 256,
@@ -3027,3 +3027,45 @@ def test_full_bandwidth():
         should_fuse_latent = lambda step: step < 5
     )
     assert sampled_selective.shape == (2, 10)
+
+def test_full_bandwidth_recirculation():
+    from x_transformers.full_bandwidth import FullBandwidth
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 512,
+        tie_embedding = True,
+        post_emb_norm = True,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 4,
+            heads = 4,
+            attn_dim_head = 16,
+            depth_scale_residual = True
+        )
+    )
+
+    tokens = torch.randint(0, 256, (2, 16))
+
+    patterns = (
+        'prev',
+        'self',
+        'top_and_prev',
+        ((4, 1), (4, 4), (3, 3), (2, 2)),
+        ((4, 3, 'glu'), (3, 2, 'residual'), (2, 1, 'gru'))
+    )
+
+    for pattern in patterns:
+        fb = FullBandwidth(
+            model,
+            temporal_parallel_passes = 2,
+            recirc_pairs = pattern
+        )
+
+        loss = fb(tokens)
+        assert loss.item() > 0
+        loss.backward()
+
+    prompts = torch.randint(0, 256, (2, 8))
+    sampled = fb.generate(prompts, seq_len = 16)
+    assert sampled.shape == (2, 16)

@@ -101,7 +101,7 @@ class XValTransformerWrapper(nn.Module):
         # to logits
 
         logits_dim = default(logits_dim, num_tokens)
-        self.to_logits = nn.Linear(dim, logits_dim) if not tie_embedding else lambda t: t @ self.token_emb.emb.weight.t()
+        self.to_logits = nn.Linear(dim, logits_dim) if not tie_embedding else lambda t: (t @ self.token_emb.emb.weight.t()) * (dim ** -0.5)
 
         self.to_numerical_output = nn.Sequential(
             nn.Linear(dim, 1),
