@@ -1278,6 +1278,9 @@ class MVSplitResidualUpdate(Module):
 
 class AttentionResidual(Module):
     """
+    Attention over all preceding hiddens, with the query conditioned on the latest hidden
+    through a low-rank residual, so that the pooling stays sensitive to the current state.
+
     https://arxiv.org/abs/2601.21582
     https://arxiv.org/abs/2603.15031
     """
@@ -1287,6 +1290,7 @@ class AttentionResidual(Module):
         dim,
         num_views = 1,
         lora_rank = DEFAULT_ATTN_RESIDUAL_LORA_RANK,
+        lora_activation = None,
         **kwargs
     ):
         super().__init__()
@@ -1298,12 +1302,14 @@ class AttentionResidual(Module):
         lora_rank = default(lora_rank, DEFAULT_ATTN_RESIDUAL_LORA_RANK)
         assert lora_rank < dim, f'lora_rank ({lora_rank}) must be less than dim ({dim})'
 
-        self.pseudo_query = nn.Parameter(torch.zeros(num_views, dim))
-        self.to_keys = nn.Sequential(
+        self.to_keys = nn.RMSNorm(dim)
+
+        self.to_query = nn.Sequential(
             nn.RMSNorm(dim),
-            LoRALinear(dim, dim = lora_rank),
-            nn.RMSNorm(dim)
+            LoRALinear(dim, dim_out = dim * num_views, dim = lora_rank, activation = lora_activation)
         )
+
+        self.norm = nn.RMSNorm(dim)
 
     def forward(
         self,
@@ -1321,9 +1327,15 @@ class AttentionResidual(Module):
         else:
             stacked = past_deltas
 
+        latest = stacked[-1]
+
+        query = rearrange(latest, '... d -> 1 ... d')
+        query_delta = rearrange(self.to_query(latest), '... (v d) -> v ... d', v = self.num_views)
+
+        query = self.norm(query + query_delta)
         keys = self.to_keys(stacked)
 
-        logits = einsum('v d, l b ... d -> v l b ...', self.pseudo_query, keys) * self.scale
+        logits = einsum('v b ... d, l b ... d -> v l b ...', query, keys) * self.scale
         weights = logits.softmax(dim = 1)
 
         out = einsum('v l b ..., l b ... d -> v b ... d', weights, stacked)

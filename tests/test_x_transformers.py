@@ -1766,6 +1766,24 @@ def test_attn_aggregated_residuals(
     logits = model(x)
     logits.sum().backward()
 
+@param('num_views', (1, 3))
+def test_attn_aggregated_residual_query_conditioned_on_latest_hidden(
+    num_views
+):
+    from x_transformers.x_transformers import AttentionResidual
+
+    res = AttentionResidual(dim = 32, num_views = num_views, lora_rank = 4)
+
+    assert isinstance(res.to_keys, nn.RMSNorm)
+
+    hiddens = [torch.randn(2, 5, 32) for _ in range(3)]
+
+    out = res(hiddens)
+    out_changed = res([*hiddens[:-1], torch.randn(2, 5, 32)])
+
+    assert out.shape == ((2, 5, 32) if num_views == 1 else (num_views, 2, 5, 32))
+    assert not torch.allclose(out, out_changed)
+
 def test_causal_override():
     model = TransformerWrapper(
         num_tokens = 20000,
