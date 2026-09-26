@@ -310,6 +310,12 @@ def init_zero_(layer):
     if exists(layer.bias):
         nn.init.constant_(layer.bias, 0.)
 
+def init_depth_scaled_(projection, layer_depth):
+    # depth scaling of the residual branch output projection, as in the olmo 'mitchell' init
+    # std = 1 / sqrt(2 * fan_in * layer_depth)
+
+    nn.init.normal_(projection.weight, std = (2 * projection.in_features * layer_depth) ** -0.5)
+
 # keyword argument helpers
 
 def pick_and_pop(keys, d):
@@ -1760,6 +1766,7 @@ class FeedForward(Module):
         sublayer_dropout = 0.,
         no_bias = False,
         zero_init_output = False,
+        output_proj_depth = None,
         softclamp_value = None,
         glu_gate_softclamp_value = None,
     ):
@@ -1803,6 +1810,8 @@ class FeedForward(Module):
 
         if zero_init_output:
             init_zero_(proj_out)
+        elif exists(output_proj_depth):
+            init_depth_scaled_(proj_out, output_proj_depth)
 
     def muon_parameters(self):
         weights = []
@@ -1858,6 +1867,7 @@ class Attention(Module):
         output_gate_headwise = False,       # per-head output gate (h); one gate logit per head, broadcasting over the head dimension
         low_rank_silu_gates = True,         # siLU activation in the middle of the low-rank x and h gates, as in HyGA
         zero_init_output = False,
+        output_proj_depth = None,
         hard = False,
         max_attend_past = None,
         qk_norm = False,
@@ -2232,6 +2242,8 @@ class Attention(Module):
 
         if zero_init_output:
             init_zero_(self.to_out)
+        elif exists(output_proj_depth):
+            init_depth_scaled_(self.to_out, output_proj_depth)
 
     @torch.no_grad()
     def qk_clip_(
@@ -3078,18 +3090,21 @@ class AttentionLayers(Module):
         self.depth = depth
 
         # depth scaling for residuals (Yang et al. / Noci et al.)
+        # boolean `depth_scale_residual` scales the residual branch output projections at init (as in the olmo 'mitchell' init)
+        # while a float value scales the branch output at runtime
+
+        depth_scale_branch_output = isinstance(depth_scale_residual, bool) and depth_scale_residual and not attn_aggregated_residuals
 
         residual_scale = None
 
         if attn_aggregated_residuals:
             residual_scale = 1.
-        elif isinstance(depth_scale_residual, bool):
-            residual_scale = (depth ** -0.5) if depth_scale_residual else None
-        elif isinstance(depth_scale_residual, (int, float)):
+        elif isinstance(depth_scale_residual, (int, float)) and not isinstance(depth_scale_residual, bool):
             residual_scale = float(depth_scale_residual)
         elif isinstance(scale_residual, (int, float)) and not isinstance(scale_residual, bool):
             residual_scale = float(scale_residual)
 
+        self.depth_scale_residual = depth_scale_branch_output
         self.residual_scale = residual_scale
 
         maybe_scale_output = maybe(partial(Scale, residual_scale)) if (exists(residual_scale) and residual_scale != 1.) else identity
@@ -3179,6 +3194,10 @@ class AttentionLayers(Module):
             block_begin = divisible_by(ind, len_default_block)
             block_ind = ind // len_default_block
 
+            # depth of the current residual branch, for the depth scaled output projection init
+
+            output_proj_depth = (block_ind + 1) if depth_scale_branch_output else None
+
             # attention, cross attention, feedforward
 
             layer_qkv_receives_diff_view = layer_type == 'a' and qkv_receive_diff_residuals and not (is_first_self_attn and integrate_layers)
@@ -3186,14 +3205,14 @@ class AttentionLayers(Module):
             if layer_type == 'a':
                 self_attn_learned_value_residual = learned_value_residual_mix and not is_first_self_attn
 
-                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, **next(attn_kwargs_iter))
+                layer = Attention(dim, heads = heads, causal = causal, qkv_receive_diff_residuals = layer_qkv_receives_diff_view, learned_value_residual_mix = self_attn_learned_value_residual, rotate_num_heads = rotate_num_heads, output_proj_depth = output_proj_depth, **next(attn_kwargs_iter))
                 is_first_self_attn = False
 
             elif layer_type == 'c':
-                layer = Attention(dim, heads = heads, inverted_attention = next(cross_attn_inverted_attention_iter), **next(cross_attn_kwargs_iter))
+                layer = Attention(dim, heads = heads, inverted_attention = next(cross_attn_inverted_attention_iter), output_proj_depth = output_proj_depth, **next(cross_attn_kwargs_iter))
 
             elif layer_type == 'f':
-                layer = FeedForward(dim, **next(ff_kwargs_iter))
+                layer = FeedForward(dim, output_proj_depth = output_proj_depth, **next(ff_kwargs_iter))
                 layer = layer if not macaron else Scale(0.5, layer)
 
             else:

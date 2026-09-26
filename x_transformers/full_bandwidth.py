@@ -231,7 +231,7 @@ class FullBandwidth(Module):
     ):
         super().__init__()
         assert isinstance(net.attn_layers, Decoder), 'must be a decoder'
-        assert exists(net.attn_layers.residual_scale), 'depth scaling must be turned on'
+        assert net.attn_layers.depth_scale_residual or exists(net.attn_layers.residual_scale), 'depth scaling must be turned on'
         assert callable(net.to_logits) and not isinstance(net.to_logits, nn.Module), 'weight tying must be turned on'
         assert not isinstance(net.post_emb_norm, Identity), 'post embedding norm must be turned on'
 
