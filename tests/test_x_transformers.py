@@ -1265,6 +1265,28 @@ def test_beam_search_kv_cache_parity():
     assert torch.equal(unrestricted_beams, uncached_beams)
     assert torch.allclose(unrestricted_scores, uncached_scores, atol = 1e-5)
 
+def test_generate_unrestricted_max_seq_len():
+    from x_transformers import AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 11,
+        max_seq_len = 32,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 2,
+            heads = 2,
+            rotary_pos_emb = True
+        )
+    )
+
+    wrapper = AutoregressiveWrapper(model)
+    prompts = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+    restricted = wrapper.generate(prompts, seq_len = 5, temperature = 0.)
+    unrestricted = wrapper.generate(prompts, seq_len = 5, temperature = 0., restrict_to_max_seq_len = False)
+
+    assert torch.equal(unrestricted, restricted)
+
 
 @param('num_pooled_tokens', (1, 3))
 @param('attn_pool_depth', (1, 3))

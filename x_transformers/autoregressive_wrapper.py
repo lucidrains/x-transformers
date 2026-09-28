@@ -455,6 +455,8 @@ class AutoregressiveWrapper(Module):
 
         for _ in range(seq_len):
 
+            x = out
+
             if restrict_to_max_seq_len:
                 max_len_exceeded = out.shape[-1] > max_seq_len
 
