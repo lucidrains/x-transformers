@@ -28,7 +28,9 @@ def masked_mean(log_probs, mask = None):
         return log_probs.mean(dim = -1)
 
     if mask.shape[-1] == (log_probs.shape[-1] + 1):
-        mask = mask[:, :-1]
+        # log_probs are the next token, so the mask has to follow those tokens.
+        # Dropping the last position scored the pad and skipped the answer.
+        mask = mask[:, 1:]
 
     log_probs = log_probs.masked_fill(~mask, 0.)
     num = log_probs.sum(dim = -1)
