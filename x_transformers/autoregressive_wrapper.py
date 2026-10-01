@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from math import ceil, log
+import math
+from math import ceil
 from typing import Tuple, Callable
 
 import torch
@@ -148,7 +149,7 @@ def contrastive_decode_fn(
     https://arxiv.org/abs/2309.09117
     """
 
-    cutoff = log(alpha) + expert_logits.amax(dim = -1, keepdim = True)
+    cutoff = math.log(alpha) + expert_logits.amax(dim = -1, keepdim = True)
     diffs = (1 + beta) * expert_logits - beta * amateur_logits
     contrastive_decode_logits = diffs.masked_fill(expert_logits < cutoff, -torch.finfo(expert_logits.dtype).max)
     return contrastive_decode_logits
@@ -445,10 +446,9 @@ class AutoregressiveWrapper(Module):
             amateur_caches = [None] * len(amateur_model)
             filter_logits_fn = identity
 
-            for i, module in enumerate(amateur_model):
-                if isinstance(module, AutoregressiveWrapper):
-                    amateur_model[i] = module.net
+            amateur_model = tuple(module.net if isinstance(module, AutoregressiveWrapper) else module for module in amateur_model)
 
+            for module in amateur_model:
                 module.eval()
 
         # sampling up to seq_len

@@ -1287,6 +1287,37 @@ def test_generate_unrestricted_max_seq_len():
 
     assert torch.equal(unrestricted, restricted)
 
+@param('wrap_amateur', (False, True))
+def test_contrastive_decoding(wrap_amateur):
+    from x_transformers import AutoregressiveWrapper
+
+    def create_model():
+        return TransformerWrapper(
+            num_tokens = 11,
+            max_seq_len = 32,
+            attn_layers = Decoder(
+                dim = 16,
+                depth = 2,
+                heads = 2,
+                rotary_pos_emb = True
+            )
+        )
+
+    wrapper = AutoregressiveWrapper(create_model())
+
+    amateur = create_model()
+
+    if wrap_amateur:
+        amateur = AutoregressiveWrapper(amateur)
+
+    prompts = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+    cached = wrapper.generate(prompts, seq_len = 5, temperature = 0., amateur_model = amateur)
+    uncached = wrapper.generate(prompts, seq_len = 5, temperature = 0., amateur_model = amateur, cache_kv = False)
+
+    assert cached.shape == (2, 5)
+    assert torch.equal(cached, uncached)
+
 
 @param('num_pooled_tokens', (1, 3))
 @param('attn_pool_depth', (1, 3))
