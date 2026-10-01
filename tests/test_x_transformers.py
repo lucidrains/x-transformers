@@ -1449,6 +1449,34 @@ def test_simple_mdlm(
     loss = nar(seq)
     loss.loss.backward()
 
+def test_nar_custom_schedule():
+    from x_transformers.nonautoregressive_wrapper import NonAutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 16 + 1,
+        max_seq_len = 32,
+        attn_layers = Encoder(
+            dim = 16,
+            depth = 1,
+            rotary_pos_emb = True
+        )
+    )
+
+    nar = NonAutoregressiveWrapper(
+        model,
+        mask_id = 16,
+        steps = 4,
+        schedule = lambda t: 1. - t ** 2
+    )
+
+    seq = torch.randint(0, 16, (2, 32))
+
+    loss = nar(seq)
+    loss.loss.backward()
+
+    sampled = nar.generate()
+    assert sampled.shape == (32,)
+
 def test_qk_clip_attn():
     from x_transformers import Attention
 
