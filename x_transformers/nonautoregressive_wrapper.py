@@ -141,7 +141,7 @@ class NonAutoregressiveWrapper(Module):
 
         if callable(schedule):
             self.schedule_fn = schedule
-        if schedule == 'linear':
+        elif schedule == 'linear':
             self.schedule_fn = linear_schedule
         elif schedule == 'cosine':
             self.schedule_fn = cosine_schedule
