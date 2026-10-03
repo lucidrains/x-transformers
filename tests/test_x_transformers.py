@@ -431,6 +431,31 @@ def test_neo_mlp():
     out = mlp(x)
     assert out.shape == (3, 7)
 
+@param('log_distance', (True, False))
+@param('dtype', (torch.float16, torch.bfloat16))
+def test_dynamic_pos_bias_preserves_dtype(log_distance, dtype):
+    # DynamicPositionBias built its continuous-position MLP input via `arange(...).float()`,
+    # hardcoding float32 regardless of the model's own dtype. nn.Linear does not type-promote
+    # a float32 input against half/bfloat16 weights the way elementwise ops do - it raises
+    # `RuntimeError: mat1 and mat2 must have the same dtype` - so a .half() or .to(bfloat16)
+    # model with dynamic_pos_bias = True crashed on its very first forward pass.
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 64,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            dynamic_pos_bias = True,
+            dynamic_pos_bias_log_distance = log_distance
+        )
+    ).to(dtype)
+
+    x = torch.randint(0, 256, (2, 16))
+
+    logits = model(x)
+    assert logits.dtype == dtype
+
 @param('flash', (True, False))
 def test_custom_alibi(flash: bool):
 
