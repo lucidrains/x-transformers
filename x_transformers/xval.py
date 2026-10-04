@@ -271,11 +271,11 @@ class XValAutoregressiveWrapper(nn.Module):
 
         mask = kwargs.get('mask', None)
         if exists(mask):
-            target_mask &= mask
-
             if mask.shape[1] == x.shape[1]:
-                mask = mask[:, :-1]
-                kwargs['mask'] = mask
+                target_mask &= mask[:, 1:]
+                kwargs['mask'] = mask[:, :-1]
+            else:
+                target_mask &= mask
 
         logits, numerical_pred = self.net(inp, x_num_inp, **kwargs)
 
