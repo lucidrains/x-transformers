@@ -1265,6 +1265,53 @@ def test_beam_search_kv_cache_parity():
     assert torch.equal(unrestricted_beams, uncached_beams)
     assert torch.allclose(unrestricted_scores, uncached_scores, atol = 1e-5)
 
+@param('cache_kv', (False, True))
+def test_beam_search_variable_prompt_lens(cache_kv):
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    torch.manual_seed(0)
+
+    model = TransformerWrapper(
+        num_tokens = 11,
+        max_seq_len = 32,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 2,
+            heads = 2,
+            rotary_pos_emb = True
+        )
+    )
+
+    wrapper = AutoregressiveWrapper(model)
+
+    prompts = torch.tensor([[1, 2, 3], [4, 5, 0]])
+    prompt_lens = torch.tensor([3, 2])
+
+    beams, scores = wrapper.beam_search(
+        prompts,
+        seq_len = 5,
+        beams = 3,
+        prompt_lens = prompt_lens,
+        cache_kv = cache_kv,
+        return_beams_and_scores = True
+    )
+
+    assert beams.shape == (3, 2, 5)
+
+    # each padded prompt should decode the same as when given alone
+
+    for i, (prompt, prompt_len) in enumerate(zip(prompts, prompt_lens)):
+        single_beams, single_scores = wrapper.beam_search(
+            prompt[None, :prompt_len],
+            seq_len = 5,
+            beams = 3,
+            cache_kv = cache_kv,
+            return_beams_and_scores = True
+        )
+
+        assert torch.equal(beams[:, i], single_beams[:, 0])
+        assert torch.allclose(scores[:, i], single_scores[:, 0], atol = 1e-5)
+
 def test_generate_unrestricted_max_seq_len():
     from x_transformers import AutoregressiveWrapper
 

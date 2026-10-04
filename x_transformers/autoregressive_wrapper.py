@@ -311,6 +311,9 @@ class AutoregressiveWrapper(Module):
             if should_cache and is_first:
                 modify_cached_kv(cache, lambda t: repeat(t, 'b ... -> (b beams) ...', beams = beams))
 
+            if exists(seq_start_pos) and is_first:
+                seq_start_pos = repeat(seq_start_pos, 'b -> (b beams)', beams = beams)
+
             # concat sample
 
             out = torch.cat((out, samples), dim=-1)
