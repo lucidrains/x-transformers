@@ -159,7 +159,7 @@ class NonAutoregressiveWrapper(Module):
 
             def loss_weight_fn(times):
                 grad, value = grad_and_value_schedule_fn(times)
-                return grad / (1. - value)
+                return -grad / (1. - value)
 
             self.loss_weight_fn = loss_weight_fn
 
