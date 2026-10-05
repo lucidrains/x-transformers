@@ -596,6 +596,10 @@ class DynamicPositionBias(Module):
     def device(self):
         return next(self.parameters()).device
 
+    @property
+    def dtype(self):
+        return next(self.parameters()).dtype
+
     def forward(self, i, j):
         n, device = j, self.device
 
@@ -606,11 +610,16 @@ class DynamicPositionBias(Module):
         indices += (j - 1)
 
         # input to continuous positions MLP
+        # kept at float32 through the distance / log-distance math for precision, then cast to the
+        # mlp's own dtype right before entering it - nn.Linear does not type-promote a float32 input
+        # against half/bfloat16 weights, it errors, so a half or bfloat16 model previously crashed here
         pos = arange(-j + 1, j, device = device).float()
         pos = rearrange(pos, '... -> ... 1')
 
         if self.log_distance:
             pos = torch.sign(pos) * torch.log(pos.abs() + 1)  # log of distance is sign(rel_pos) * log(abs(rel_pos) + 1)
+
+        pos = pos.to(self.dtype)
 
         for layer in self.mlp:
             pos = layer(pos)
