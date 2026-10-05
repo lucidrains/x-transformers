@@ -3215,3 +3215,37 @@ def test_full_bandwidth_recirculation():
     prompts = torch.randint(0, 256, (2, 8))
     sampled = fb.generate(prompts, seq_len = 16)
     assert sampled.shape == (2, 16)
+
+def test_xval_full_length_padding_mask():
+    from x_transformers import XValTransformerWrapper, XValAutoregressiveWrapper
+
+    torch.manual_seed(0)
+
+    model = XValTransformerWrapper(
+        num_tokens = 4,
+        numerical_token_id = 3,
+        max_seq_len = 32,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 1,
+            heads = 2
+        )
+    )
+
+    wrapper = XValAutoregressiveWrapper(model).eval()
+
+    ids = torch.randint(0, 4, (1, 10))
+    nums = torch.randn(1, 10)
+
+    # right padded key padding mask, same length as the sequence
+
+    mask = torch.ones((1, 10), dtype = torch.bool)
+    mask[:, 6:] = False
+
+    loss = wrapper(ids, nums, mask = mask)
+
+    # should equal the loss on the unpadded sequence
+
+    unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
+
+    assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
