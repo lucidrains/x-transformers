@@ -444,7 +444,7 @@ class ContinuousAutoregressiveWrapper(Module):
 
         if exists(lens):
             assert 'mask' not in kwargs, 'either `mask` or `lens` passed in, but not both'
-            seq_len, device = inp.shape[1], inp.device
+            seq_len, device = x.shape[1], x.device
             seq_arange = torch.arange(seq_len, device = device)
             mask = einx.less('j, i -> i j', seq_arange, lens)
 
@@ -453,8 +453,10 @@ class ContinuousAutoregressiveWrapper(Module):
         # mask
 
         mask = kwargs.get('mask', None)
+        loss_mask = mask
 
         if exists(mask) and mask.shape[1] == x.shape[1]:
+            loss_mask = mask[:, 1:]
             mask = mask[:, :-1]
             kwargs['mask'] = mask
 
@@ -462,12 +464,12 @@ class ContinuousAutoregressiveWrapper(Module):
 
         loss = self.loss_fn(out, target)
 
-        if exists(mask):
+        if exists(loss_mask):
             assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
 
             if self.equal_loss_weight_batch:
-                loss = batch_masked_mean(loss, mask)
+                loss = batch_masked_mean(loss, loss_mask)
             else:
-                loss = loss[mask]
+                loss = loss[loss_mask]
 
         return loss.mean()
