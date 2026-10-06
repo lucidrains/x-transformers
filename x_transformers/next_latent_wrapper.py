@@ -391,7 +391,7 @@ class NextLatentWrapper(Module):
         sigreg_loss = self.zero
 
         if self.has_sigreg:
-            sigreg_loss = self.sigreg_loss(hidden_states[mask], **self.sigreg_loss_kwargs)
+            sigreg_loss = self.sigreg_loss(hidden_states[:, :-1][mask], **self.sigreg_loss_kwargs)
 
         # total
 
