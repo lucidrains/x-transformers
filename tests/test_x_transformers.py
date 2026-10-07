@@ -3249,3 +3249,46 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+def test_continuous_generate_with_memory_tokens():
+    from x_transformers.continuous import ContinuousTransformerWrapper, ContinuousAutoregressiveWrapper
+
+    model = ContinuousAutoregressiveWrapper(ContinuousTransformerWrapper(
+        dim_in = 3,
+        dim_out = 3,
+        max_seq_len = 64,
+        num_memory_tokens = 2,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4
+        )
+    )).eval()
+
+    start = torch.randn(1, 4, 3)
+
+    cached = model.generate(start, 4, cache_kv = True)
+    uncached = model.generate(start, 4, cache_kv = False)
+
+    assert torch.allclose(cached, uncached, atol = 1e-5)
+
+def test_continuous_generate_with_kv_cache_past_max_seq_len():
+    from x_transformers.continuous import ContinuousTransformerWrapper, ContinuousAutoregressiveWrapper
+
+    model = ContinuousAutoregressiveWrapper(ContinuousTransformerWrapper(
+        dim_in = 3,
+        dim_out = 3,
+        max_seq_len = 8,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            rotary_pos_emb = True
+        )
+    )).eval()
+
+    start = torch.randn(1, 4, 3)
+
+    generated = model.generate(start, 10, cache_kv = True)
+
+    assert generated.shape == (1, 10, 3)
