@@ -3249,3 +3249,32 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+def test_encoder_shift_tokens_ignore_padding():
+    from x_transformers import TransformerWrapper, Encoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Encoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            shift_tokens = 1
+        )
+    ).eval()
+
+    x = torch.randint(0, 256, (2, 10))
+    mask = torch.ones((2, 10), dtype = torch.bool)
+    mask[:, 7:] = False
+
+    x_changed = x.clone()
+    x_changed[:, 7:] = (x[:, 7:] + 1) % 256
+
+    with torch.no_grad():
+        logits = model(x, mask = mask)
+        logits_changed = model(x_changed, mask = mask)
+
+    # changing padded tokens must not affect the unpadded positions
+
+    assert torch.allclose(logits[:, :7], logits_changed[:, :7], atol = 1e-6)
