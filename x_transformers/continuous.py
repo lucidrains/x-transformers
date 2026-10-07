@@ -12,7 +12,6 @@ from einops import rearrange, reduce, pack, repeat, unpack
 from x_transformers.autoregressive_wrapper import align_right
 
 from x_transformers.x_transformers import (
-    Attention,
     AttentionLayers,
     ScaledSinusoidalEmbedding,
     AbsolutePositionalEmbedding,
@@ -134,7 +133,8 @@ class ContinuousTransformerWrapper(Module):
 
         # can cache kv
 
-        self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
+        self.can_cache_kv = not self.has_memory_tokens and attn_layers.can_cache_kv
+        self.can_cache_kv_outside_max_seq_len = no_abs_pos_emb
 
     def forward(
         self,
@@ -305,7 +305,16 @@ class ContinuousAutoregressiveWrapper(Module):
         for _ in range(seq_len):
             x = out
             if exists(self.max_seq_len):
+                max_len_exceeded = out.shape[-2] > self.max_seq_len
+
+                assert not (should_cache_kv and max_len_exceeded and not self.net.can_cache_kv_outside_max_seq_len), 'the network cannot use cached key values when decoding outside the max sequence length. most likely because you are using absolute positional embedding. you can switch to rotary embeddings to resolve this issue'
+
                 x = x[:, -self.max_seq_len:]
+
+                if exists(cache):
+                    for inter in cache.attn_intermediates:
+                        if inter.layer_type == 'a':
+                            inter.cached_kv = [t[..., -(self.max_seq_len - 1):, :] for t in inter.cached_kv]
 
             net_out, new_cache = self.net(x, cache = cache, return_intermediates = True, **kwargs)
 
