@@ -3249,3 +3249,76 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+def test_multi_input_memory_tokens_with_prepend_embeds():
+    torch.manual_seed(0)
+
+    multi_input = MultiInputTransformerWrapper(
+        num_tokens = dict(token = 20),
+        max_seq_len = 32,
+        num_memory_tokens = 2,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 1,
+            heads = 2
+        )
+    )
+
+    model = TransformerWrapper(
+        num_tokens = 20,
+        max_seq_len = 32,
+        num_memory_tokens = 2,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 1,
+            heads = 2
+        )
+    )
+
+    # same weights, single input
+
+    state_dict = multi_input.state_dict()
+    state_dict['token_emb.emb.weight'] = state_dict.pop('embeds.token_embed.weight')
+    state_dict['to_logits.weight'] = state_dict.pop('to_logits.token.weight')
+    model.load_state_dict(state_dict)
+
+    multi_input.eval()
+    model.eval()
+
+    x = torch.randint(0, 20, (2, 5))
+    prepend_embeds = torch.randn(2, 3, 16)
+
+    multi_input_logits = multi_input(dict(token = x), prepend_embeds = prepend_embeds)['token']
+    logits = model(x, prepend_embeds = prepend_embeds)
+
+    assert multi_input_logits.shape == (2, 3 + 5, 20)
+    assert torch.allclose(multi_input_logits, logits, atol = 1e-5)
+
+@pytest.mark.parametrize('wrapper', ('transformer', 'multi_input'))
+def test_interspersed_memory_tokens_with_prepend_embeds(wrapper):
+    torch.manual_seed(0)
+
+    kwargs = dict(
+        max_seq_len = 32,
+        num_memory_tokens = 2,
+        memory_tokens_interspersed_every = 4,
+        attn_layers = Decoder(
+            dim = 16,
+            depth = 1,
+            heads = 2
+        )
+    )
+
+    x = torch.randint(0, 20, (2, 5))
+
+    if wrapper == 'transformer':
+        model = TransformerWrapper(num_tokens = 20, **kwargs)
+    else:
+        model = MultiInputTransformerWrapper(num_tokens = dict(token = 20), **kwargs)
+        x = dict(token = x)
+
+    prepend_embeds = torch.randn(2, 3, 16)
+
+    embeds = model(x, prepend_embeds = prepend_embeds, return_embeddings = True)
+
+    assert embeds.shape == (2, 3 + 5, 16)
