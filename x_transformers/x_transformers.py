@@ -1597,8 +1597,8 @@ class ShiftTokens(Module):
         self.fn = fn
         self.shifts = tuple(shifts)
 
-    def forward(self, x, **kwargs):
-        mask = kwargs.get('mask', None)
+    def forward(self, x, shift_mask = None, **kwargs):
+        mask = default(shift_mask, kwargs.get('mask', None))
         shifts = self.shifts
         segments = len(shifts)
         feats_per_shift = x.shape[-1] // segments
@@ -3120,6 +3120,7 @@ class AttentionLayers(Module):
         # calculate token shifting
 
         shift_tokens = cast_tuple(shift_tokens, len(layer_types))
+        self.layer_shift_tokens = shift_tokens
 
         # optional soft clamping just before the final norm
         # used in gemma 2
@@ -3519,7 +3520,8 @@ class AttentionLayers(Module):
             self.skip_combines,
             self.layers,
             self.layer_dropouts,
-            self.layer_integrators
+            self.layer_integrators,
+            self.layer_shift_tokens
         )
 
         # able to override the layers execution order on forward, for trying to depth extrapolate
@@ -3597,7 +3599,7 @@ class AttentionLayers(Module):
 
         block_hiddens = []
 
-        for ind, (layer_type, skip_combine, (norm, block, residual_fn), layer_dropout, layer_integrator) in enumerate(zip(*layer_variables)):
+        for ind, (layer_type, skip_combine, (norm, block, residual_fn), layer_dropout, layer_integrator, layer_shift_tokens) in enumerate(zip(*layer_variables)):
             is_last = ind == (len(self.layers) - 1)
 
             block_begin = divisible_by(ind, self.len_default_block)
@@ -3680,7 +3682,9 @@ class AttentionLayers(Module):
             elif layer_type == 'c':
                 out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, flash_pack_seq_kwargs = flash_pack_seq_context_kwargs, return_intermediates = True)
             elif layer_type == 'f':
-                out = block(x, deep_embed = next(deep_embeds_iter, None))
+                # token shifting in a feedforward needs the mask, so padding is not shifted into valid tokens
+                shift_kwargs = dict(shift_mask = mask) if layer_shift_tokens > 0 else dict()
+                out = block(x, deep_embed = next(deep_embeds_iter, None), **shift_kwargs)
 
             # store first self or cross attention intermediate for value residual
 
