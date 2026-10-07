@@ -3249,3 +3249,29 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+@param('decoder_kwargs', (
+    dict(shift_tokens = 1),
+    dict(attn_data_dependent_alibi = True),
+    dict(attn_data_dependent_alibi = True, attn_data_dependent_alibi_per_row = True)
+))
+def test_generate_with_kv_cache_matches_without(decoder_kwargs):
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    model = AutoregressiveWrapper(TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            **decoder_kwargs
+        )
+    )).eval()
+
+    prompt = torch.randint(0, 256, (2, 4))
+
+    cached = model.generate(prompt, 16, cache_kv = True, temperature = 0.)
+    uncached = model.generate(prompt, 16, cache_kv = False, temperature = 0.)
+
+    assert torch.equal(cached, uncached)
