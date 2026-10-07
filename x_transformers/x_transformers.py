@@ -239,8 +239,8 @@ def or_reduce(masks):
     return head
 
 def orthog_project(x, y):
-    x, packed_shape = pack([x], 'b *')
-    y, _ = pack([y], 'b *')
+    # project along the feature dimension only, so each token (and head) is projected independently
+    # flattening the sequence into the projection would let future tokens leak into past ones
 
     dtype = x.dtype
 
@@ -251,8 +251,6 @@ def orthog_project(x, y):
 
     parallel = (x * unit).sum(dim = -1, keepdim = True) * unit
     orthog = x - parallel
-
-    orthog, = unpack(orthog, packed_shape, 'b *')
 
     return orthog.to(dtype)
 

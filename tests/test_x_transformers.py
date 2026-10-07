@@ -3249,3 +3249,34 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+@param('decoder_kwargs', (
+    dict(attn_orthog_projected_values = True),
+    dict(attn_orthog_projected_values_per_head = True),
+    dict(orthog_residual = True)
+))
+def test_orthog_projections_are_causal(decoder_kwargs):
+    from x_transformers import TransformerWrapper, Decoder
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            **decoder_kwargs
+        )
+    ).eval()
+
+    x = torch.randint(0, 256, (1, 10))
+    x_changed = x.clone()
+    x_changed[:, -1] = (x[:, -1] + 1) % 256
+
+    with torch.no_grad():
+        logits = model(x)
+        logits_changed = model(x_changed)
+
+    # changing the last token must not affect any earlier position
+
+    assert torch.allclose(logits[:, :-1], logits_changed[:, :-1], atol = 1e-6)
