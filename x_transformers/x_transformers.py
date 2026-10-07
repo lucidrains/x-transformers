@@ -4352,9 +4352,9 @@ class TransformerWrapper(Module):
             if exists(mem_every):
                 assert mem_every > 0
                 assert isinstance(self.attn_layers, Decoder), 'only for decoder'
-                next_seq_len = math.ceil(n / mem_every) * mem_every
+                next_seq_len = math.ceil(mem_seq / mem_every) * mem_every
 
-                x = pad_at_dim(x, (0, next_seq_len - n), dim = -2, value = 0.)
+                x = pad_at_dim(x, (0, next_seq_len - mem_seq), dim = -2, value = 0.)
                 x = rearrange(x, 'b (n m) d -> (b n) m d', m = mem_every)
 
             mem = repeat(self.memory_tokens, 'n d -> b n d', b = x.shape[0])
