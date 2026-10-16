@@ -2061,8 +2061,10 @@ def test_softclamp_ff():
             depth = 2,
             heads = 8,
             ff_glu = True,
-            ff_softclamp_value = 10.,
-            ff_glu_gate_softclamp_value = 10.
+            ff_swish = True,
+            ff_glu_softclamp = True,
+            ff_glu_gate_softclamp_value = 10.,
+            ff_glu_up_softclamp_value = 10.
         )
     )
 
@@ -2073,6 +2075,12 @@ def test_softclamp_ff():
 
     loss = logits.sum()
     loss.backward()
+
+def test_softclamp_ff_assert():
+    from x_transformers import FeedForward
+
+    with pytest.raises(AssertionError):
+        FeedForward(16, glu = True, relu_squared = True, glu_softclamp = True)
 
 @param('loss_type', ('l1', 'l2'))
 @param('has_lens', (False, True))

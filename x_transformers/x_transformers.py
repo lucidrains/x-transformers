@@ -385,6 +385,14 @@ class SoLU(Module):
         activated = x.softmax(dim = -1) * x
         return self.norm(activated)
 
+# soft clamped gelu / swish, as in the situ-glu of kimi k3 - https://arxiv.org/abs/2607.24653
+
+def softclamp_gelu(t, value):
+    return softclamp(t, value) * torch.special.ndtr(t)  # ndtr - the nonlinearity of gelu
+
+def softclamp_silu(t, value):
+    return softclamp(t, value) * t.sigmoid()
+
 # embedding
 
 class TokenEmbedding(Module):
@@ -1725,29 +1733,32 @@ class GLU(Module):
         dim_out,
         activation: Callable,
         mult_bias = False,
-        softclamp_value = None,
-        gate_softclamp_value = None
+        softclamp = False,
+        gate_softclamp_value = 4.,
+        up_softclamp_value = 25.
     ):
         super().__init__()
+
+        # forward the gate soft clamping to the specialized gelu / swish
+
+        if softclamp:
+            assert isinstance(activation, (nn.GELU, nn.SiLU)), 'soft clamping of the glu gate is only supported for the gelu and swish activations'
+
+            softclamped = softclamp_gelu if isinstance(activation, nn.GELU) else softclamp_silu
+            activation = partial(softclamped, value = gate_softclamp_value)
+
         self.act = activation
+        self.up_softclamp_value = up_softclamp_value if softclamp else None
         self.proj = nn.Linear(dim_in, dim_out * 2)
         self.mult_bias = nn.Parameter(torch.ones(dim_out)) if mult_bias else 1.
 
-        # deepseek v4 softclamping of feedforward
-
-        self.softclamp_value = softclamp_value
-        self.gate_softclamp_value = gate_softclamp_value
-
     def forward(self, x):
-        x, gate = self.proj(x).chunk(2, dim = -1)
+        up, gate = self.proj(x).chunk(2, dim = -1)
 
-        if exists(self.softclamp_value):
-            x = softclamp(x, self.softclamp_value)
+        if exists(self.up_softclamp_value):
+            up = softclamp(up, self.up_softclamp_value)
 
-        if exists(self.gate_softclamp_value):
-            gate = softclamp(gate, self.gate_softclamp_value)
-
-        return x * self.act(gate) * self.mult_bias
+        return up * self.act(gate) * self.mult_bias
 
 class FeedForward(Module):
     def __init__(
@@ -1768,7 +1779,9 @@ class FeedForward(Module):
         zero_init_output = False,
         output_proj_depth = None,
         softclamp_value = None,
-        glu_gate_softclamp_value = None,
+        glu_softclamp = False,            # soft clamps the linear factor of the glu branches, as in situ-glu
+        glu_gate_softclamp_value = 4.,    # b_g
+        glu_up_softclamp_value = 25.,     # b_u
     ):
         super().__init__()
         inner_dim = int(dim * mult)
@@ -1788,7 +1801,15 @@ class FeedForward(Module):
             activation = nn.GELU()
 
         if glu:
-            proj_in = GLU(dim, inner_dim, activation, mult_bias = glu_mult_bias, softclamp_value = softclamp_value, gate_softclamp_value = glu_gate_softclamp_value)
+            proj_in = GLU(
+                dim,
+                inner_dim,
+                activation,
+                mult_bias = glu_mult_bias,
+                softclamp = glu_softclamp,
+                gate_softclamp_value = glu_gate_softclamp_value,
+                up_softclamp_value = glu_up_softclamp_value
+            )
         else:
             proj_in = Sequential(
                 nn.Linear(dim, inner_dim, bias = not no_bias),

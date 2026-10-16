@@ -2859,4 +2859,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{kimiteam2026kimik3openfrontier,
+    title   = {Kimi K3: Open Frontier Intelligence},
+    author  = {Kimi Team},
+    year    = {2026},
+    eprint  = {2607.24653},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CL},
+    url     = {https://arxiv.org/abs/2607.24653},
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
