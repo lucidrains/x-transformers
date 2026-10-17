@@ -203,15 +203,20 @@ class UniversalPretrainWrapper(Module):
     def device(self):
         return self.step.device
 
-    def get_rand_sequences_from_buffer(self, size = None):
+    def get_rand_sequences_from_buffer(self, size = None, return_indices = False):
         size = default(size, self.batch_size)
-        rand_indices = randperm(self.buffer_size, device = self.device)[:size]
-        return self.synth_data_buffer[rand_indices]
+        rand_indices = randperm(self.buffer_size, device = self.synth_data_buffer.device)[:size]
+        sequences = self.synth_data_buffer[rand_indices]
+
+        if not return_indices:
+            return sequences
+
+        return sequences, rand_indices
 
     def forward(self):
         # following algorithm 1.
 
-        conditions = self.get_rand_sequences_from_buffer()
+        conditions, condition_indices = self.get_rand_sequences_from_buffer(return_indices = True)
 
         # get seeds, which appears to be random sequences with random crops of seed length
 
@@ -239,19 +244,19 @@ class UniversalPretrainWrapper(Module):
         if self.reset_turing_machine_every > 0 and divisible_by(self.step.item(), self.reset_turing_machine_every):
             self.data_generator.reset_()
 
-        # reset
+        # reset - indexing the buffer returns a copy, so write back through the sampled indices
 
         if self.num_reset > 0:
-            buffer_to_reset = self.get_rand_sequences_from_buffer(self.num_reset)
+            _, reset_indices = self.get_rand_sequences_from_buffer(self.num_reset, return_indices = True)
 
             with torch.no_grad():
-                reset_sequences = self.random_sequences_fn(self.num_reset // 2, self.num_reset // 2, device = self.device)
-                buffer_to_reset.copy_(reset_sequences)
+                reset_sequences = self.random_sequences_fn(self.num_reset // 2, self.num_reset // 2, device = self.synth_data_buffer.device)
+                self.synth_data_buffer[reset_indices] = reset_sequences
 
         # place "enriched" random generated sequences back
 
         with torch.no_grad():
-            conditions.copy_(generated)
+            self.synth_data_buffer[condition_indices] = generated.to(self.synth_data_buffer.device)
 
         # sample yet again according to pseudocode
 
