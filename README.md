@@ -212,6 +212,24 @@ loss.backward()
 # attention is all you need
 ```
 
+For generation, pass the image embeddings through `src_prepend_embeds` again. The `mask` still describes only the text prompt; the prepended image tokens are included automatically. The decoder prefix should contain the same start token used in the training targets.
+
+```python
+vit.eval()
+pali.eval()
+
+with torch.no_grad():
+    img_embeds = vit(img, return_embeddings = True)
+
+    generated = pali.generate(
+        prompt,
+        output_text[:, :1],
+        seq_len = 128,
+        mask = prompt_mask,
+        src_prepend_embeds = img_embeds
+    ) # (1, 128)
+```
+
 ## Dropouts
 
 ```python

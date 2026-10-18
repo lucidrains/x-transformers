@@ -79,6 +79,48 @@ def test_readme():
     loss = model(src, tgt, mask = src_mask)
     loss.backward()
 
+@param('prepend', (False, True))
+@param('masked', (False, True))
+def test_encoder_decoder_generate(prepend, masked):
+    torch.manual_seed(0)
+
+    model = XTransformer(
+        dim = 16,
+        enc_num_tokens = 32,
+        enc_depth = 1,
+        enc_heads = 2,
+        enc_max_seq_len = 16,
+        dec_num_tokens = 32,
+        dec_depth = 1,
+        dec_heads = 2,
+        dec_max_seq_len = 16
+    ).eval()
+
+    src = torch.randint(0, 32, (2, 5))
+    start = torch.ones((2, 1), dtype = torch.long)
+    prepend_embeds = torch.randn(2, 3, 16) if prepend else None
+    mask = torch.tensor([[True, True, True, False, False], [True, True, True, True, False]]) if masked else None
+
+    encodings = model.encoder(src, mask = mask, prepend_embeds = prepend_embeds, return_embeddings = True)
+    context_mask = mask
+
+    if prepend and masked:
+        context_mask = torch.cat((torch.ones(2, 3, dtype = torch.bool), mask), dim = -1)
+
+    expected = model.decoder.generate(
+        start,
+        seq_len = 3,
+        context = encodings,
+        context_mask = context_mask,
+        temperature = 0.
+    )
+
+    kwargs = dict(src_prepend_embeds = prepend_embeds) if prepend else dict()
+    generated = model.generate(src, start, seq_len = 3, mask = mask, temperature = 0., **kwargs)
+
+    assert generated.shape == (2, 3)
+    assert torch.equal(generated, expected)
+
 def test_kv_cache():
     model = TransformerWrapper(
         num_tokens = 20000,
