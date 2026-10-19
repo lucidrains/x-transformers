@@ -217,6 +217,7 @@ class FreeTransformer(Module):
         )
 
         self.pad_id = pad_id
+        self._substitute_pad_for_embed = not (0 <= pad_id < num_tokens)
 
         self.kl_loss_weight = kl_loss_weight
 
@@ -356,7 +357,8 @@ class FreeTransformer(Module):
         seq, labels = seq[:, :-1], seq[:, 1:]
 
 
-        tokens = self.token_emb(seq)
+        embed_seq = seq.masked_fill(seq == self.pad_id, 0) if self._substitute_pad_for_embed else seq
+        tokens = self.token_emb(embed_seq)
 
         # decoder head
 
@@ -366,7 +368,8 @@ class FreeTransformer(Module):
         # determine whether to use a separate sequence for encoding latents
 
         if exists(seq_for_latents):
-            tokens_for_latents = self.token_emb(seq_for_latents)
+            embed_seq_for_latents = seq_for_latents.masked_fill(seq_for_latents == self.pad_id, 0) if self._substitute_pad_for_embed else seq_for_latents
+            tokens_for_latents = self.token_emb(embed_seq_for_latents)
 
             if exists(self.decoder_head):
                 tokens_for_latents = self.decoder_head(tokens_for_latents)
