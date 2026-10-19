@@ -99,7 +99,7 @@ class BinaryMapper(Module):
         sampled_bits = (torch.rand_like(logits) <= prob_for_sample).long()
         indices = (self.power_two * sampled_bits).sum(dim = -1)
 
-        one_hot = F.one_hot(indices, self.num_codes).float()
+        one_hot = F.one_hot(indices, self.num_codes).to(logits.dtype)
 
         # maybe calculate aux loss
 
@@ -117,13 +117,13 @@ class BinaryMapper(Module):
             # get the soft G for the gradients and do a straight through
 
             soft_G = (
-                einsum(F.logsigmoid(logits), self.codes.float(), '... bits, codes bits -> ... codes') +
-                einsum(F.logsigmoid(-logits), (~self.codes).float(), '... bits, codes bits -> ... codes')
+                einsum(F.logsigmoid(logits), self.codes.to(logits.dtype), '... bits, codes bits -> ... codes') +
+                einsum(F.logsigmoid(-logits), (~self.codes).to(logits.dtype), '... bits, codes bits -> ... codes')
             ).exp()
 
             # straight through
 
-            one_hot = one_hot + soft_G - soft_G.detach()
+            one_hot = one_hot + (soft_G - soft_G.detach())
 
         return one_hot, aux_kl_loss
 
@@ -290,7 +290,7 @@ class FreeTransformer(Module):
 
             if latents.dtype in (torch.int, torch.long):
                 # if given as indices
-                latents = F.one_hot(latents, self.binary_mapper.num_codes).float()
+                latents = F.one_hot(latents, self.binary_mapper.num_codes).to(self.from_latent_to_condition.weight.dtype)
 
             if latents.ndim == 1: # repeat latents
                 latents = repeat(latents, 'd -> b 1 d', b = batch)
