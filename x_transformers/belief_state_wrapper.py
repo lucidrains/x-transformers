@@ -369,10 +369,12 @@ class BeliefStateWrapper(Module):
 
         # cross entropy loss
 
+        needs_loss_weight = self.needs_loss_weight or exists(loss_weight_by_fb_indices)
+
         loss = F.cross_entropy(
             rearrange(logits, 'b n (fb l) -> b l (fb n)', fb = 2),
             labels,
-            reduction = 'none' if self.needs_loss_weight else 'mean',
+            reduction = 'none' if needs_loss_weight else 'mean',
             ignore_index = -1
         )
 
@@ -405,8 +407,6 @@ class BeliefStateWrapper(Module):
             )
 
         # maybe loss weighting
-
-        needs_loss_weight = default(self.needs_loss_weight, exists(loss_weight_by_fb_indices))
 
         if needs_loss_weight:
             loss = rearrange(loss, 'b (fb n) -> b fb n', fb = 2)
