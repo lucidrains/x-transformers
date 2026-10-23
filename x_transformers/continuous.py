@@ -417,7 +417,7 @@ class ContinuousAutoregressiveWrapper(Module):
 
         # stack for predictions
 
-        preds = cat(preds, dim = 1)
+        preds = cat(preds, dim = -2)
 
         # loss
 
