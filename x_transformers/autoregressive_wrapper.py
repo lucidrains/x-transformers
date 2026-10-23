@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from einops import rearrange, repeat, pack, unpack
 
-from torch_einops_utils import masked_mean, pad_at_dim, lens_to_mask
+from torch_einops_utils import masked_mean, pad_at_dim, lens_to_mask, cross_entropy
 
 def exists(val):
     return val is not None
@@ -600,7 +600,7 @@ class AutoregressiveWrapper(Module):
 
         # loss function
 
-        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+        loss_fn = cross_entropy if not self.net.output_is_log_prob else F.nll_loss
 
         # losses - if looped
 
