@@ -1189,6 +1189,48 @@ def test_up(
     loss = up_wrapper()
     loss.backward()
 
+@param('keep_buffer_on_cpu', (False, True))
+def test_up_updates_buffer(
+    keep_buffer_on_cpu
+):
+    from torch.nn import Module
+    from x_transformers.up_wrapper import UniversalPretrainWrapper
+
+    # data generator that always generates the same token, so its sequences are easy to find in the buffer
+
+    class ConstantDataGenerator(Module):
+        def generate(self, length, seed = None, condition = None):
+            return torch.full((condition.shape[0], length), 255, device = condition.device)
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 64,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 1,
+            heads = 2
+        ),
+    )
+
+    up_wrapper = UniversalPretrainWrapper(
+        model,
+        data_generator = ConstantDataGenerator(),
+        seq_len = 16,
+        batch_size = 4,
+        buffer_size = 8,
+        num_reset = 0,
+        keep_buffer_on_cpu = keep_buffer_on_cpu
+    )
+
+    up_wrapper.synth_data_buffer.fill_(0)
+
+    up_wrapper()
+
+    # the generated sequences should be placed back into the buffer, one row per sampled condition
+
+    generated_rows = (up_wrapper.synth_data_buffer == 255).all(dim = -1)
+    assert generated_rows.sum().item() == 4
+
 @param('stochastic', (False, True))
 def test_beam_search(stochastic):
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
