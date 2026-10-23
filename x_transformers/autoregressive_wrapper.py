@@ -472,6 +472,11 @@ class AutoregressiveWrapper(Module):
                         if inter.layer_type == 'a':
                             inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
 
+                if exists(amateur_model):
+                    for amateur_cache in amateur_caches:
+                        if exists(amateur_cache):
+                            modify_cached_kv(amateur_cache, lambda t: t[..., -(max_seq_len - 1):, :])
+
             logits, new_cache = self.net(
                 x,
                 return_intermediates = True,
