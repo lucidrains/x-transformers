@@ -4756,8 +4756,12 @@ class XTransformer(Module):
         self.decoder = AutoregressiveWrapper(self.decoder, ignore_index=ignore_index, pad_value=pad_value)
 
     @torch.no_grad()
-    def generate(self, seq_in, seq_out_start, seq_len, mask = None, attn_mask = None, **kwargs):
-        encodings = self.encoder(seq_in, mask = mask, attn_mask = attn_mask, return_embeddings = True)
+    def generate(self, seq_in, seq_out_start, seq_len, mask = None, attn_mask = None, src_prepend_embeds = None, **kwargs):
+        encodings = self.encoder(seq_in, mask = mask, attn_mask = attn_mask, prepend_embeds = src_prepend_embeds, return_embeddings = True)
+
+        if exists(src_prepend_embeds) and exists(mask):
+            mask = pad_at_dim(mask, (src_prepend_embeds.shape[-2], 0), dim = -1, value = True)
+
         return self.decoder.generate(seq_out_start, seq_len, context = encodings, context_mask = mask, **kwargs)
 
     def forward(self, src, tgt, mask = None, attn_mask = None, src_prepend_embeds = None):
