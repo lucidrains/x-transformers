@@ -35,6 +35,8 @@ from torch_einops_utils import (
     tree_map_tensor
 )
 
+from torch_einops_utils.shape import size
+
 from torch_einops_utils.nn import Sequential, Lambda, Identity
 
 # einstein notation
@@ -2748,7 +2750,9 @@ class Attention(Module):
 
         out = maybe(self.sublayer_dropout)(out)
 
-        if exists(mask) and not exists(cache):
+        if exists(mask):
+            seq_len = size(out, 'b n d -> n')
+            mask = slice_right_at_dim(mask, seq_len, dim = -1)
             out = einx.where('b n, b n d, -> b n d', mask, out, 0.)
 
         if not return_intermediates:
@@ -3388,12 +3392,35 @@ class AttentionLayers(Module):
         flash_pack_seq_kwargs = None,
         flash_pack_seq_context_kwargs = None,
         causal = None,
-        transform_block_inputs: dict[int, Callable] | Callable | None = None
+        transform_block_inputs: dict[int, Callable] | Callable | None = None,
+        cross_attn_mask = None,
+        cross_attn_attn_mask = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
         assert not (exists(flash_pack_seq_kwargs) and (exists(attn_mask) or exists(mask))), 'attn_mask or mask cannot be used with flash block masking'
         assert not (exists(flash_pack_seq_context_kwargs) and (exists(context_mask))), 'context_mask cannot be used with flash block masking'
+        assert not (self.training and self.cross_attn_tokens_dropout > 0. and exists(context_pos)), 'context_pos cannot be used with cross_attn_tokens_dropout'
+
+        # expand per cross attention layer values - broadcast if not a tuple / list
+        # keyed by layer index so reordering and layer dropout cannot misalign them
+
+        def expand_cross_attn_values(values, name = 'values'):
+            values = tuple(values) if isinstance(values, (list, tuple)) else (values,) * self.num_cross_attn_layers
+            assert len(values) == self.num_cross_attn_layers, f'expected {self.num_cross_attn_layers} cross attention {name}, received {len(values)}'
+
+            return dict(zip((ind for ind, layer_type in enumerate(self.layer_types) if layer_type == 'c'), values))
+
+        contexts = expand_cross_attn_values(context, 'contexts') if exists(context) else None
+        context_masks = expand_cross_attn_values(context_mask, 'context masks') if exists(context_mask) else None
+
+        if exists(contexts) and (self.cross_residual_attn or self.add_value_residual):
+            context_lens = {size(t, 'b n d -> n') for t in contexts.values()}
+            assert len(context_lens) == 1, 'cross attention contexts must have the same length when using cross residual attention or value residual'
+
+        cross_attn_masks = expand_cross_attn_values(cross_attn_mask, 'masks')
+        cross_attn_attn_masks = expand_cross_attn_values(cross_attn_attn_mask, 'attn masks')
+        flash_pack_seq_context_kwargs_by_layer = expand_cross_attn_values(flash_pack_seq_context_kwargs, 'flash pack seq context kwargs') if exists(flash_pack_seq_context_kwargs) else None
 
         return_hiddens |= return_gumbel_log_probs
 
@@ -3454,7 +3481,7 @@ class AttentionLayers(Module):
 
         # rotary positions
 
-        cross_attn_rotary_pos_emb = dict()
+        cross_attn_rotary_pos_embs = dict()
 
         if exists(self.rotary_pos_emb):
             if not exists(rotary_pos_emb):
@@ -3470,12 +3497,16 @@ class AttentionLayers(Module):
 
             if exists(context_pos):
                 assert self.cross_attend
-                context_rotary_pos_emb = self.rotary_pos_emb(context_pos)
 
-                cross_attn_rotary_pos_emb.update(
-                    rotary_pos_emb = rotary_pos_emb,
-                    context_rotary_pos_emb = context_rotary_pos_emb
-                )
+                context_positions = expand_cross_attn_values(context_pos, 'context positions')
+
+                cross_attn_rotary_pos_embs = {
+                    ind: dict(
+                        rotary_pos_emb = rotary_pos_emb,
+                        context_rotary_pos_emb = self.rotary_pos_emb(layer_context_pos)
+                    )
+                    for ind, layer_context_pos in context_positions.items()
+                }
 
         # polar positions
 
@@ -3497,8 +3528,8 @@ class AttentionLayers(Module):
 
             prev_cache_length = cache.cache_length
 
-            if exists(context):
-                context = context[:, :0]
+            if exists(contexts):
+                contexts = {ind: t[:, :0] for ind, t in contexts.items()}
 
             if cache_age > 0:
                 x = x[:, -cache_age:] # for spec decoding, may be greater than 1
@@ -3653,10 +3684,6 @@ class AttentionLayers(Module):
                 layer_mem = mems.pop(0) if mems else None
                 layer_mem_mask = mem_masks.pop(0) if mem_masks else None
 
-            if layer_type == 'c':
-                if self.training and self.cross_attn_tokens_dropout > 0.:
-                    context, context_mask = dropout_seq(context, context_mask, self.cross_attn_tokens_dropout)
-
             x, inner_residual, residual_kwargs = residual_fn.prepare(x)
 
             layer_hiddens.append(x)
@@ -3699,7 +3726,24 @@ class AttentionLayers(Module):
             if layer_type == 'a':
                 out, inter = block(x, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, flash_pack_seq_kwargs = flash_pack_seq_kwargs, return_intermediates = True, causal = causal)
             elif layer_type == 'c':
-                out, inter = block(x, context = context, mask = mask, context_mask = context_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_emb, flash_pack_seq_kwargs = flash_pack_seq_context_kwargs, return_intermediates = True)
+                layer_ind = layers_execute_order[ind]
+
+                layer_context = contexts[layer_ind] if exists(contexts) else None
+                layer_context_mask = context_masks[layer_ind] if exists(context_masks) else None
+
+                if self.training and self.cross_attn_tokens_dropout > 0.:
+                    layer_context, layer_context_mask = dropout_seq(layer_context, layer_context_mask, self.cross_attn_tokens_dropout)
+
+                layer_mask = cross_attn_masks[layer_ind]
+                layer_attn_mask = cross_attn_attn_masks[layer_ind]
+                layer_flash_pack_seq_kwargs = flash_pack_seq_context_kwargs_by_layer[layer_ind] if exists(flash_pack_seq_context_kwargs_by_layer) else None
+
+                # combine with network-wide padding masks
+
+                if exists(mask):
+                    layer_mask = mask if not exists(layer_mask) else mask & layer_mask
+
+                out, inter = block(x, context = layer_context, mask = layer_mask, context_mask = layer_context_mask, attn_mask = layer_attn_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_embs.get(layer_ind, dict()), flash_pack_seq_kwargs = layer_flash_pack_seq_kwargs, return_intermediates = True)
             elif layer_type == 'f':
                 out = block(x, deep_embed = next(deep_embeds_iter, None))
 

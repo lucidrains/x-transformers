@@ -2148,6 +2148,232 @@ def test_inverted_cross_attn(attn_sigmoid):
 
     assert out.shape == (2, 64, 512)
 
+def test_custom_cross_attn_masks():
+    from x_transformers import CrossAttender
+
+    torch.manual_seed(0)
+
+    model = CrossAttender(
+        dim = 16,
+        custom_layers = ('c', 'c'),
+        heads = 2,
+        cross_attn_dim_context = 12,
+        pre_norm_has_final_norm = False
+    )
+
+    queries = torch.randn(2, 5, 16)
+    context = torch.randn(2, 4, 12)
+
+    row_mask = torch.ones(2, 5, dtype = torch.bool)
+    row_mask[:, 3:] = False
+
+    context_mask = torch.ones(2, 4, dtype = torch.bool)
+    context_mask[:, 2:] = False
+
+    attn_mask = torch.ones(5, 4, dtype = torch.bool)
+    attn_mask[:, 2:] = False
+
+    def cross_attn_outputs(**kwargs):
+        outputs = []
+
+        def store_output(_, __, out):
+            outputs.append(out[0] if isinstance(out, tuple) else out)
+
+        handlers = [layer[1].register_forward_hook(store_output) for layer in model.layers if isinstance(layer[1], Attention)]
+
+        try:
+            model(queries, context = context, **kwargs)
+        finally:
+            for handler in handlers:
+                handler.remove()
+
+        return outputs
+
+    # row mask -> only masked queries update, per layer
+
+    out = model(queries, context = context, cross_attn_mask = row_mask)
+    assert torch.equal(out[~row_mask], queries[~row_mask])
+
+    first, second = cross_attn_outputs(cross_attn_mask = (row_mask, None))
+    assert torch.equal(first[~row_mask], torch.zeros_like(first[~row_mask]))
+    assert not torch.allclose(second[~row_mask], torch.zeros_like(second[~row_mask]))
+
+    # key padding mask -> zeroes layer output when all keys masked, per layer
+
+    first, second = cross_attn_outputs(context_mask = (None, torch.zeros_like(context_mask)))
+    assert not torch.allclose(first, torch.zeros_like(first))
+    assert torch.equal(second, torch.zeros_like(second))
+
+    # arbitrary attn mask -> 2d / 4d, per layer
+
+    out_attn_mask = model(queries, context = context, cross_attn_attn_mask = attn_mask)
+    out_context_mask = model(queries, context = context, context_mask = context_mask)
+    assert torch.allclose(out_attn_mask, out_context_mask)
+
+    head_mask = attn_mask[None, None].expand(2, 2, -1, -1)
+    assert torch.allclose(out_attn_mask, model(queries, context = context, cross_attn_attn_mask = head_mask))
+
+    first, second = cross_attn_outputs(cross_attn_attn_mask = (None, torch.zeros_like(attn_mask)))
+    assert not torch.allclose(first, torch.zeros_like(first))
+    assert torch.equal(second, torch.zeros_like(second))
+
+    # single tensor broadcasts to all cross attn layers
+
+    out_global = model(queries, context = context, context_mask = context_mask)
+    assert torch.allclose(out_global, model(queries, context = context, context_mask = (context_mask, context_mask)))
+
+def test_cross_attn_masks_two_per_block():
+    torch.manual_seed(1)
+
+    num_blocks = 2
+    model = Decoder(
+        dim = 16,
+        heads = 2,
+        cross_attend = True,
+        cross_attn_dim_context = 12,
+        custom_layers = ('a', 'c', 'c', 'f') * num_blocks
+    )
+
+    x = torch.randn(2, 6, 16)
+
+    even_context = torch.randn(2, 4, 12)
+    odd_context = torch.randn(2, 7, 12)
+
+    even_context_mask = torch.ones(2, 4, dtype = torch.bool)
+    even_context_mask[:, 2:] = False
+
+    odd_context_mask = torch.ones(2, 7, dtype = torch.bool)
+    odd_context_mask[:, 5:] = False
+
+    contexts = (even_context, odd_context) * num_blocks
+    context_masks = (even_context_mask, odd_context_mask) * num_blocks
+
+    even = torch.ones(2, 6, dtype = torch.bool)
+    even[:, 1::2] = False
+
+    odd = ~even
+
+    outputs = []
+
+    def store_output(_, __, out):
+        outputs.append(out[0] if isinstance(out, tuple) else out)
+
+    cross_layers = [layer[1] for layer_type, layer in zip(model.layer_types, model.layers) if layer_type == 'c']
+    handles = [block.register_forward_hook(store_output) for block in cross_layers]
+
+    try:
+        model(x, context = contexts, context_mask = context_masks, cross_attn_mask = (even, odd) * num_blocks)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    # each block -> even cross attn updates even tokens from even context, odd cross attn updates odd tokens from odd context
+
+    for even_layer, odd_layer in zip(outputs[::2], outputs[1::2]):
+        assert not torch.allclose(even_layer[even], torch.zeros_like(even_layer[even]))
+        assert torch.equal(even_layer[~even], torch.zeros_like(even_layer[~even]))
+
+        assert not torch.allclose(odd_layer[~even], torch.zeros_like(odd_layer[~even]))
+        assert torch.equal(odd_layer[even], torch.zeros_like(odd_layer[even]))
+
+def test_cross_attn_routes_context_per_layer():
+    from x_transformers import CrossAttender
+
+    torch.manual_seed(2)
+
+    model = CrossAttender(
+        dim = 16,
+        custom_layers = ('c', 'c'),
+        heads = 2,
+        cross_attn_dim_context = 12,
+        pre_norm_has_final_norm = False
+    )
+
+    model.eval()
+
+    queries = torch.randn(2, 5, 16)
+    context_a = torch.randn(2, 4, 12)
+    context_b = torch.randn(2, 7, 12)
+
+    def cross_outputs(contexts):
+        outputs = []
+
+        def store_output(_, __, out):
+            outputs.append(out[0] if isinstance(out, tuple) else out)
+
+        handles = [layer[1].register_forward_hook(store_output) for layer in model.layers if isinstance(layer[1], Attention)]
+
+        try:
+            model(queries, context = contexts)
+        finally:
+            for handle in handles:
+                handle.remove()
+
+        return outputs
+
+    base = cross_outputs((context_a, context_b))
+    changed_b = cross_outputs((context_a, context_b + 1.))
+
+    # first cross attn only sees context a, second only context b
+
+    assert torch.allclose(base[0], changed_b[0])
+    assert not torch.allclose(base[1], changed_b[1])
+
+    changed_a = cross_outputs((context_a + 1., context_b))
+    assert not torch.allclose(base[0], changed_a[0])
+
+def test_cross_attn_mask_with_layer_dropout():
+    from x_transformers import CrossAttender
+
+    torch.manual_seed(0)
+
+    model = CrossAttender(
+        dim = 16,
+        custom_layers = ('c', 'c'),
+        heads = 2,
+        cross_attn_dim_context = 12,
+        pre_norm_has_final_norm = False,
+        layer_dropout = (1., 0.)
+    )
+
+    model.train()
+
+    queries = torch.randn(2, 5, 16)
+    context = torch.randn(2, 4, 12)
+
+    row_mask = torch.ones(2, 5, dtype = torch.bool)
+    row_mask[:, 3:] = False
+
+    # first cross attn layer is dropped -> second must still receive its own mask
+
+    out = model(queries, context = context, cross_attn_mask = (None, row_mask))
+    assert torch.equal(out[~row_mask], queries[~row_mask])
+
+def test_cross_attn_mask_with_cache():
+    from x_transformers import Decoder
+
+    torch.manual_seed(0)
+
+    model = Decoder(
+        dim = 16,
+        heads = 2,
+        cross_attend = True,
+        cross_attn_dim_context = 12,
+        custom_layers = ('c',),
+        pre_norm_has_final_norm = False
+    )
+
+    x = torch.randn(2, 5, 16)
+    context = torch.randn(2, 4, 12)
+
+    _, cache = model(x, context = context, return_hiddens = True)
+
+    next_x = torch.randn(2, 1, 16)
+    row_mask = torch.zeros(2, 1, dtype = torch.bool)
+
+    out = model(next_x, context = context, cache = cache, cross_attn_mask = row_mask)
+    assert torch.equal(out, next_x)
+
 @param('use_custom_loss', ('none', 'kl', 'next_latent'))
 @param('ttt_use_muon', (False, True))
 @param('episodic_mem_len', (0, 16))
