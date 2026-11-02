@@ -12,7 +12,7 @@ from torch.func import functional_call, vmap
 from einops import rearrange, repeat, pack, unpack
 from x_transformers.autoregressive_wrapper import top_p, top_k, eval_decorator, cast_tuple
 
-from torch_einops_utils import masked_mean, mask_after, maybe, tree_map_tensor
+from torch_einops_utils import masked_mean, mask_after, maybe, tree_map_tensor, cross_entropy
 from torch_einops_utils.device import module_device
 
 # helper functions
@@ -335,7 +335,7 @@ class XLAutoregressiveWrapper(Module):
         self.max_seq_len = net.max_seq_len
         self.output_is_log_prob = net.output_is_log_prob
 
-        self.loss_fn = F.cross_entropy if not self.output_is_log_prob else F.nll_loss
+        self.loss_fn = cross_entropy if not self.output_is_log_prob else F.nll_loss
 
         self.ttt_lr = ttt_lr
         self.ttt_wd = ttt_wd

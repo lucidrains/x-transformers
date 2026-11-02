@@ -14,6 +14,7 @@ from torch.optim import AdamW
 from einops import rearrange
 
 from x_transformers.x_transformers import LayerIntermediates
+from torch_einops_utils import cross_entropy
 
 def exists(val):
     return val is not None
@@ -371,7 +372,7 @@ class Recirculation(Module):
 
             logits = self.forward(batch_x)[:, :-1]
 
-            loss = F.cross_entropy(
+            loss = cross_entropy(
                 rearrange(logits, 'b n c -> b c n'),
                 labels[rand_indices],
                 ignore_index = 0

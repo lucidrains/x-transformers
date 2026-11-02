@@ -29,6 +29,8 @@ from x_transformers.autoregressive_wrapper import (
     top_p
 )
 
+from torch_einops_utils import cross_entropy
+
 # constants
 
 LossBreakdown = namedtuple('LossBreakdown', ['cross_entropy_loss', 'numerical_mse_loss'])
@@ -281,7 +283,7 @@ class XValAutoregressiveWrapper(nn.Module):
 
         logits = rearrange(logits, 'b n c -> b c n')
 
-        cross_entropy_loss = F.cross_entropy(logits, target, reduction = 'none', ignore_index = self.ignore_index)
+        cross_entropy_loss = cross_entropy(logits, target, reduction = 'none', ignore_index = self.ignore_index)
 
         # protect against nan in `x_num` input tensor
 

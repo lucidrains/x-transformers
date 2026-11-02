@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.nn import Module
 
 from einops import rearrange, repeat, reduce
-from torch_einops_utils import temp_eval, batched_index_select, masked_mean, and_masks
+from torch_einops_utils import temp_eval, batched_index_select, masked_mean, and_masks, cross_entropy
 
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
 
@@ -240,7 +240,7 @@ class XMLatentDecoder(Module):
             if not return_loss:
                 return logits
 
-            loss = F.cross_entropy(
+            loss = cross_entropy(
                 rearrange(logits, 'b n c -> (b n) c'),
                 rearrange(labels, 'b n -> (b n)'),
                 reduction = 'none',
@@ -315,7 +315,7 @@ class XMLatentDecoder(Module):
             chunk_labels = labels_candidates[chunk]
             chunk_mask = mask_candidates[chunk]
 
-            loss = F.cross_entropy(
+            loss = cross_entropy(
                 rearrange(logits, 'b n c -> (b n) c'),
                 rearrange(chunk_labels, 'b n -> (b n)'),
                 reduction = 'none',

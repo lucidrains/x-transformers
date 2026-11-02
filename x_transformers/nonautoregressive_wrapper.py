@@ -15,6 +15,7 @@ import einx
 from einops import rearrange, repeat, pack, unpack
 
 from x_transformers.x_transformers import TransformerWrapper
+from torch_einops_utils import cross_entropy
 
 # constants
 
@@ -331,7 +332,7 @@ class NonAutoregressiveWrapper(Module):
         with context():
             logits = self.net(masked, **kwargs)
 
-        loss_fn = F.cross_entropy if not self.net.output_is_log_prob else F.nll_loss
+        loss_fn = cross_entropy if not self.net.output_is_log_prob else F.nll_loss
 
         # loss
 

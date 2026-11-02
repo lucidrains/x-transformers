@@ -23,6 +23,8 @@ from x_transformers.x_transformers import (
     TransformerWrapper
 )
 
+from torch_einops_utils import cross_entropy
+
 import einx
 from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
@@ -371,7 +373,7 @@ class BeliefStateWrapper(Module):
 
         needs_loss_weight = self.needs_loss_weight or exists(loss_weight_by_fb_indices)
 
-        loss = F.cross_entropy(
+        loss = cross_entropy(
             rearrange(logits, 'b n (fb l) -> b l (fb n)', fb = 2),
             labels,
             reduction = 'none' if needs_loss_weight else 'mean',
@@ -396,7 +398,7 @@ class BeliefStateWrapper(Module):
             distance_labels = (bi - fi).clamp(max = self.max_pred_distance - 1)
             distance_labels = repeat(distance_labels, 'n -> b n', b = batch)
 
-            pred_dist_loss = F.cross_entropy(
+            pred_dist_loss = cross_entropy(
                 rearrange(distance_logits, 'b n l -> b l n'),
                 distance_labels
             )

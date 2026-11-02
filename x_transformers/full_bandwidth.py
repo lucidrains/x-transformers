@@ -16,7 +16,8 @@ from torch_einops_utils import (
     temp_eval,
     pack_with_inverse,
     cast_tensor,
-    exclusive_cumsum
+    exclusive_cumsum,
+    cross_entropy
 )
 
 from x_transformers.x_transformers import (
@@ -415,7 +416,7 @@ class FullBandwidth(Module):
         # cross entropy helper
 
         def ce_loss(logits, target):
-            return F.cross_entropy(
+            return cross_entropy(
                 rearrange(logits, 'b n l -> (b n) l'),
                 rearrange(target, 'b n -> (b n)'),
                 ignore_index = self.ignore_index

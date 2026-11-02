@@ -23,6 +23,8 @@ from x_transformers.autoregressive_wrapper import (
     top_k
 )
 
+from torch_einops_utils import cross_entropy
+
 from einops.layers.torch import Rearrange, Reduce
 from einops import rearrange, reduce, repeat, einsum, pack, unpack
 
@@ -395,7 +397,7 @@ class FreeTransformer(Module):
 
         logits = self.token_unembed(tokens)
 
-        ar_loss = F.cross_entropy(
+        ar_loss = cross_entropy(
             rearrange(logits, 'b n l -> b l n'),
             labels,
             ignore_index = self.pad_id

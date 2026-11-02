@@ -16,7 +16,7 @@ from einops import rearrange
 
 from x_transformers import Decoder, TransformerWrapper, RMSNorm
 from x_transformers.autoregressive_wrapper import AutoregressiveWrapper
-from torch_einops_utils import lens_to_mask, pad_right_at_dim, masked_mean
+from torch_einops_utils import lens_to_mask, pad_right_at_dim, masked_mean, cross_entropy
 from torch_einops_utils.nn import Sequential
 
 # helpers
@@ -197,7 +197,7 @@ class LatentAutoregressive(Module):
         embed_prev_ce = scale_grad(embed_prev, self.frac_gradient)
         logits = self.net.to_logits(embed_prev_ce)
 
-        ce_loss = F.cross_entropy(
+        ce_loss = cross_entropy(
             rearrange(logits, 'b n c -> b c n'),
             target,
             ignore_index = ignore_index

@@ -9,7 +9,7 @@ from torch.nn import Module
 
 import einx
 from einops import rearrange, reduce
-from torch_einops_utils import pad_right_at_dim, masked_mean, exclusive_cumsum, pack_with_inverse
+from torch_einops_utils import pad_right_at_dim, masked_mean, exclusive_cumsum, pack_with_inverse, cross_entropy
 
 # helpers
 
@@ -289,7 +289,7 @@ class NextLatentWrapper(Module):
 
         logits = self.net.to_logits(hidden_states[:, :-1])
 
-        ce_loss = F.cross_entropy(
+        ce_loss = cross_entropy(
             rearrange(logits, 'b n c -> b c n'),
             target,
             ignore_index = ignore_index
