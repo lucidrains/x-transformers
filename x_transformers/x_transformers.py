@@ -878,7 +878,9 @@ class RotaryEmbedding(Module):
         if t.ndim == 1:
             t = rearrange(t, 'n -> 1 n')
 
-        freqs = torch.einsum('b i , j -> b i j', t.type_as(self.inv_freq), self.inv_freq) / self.interpolation_factor
+        # Keep adjacent positions distinct in half-precision models.
+        phase_dtype = torch.promote_types(self.inv_freq.dtype, torch.float32)
+        freqs = torch.einsum('b i , j -> b i j', t.to(device = self.inv_freq.device, dtype = phase_dtype), self.inv_freq.to(phase_dtype)) / self.interpolation_factor
         freqs = stack((freqs, freqs), dim = -1)
         freqs = rearrange(freqs, '... d r -> ... (d r)')
 
@@ -944,7 +946,9 @@ class PolarEmbedding(Module):
         if t.ndim == 1:
             t = rearrange(t, 'n -> 1 n')
 
-        freqs = torch.einsum('b i , j -> b i j', t.type_as(self.inv_freq), self.inv_freq)
+        # Keep adjacent positions distinct in half-precision models.
+        phase_dtype = torch.promote_types(self.inv_freq.dtype, torch.float32)
+        freqs = torch.einsum('b i , j -> b i j', t.to(device = self.inv_freq.device, dtype = phase_dtype), self.inv_freq.to(phase_dtype))
 
         bias = self.learned_bias.clamp(-2. * math.pi, 0.)
 

@@ -14,7 +14,9 @@ from x_transformers.x_transformers import (
     AttentionLayers,
     Attention,
     Attend,
-    disable_autocast
+    disable_autocast,
+    RotaryEmbedding,
+    PolarEmbedding
 )
 
 from x_transformers.neo_mlp import (
@@ -45,6 +47,57 @@ def test_disable_autocast_uses_tensor_device():
         out = matrix_multiply(x, x)
 
     assert out.dtype == torch.float32
+
+@param('dtype', (torch.float16, torch.bfloat16, torch.float32))
+@param('kind', ('rotary', 'xpos', 'polar'))
+def test_positional_phases_keep_adjacent_positions_distinct(dtype, kind):
+    offset = 2048 if dtype == torch.float16 else 256
+    positions = torch.tensor([offset, offset + 1])
+    if kind == 'polar':
+        embedding = PolarEmbedding(32, heads = 2).to(dtype = dtype)
+    else:
+        embedding = RotaryEmbedding(32, use_xpos = kind == 'xpos', interpolation_factor = 2. if kind == 'xpos' else 1.).to(dtype = dtype)
+    stored_frequencies = embedding.inv_freq.clone()
+    phases, _ = embedding(positions)
+    reference = torch.einsum('n, d -> n d', positions.double(), embedding.inv_freq.double())
+    if kind != 'polar':
+        reference = reference.repeat_interleave(2, dim = -1) / embedding.interpolation_factor
+    torch.testing.assert_close(phases.float(), reference[None].float())
+    assert phases.dtype == torch.float32
+    assert not torch.equal(phases[:, 0], phases[:, 1])
+    assert torch.equal(embedding.inv_freq, stored_frequencies)
+    assert embedding.inv_freq.dtype == dtype
+
+
+@param('dtype, offset', ((torch.bfloat16, 256), (torch.float16, 2048)))
+@param('kind', ('rotary', 'polar'))
+def test_low_precision_decoder_distinguishes_adjacent_positions(dtype, offset, kind):
+    with torch.random.fork_rng(devices = []):
+        torch.random.set_rng_state(torch.Generator(device = 'cpu').manual_seed(57).get_state())
+        options = dict(rotary_pos_emb = True, rotary_emb_dim = 32) if kind == 'rotary' else dict(polar_pos_emb = True)
+        model = TransformerWrapper(
+            num_tokens = 16,
+            max_seq_len = 4096,
+            attn_layers = Decoder(dim = 64, depth = 1, heads = 2, attn_dim_head = 32, **options)
+        ).to(dtype = dtype).eval()
+        tokens = torch.tensor([[1, 2]])
+        adjacent = model(tokens, pos = torch.tensor([offset, offset + 1]))
+        repeated = model(tokens, pos = torch.tensor([offset, offset]))
+        assert adjacent.dtype == dtype
+        assert not torch.equal(adjacent, repeated)
+        adjacent.float().square().mean().backward()
+        grads = [p.grad for p in model.parameters() if exists(p.grad)]
+        assert len(grads) > 0
+        assert all(torch.isfinite(g).all() for g in grads)
+
+
+@param('kind', ('rotary', 'polar'))
+def test_positional_phases_follow_buffer_device(kind):
+    embedding = RotaryEmbedding(32) if kind == 'rotary' else PolarEmbedding(32, heads = 2)
+    embedding = embedding.to('meta')
+    phases, _ = embedding(torch.tensor([0, 1]))
+    assert phases.device.type == 'meta'
+
 
 @pytest.mark.skipif(
     not hasattr(torch, 'xpu') or not torch.xpu.is_available(),
