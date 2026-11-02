@@ -362,13 +362,15 @@ class AutoregressiveWrapper(Module):
 
         out = out[..., orig_seq_len:]
 
-        out, = unpack(out, packed_shape, '* beams n') # prompt may have no batch dimension
-
         if not return_beams_and_scores:
-            return out[..., 0, :]
+            out, = unpack(out[..., 0, :], packed_shape, '* n')
+            return out
 
         scores = rearrange(scores, '(b beams) -> beams b', b = batch)
         out = rearrange(out, 'b beams n -> beams b n')
+
+        out, = unpack(out, packed_shape, 'beams * n')
+        scores, = unpack(scores, packed_shape, 'beams *')
 
         return out, scores
 
