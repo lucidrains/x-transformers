@@ -3394,7 +3394,8 @@ class AttentionLayers(Module):
         causal = None,
         transform_block_inputs: dict[int, Callable] | Callable | None = None,
         cross_attn_mask = None,
-        cross_attn_attn_mask = None
+        cross_attn_attn_mask = None,
+        cross_attn_bias = None
     ):
         assert not (self.cross_attend ^ exists(context)), 'context must be passed in if cross_attend is set to True'
         assert not (exists(condition) ^ self.need_condition), 'condition needs to be passed in if using adaptive layernorm or vice versa'
@@ -3420,6 +3421,7 @@ class AttentionLayers(Module):
 
         cross_attn_masks = expand_cross_attn_values(cross_attn_mask, 'masks')
         cross_attn_attn_masks = expand_cross_attn_values(cross_attn_attn_mask, 'attn masks')
+        cross_attn_biases = expand_cross_attn_values(cross_attn_bias, 'biases')
         flash_pack_seq_context_kwargs_by_layer = expand_cross_attn_values(flash_pack_seq_context_kwargs, 'flash pack seq context kwargs') if exists(flash_pack_seq_context_kwargs) else None
 
         return_hiddens |= return_gumbel_log_probs
@@ -3730,20 +3732,28 @@ class AttentionLayers(Module):
 
                 layer_context = contexts[layer_ind] if exists(contexts) else None
                 layer_context_mask = context_masks[layer_ind] if exists(context_masks) else None
+                layer_attn_bias = cross_attn_biases[layer_ind]
 
                 if self.training and self.cross_attn_tokens_dropout > 0.:
+                    assert not exists(layer_attn_bias), 'cross_attn_bias cannot be used with cross_attn_tokens_dropout during training'
                     layer_context, layer_context_mask = dropout_seq(layer_context, layer_context_mask, self.cross_attn_tokens_dropout)
 
                 layer_mask = cross_attn_masks[layer_ind]
                 layer_attn_mask = cross_attn_attn_masks[layer_ind]
                 layer_flash_pack_seq_kwargs = flash_pack_seq_context_kwargs_by_layer[layer_ind] if exists(flash_pack_seq_context_kwargs_by_layer) else None
 
+                if exists(layer_attn_bias):
+                    assert not exists(layer_flash_pack_seq_kwargs), 'cross_attn_bias cannot be used with flash packed context'
+                    assert 2 <= layer_attn_bias.ndim <= 4, 'cross_attn_bias must have 2 to 4 dimensions'
+                    if exists(cache) and cache_age > 0:
+                        layer_attn_bias = layer_attn_bias[..., -cache_age:, :]
+
                 # combine with network-wide padding masks
 
                 if exists(mask):
                     layer_mask = mask if not exists(layer_mask) else mask & layer_mask
 
-                out, inter = block(x, context = layer_context, mask = layer_mask, context_mask = layer_context_mask, attn_mask = layer_attn_mask, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_embs.get(layer_ind, dict()), flash_pack_seq_kwargs = layer_flash_pack_seq_kwargs, return_intermediates = True)
+                out, inter = block(x, context = layer_context, mask = layer_mask, context_mask = layer_context_mask, attn_mask = layer_attn_mask, attn_bias = layer_attn_bias, prev_attn = prev_cross_attn, cache = next(iter_attn_cache, None), kv_input_residual = next(cross_attn_kv_residuals_iter, None), value_residual = maybe_cross_attn_value_residual, **cross_attn_rotary_pos_embs.get(layer_ind, dict()), flash_pack_seq_kwargs = layer_flash_pack_seq_kwargs, return_intermediates = True)
             elif layer_type == 'f':
                 out = block(x, deep_embed = next(deep_embeds_iter, None))
 

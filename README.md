@@ -1407,6 +1407,17 @@ model(nodes, context = encoded_neighbors, mask = node_masks, context_mask = neig
 
 ```
 
+Cross-attention also accepts a differentiable additive bias, applied before softmax:
+
+```python
+bias = torch.randn(1, 1, 1, 5, requires_grad = True)
+model(nodes, context = encoded_neighbors, cross_attn_bias = bias)
+```
+
+`cross_attn_bias` defaults to `None`. A tensor is shared by all cross-attention layers; a tuple or list must contain one tensor or `None` per cross-attention layer, in construction order. Supported shapes are `(queries, keys)`, `(heads, queries, keys)` and `(batch, heads, queries, keys)`, with singleton dimensions for broadcasting. The key dimension includes any learned memory key / values; prepend zero bias for these positions if they should remain neutral. Padding and attention masks still apply.
+
+For cached decoding with a positive `cache_age`, the last `cache_age` query rows are used; a bias already sliced to the new queries is also accepted. Training with `cross_attn_tokens_dropout` and flash packed context are not supported with an additive cross-attention bias and raise an error, rather than silently misaligning the bias with the context.
+
 ### Continuous Embeddings
 
 ```python
