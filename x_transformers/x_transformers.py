@@ -4296,6 +4296,11 @@ class TransformerWrapper(Module):
         to_logits_kwargs = dict(),
         **kwargs,
     ):
+        """Decode full-prefix inputs, or new tokens with input_not_include_cache.
+
+        Cached looped steps retain global positions after the first step reduces
+        the full prefix to the tokens being decoded.
+        """
 
         input_not_include_cache = default(input_not_include_cache, self.input_not_include_cache)
 
@@ -4511,6 +4516,12 @@ class TransformerWrapper(Module):
                     for attn_intermediate, prompt_kv in zip(cache.attn_intermediates, loop_prompt_kvs):
                         kv_cache = attn_intermediate.cached_kv
                         attn_intermediate.cached_kv = tuple(cat((p_kv, kv[..., prompt_kv_len:, :]), dim = -2) for p_kv, kv in zip(prompt_kv, kv_cache))
+
+                # from the second step on, `x` is the already sliced hidden state of the token(s) being decoded
+                # so the positional offset of the existing kv cache has to be carried along for the rotary / polar positions
+
+                if i == 1 and exists(cache):
+                    kwargs['seq_pos_offset'] = cache.cache_length
 
                 # attend
 

@@ -2002,6 +2002,100 @@ def test_looped():
     assert exists(intermediates.looped_prompt_kv_cache)
     assert (intermediates.exit_indices < 5).all()
 
+LOOPED_POS_CONFIGS = dict(
+    absolute = dict(),
+    rotary = dict(rotary_pos_emb = True),
+    xpos = dict(rotary_xpos = True),
+    polar = dict(polar_pos_emb = True),
+)
+
+def _build_looped_decoder(**attn_kwargs):
+    return TransformerWrapper(
+        num_tokens = 64,
+        max_seq_len = 64,
+        looped = True,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 2,
+            pre_and_post_norm = True,
+            **attn_kwargs
+        )
+    ).eval()
+
+def _looped_cached_decode(model, prompt, decode_tokens, looped_steps, input_repr):
+    step_logits = []
+    with torch.no_grad():
+        _, cache = model(
+            prompt,
+            looped_steps = looped_steps,
+            looped_inference = True,
+            return_intermediates = True
+        )
+
+        full_seq = prompt
+        for i in range(decode_tokens.shape[-1]):
+            token = decode_tokens[:, i:i + 1]
+            full_seq = torch.cat((full_seq, token), dim = -1)
+
+            if input_repr == 'token_only':
+                x = token
+                pos = None
+                input_not_include_cache = True
+            elif input_repr == 'explicit_pos':
+                x = full_seq
+                pos = torch.arange(full_seq.shape[-1], device = prompt.device)[None]
+                input_not_include_cache = False
+            else:  # full_prefix
+                x = full_seq
+                pos = None
+                input_not_include_cache = False
+
+            logits, cache = model(
+                x,
+                pos = pos,
+                cache = cache,
+                input_not_include_cache = input_not_include_cache,
+                looped_steps = looped_steps,
+                looped_inference = True,
+                return_intermediates = True
+            )
+            step_logits.append(logits[:, -1])
+
+    return torch.stack(step_logits, dim = 1)
+
+@param('pos_type', ('absolute', 'rotary', 'xpos', 'polar'))
+def test_looped_cached_decode_depth_one_oracle(pos_type):
+    torch.manual_seed(42)
+    model = _build_looped_decoder(**LOOPED_POS_CONFIGS[pos_type])
+
+    prompt = torch.randint(0, 64, (1, 4))
+    decode_tokens = torch.randint(0, 64, (1, 2))
+
+    cached_logits = _looped_cached_decode(model, prompt, decode_tokens, looped_steps = 1, input_repr = 'full_prefix')
+
+    full_seq = prompt
+    with torch.no_grad():
+        for i in range(decode_tokens.shape[-1]):
+            full_seq = torch.cat((full_seq, decode_tokens[:, i:i + 1]), dim = -1)
+            uncached_logits = model(full_seq, looped_steps = 1)[:, -1]
+            assert torch.allclose(cached_logits[:, i], uncached_logits, atol = 1e-4, rtol = 1e-4)
+
+@param('pos_type', ('absolute', 'rotary', 'xpos', 'polar'))
+def test_looped_cached_decode_depth_three_representation_parity(pos_type):
+    torch.manual_seed(42)
+    model = _build_looped_decoder(**LOOPED_POS_CONFIGS[pos_type])
+
+    prompt = torch.randint(0, 64, (1, 4))
+    decode_tokens = torch.randint(0, 64, (1, 3))
+
+    ref = _looped_cached_decode(model, prompt, decode_tokens, looped_steps = 3, input_repr = 'explicit_pos')
+    token_only = _looped_cached_decode(model, prompt, decode_tokens, looped_steps = 3, input_repr = 'token_only')
+    full_prefix = _looped_cached_decode(model, prompt, decode_tokens, looped_steps = 3, input_repr = 'full_prefix')
+
+    assert torch.allclose(token_only, ref, atol = 1e-4, rtol = 1e-4)
+    assert torch.allclose(full_prefix, ref, atol = 1e-4, rtol = 1e-4)
+
 def test_orthog_residual():
     from x_transformers import TransformerWrapper, Decoder
 
