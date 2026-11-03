@@ -833,6 +833,61 @@ def test_multi_latent_attention():
 
     model(x)
 
+@param('latent_rope_subheads', (None, 2))
+@param('restrict_to_max_seq_len', (False, True))
+def test_multi_latent_attention_kv_cache_parity(latent_rope_subheads, restrict_to_max_seq_len):
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    torch.manual_seed(19)
+
+    model = TransformerWrapper(
+        num_tokens = 11,
+        max_seq_len = 16,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            attn_dim_head = 16,
+            rotary_pos_emb = True,
+            attn_use_latent_kv = True,
+            attn_dim_latent_kv = 16,
+            attn_latent_rope_subheads = latent_rope_subheads
+        )
+    )
+
+    wrapper = AutoregressiveWrapper(model)
+    prompts = torch.tensor([[1, 2, 3], [3, 2, 1]])
+
+    # cached greedy generation must match uncached, with the separate rotary subheads absent or present
+
+    uncached = wrapper.generate(prompts, 3, cache_kv = False, restrict_to_max_seq_len = restrict_to_max_seq_len, temperature = 0.)
+    cached = wrapper.generate(prompts, 3, cache_kv = True, restrict_to_max_seq_len = restrict_to_max_seq_len, temperature = 0.)
+
+    assert torch.equal(cached, uncached)
+
+    # same for beam search, which trims, expands and reindexes the cached key / values
+
+    uncached_beams, uncached_scores = wrapper.beam_search(
+        prompts,
+        seq_len = 3,
+        beams = 2,
+        cache_kv = False,
+        restrict_to_max_seq_len = restrict_to_max_seq_len,
+        return_beams_and_scores = True
+    )
+
+    cached_beams, cached_scores = wrapper.beam_search(
+        prompts,
+        seq_len = 3,
+        beams = 2,
+        cache_kv = True,
+        restrict_to_max_seq_len = restrict_to_max_seq_len,
+        return_beams_and_scores = True
+    )
+
+    assert torch.equal(cached_beams, uncached_beams)
+    assert torch.allclose(cached_scores, uncached_scores, atol = 1e-5)
+
 @param('num_residual_streams', (1, 4))
 @param('integrate_layers', (False, True))
 def test_lime(
