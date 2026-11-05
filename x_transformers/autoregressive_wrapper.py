@@ -269,11 +269,15 @@ class AutoregressiveWrapper(Module):
                 if exists(cache):
                     modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :])
 
+            window_seq_start_pos = seq_start_pos
+            if exists(seq_start_pos) and out.shape[-1] != x.shape[-1]:
+                window_seq_start_pos = (seq_start_pos - (out.shape[-1] - x.shape[-1])).clamp(min = 0)
+
             logits, new_cache = self.net(
                 x,
                 return_intermediates = True,
                 cache = cache,
-                seq_start_pos = seq_start_pos,
+                seq_start_pos = window_seq_start_pos,
                 **kwargs
             )
 
@@ -472,11 +476,15 @@ class AutoregressiveWrapper(Module):
                         if inter.layer_type == 'a':
                             inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
 
+            window_seq_start_pos = seq_start_pos
+            if exists(seq_start_pos) and out.shape[-1] != x.shape[-1]:
+                window_seq_start_pos = (seq_start_pos - (out.shape[-1] - x.shape[-1])).clamp(min = 0)
+
             logits, new_cache = self.net(
                 x,
                 return_intermediates = True,
                 cache = cache,
-                seq_start_pos = seq_start_pos,
+                seq_start_pos = window_seq_start_pos,
                 **kwargs
             )
 
@@ -490,11 +498,14 @@ class AutoregressiveWrapper(Module):
 
             if exists(amateur_model):
                 for i, (amateur, amateur_cache, amateur_contrastive_decode_kwargs) in enumerate(zip(amateur_model, amateur_caches, contrastive_decode_kwargs)):
+                    if restrict_to_max_seq_len and exists(amateur_cache):
+                        modify_cached_kv(amateur_cache, lambda t: t[..., -(max_seq_len - 1):, :] if exists(t) else t)
+
                     amateur_logits, next_amateur_cache = amateur(
                         x,
                         return_intermediates = True,
                         cache = amateur_cache,
-                        seq_start_pos = seq_start_pos,
+                        seq_start_pos = window_seq_start_pos,
                         **kwargs
                     )
 
