@@ -55,7 +55,7 @@ def gumbel_sample(logits, temperature = 1., eps = 1e-6):
 def modify_cached_kv(cache, fn):
     for inter in cache.attn_intermediates:
         if inter.layer_type == 'a':
-            inter.cached_kv = [fn(t) for t in inter.cached_kv]
+            inter.cached_kv = [fn(t) if exists(t) else t for t in inter.cached_kv]
 
 # for variable lengthed prefixes
 
@@ -472,9 +472,7 @@ class AutoregressiveWrapper(Module):
                 x = out[:, -max_seq_len:]
 
                 if exists(cache):
-                    for inter in cache.attn_intermediates:
-                        if inter.layer_type == 'a':
-                            inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
+                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :])
 
             window_seq_start_pos = seq_start_pos
             if exists(seq_start_pos) and out.shape[-1] != x.shape[-1]:
@@ -499,7 +497,7 @@ class AutoregressiveWrapper(Module):
             if exists(amateur_model):
                 for i, (amateur, amateur_cache, amateur_contrastive_decode_kwargs) in enumerate(zip(amateur_model, amateur_caches, contrastive_decode_kwargs)):
                     if restrict_to_max_seq_len and exists(amateur_cache):
-                        modify_cached_kv(amateur_cache, lambda t: t[..., -(max_seq_len - 1):, :] if exists(t) else t)
+                        modify_cached_kv(amateur_cache, lambda t: t[..., -(max_seq_len - 1):, :])
 
                     amateur_logits, next_amateur_cache = amateur(
                         x,

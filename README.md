@@ -62,6 +62,8 @@ model(x) # (1, 1024, 20000)
 
 When using `AutoregressiveWrapper.generate` or `beam_search` with `prompt_lens`, padding offsets follow the retained context as generation crops to `max_seq_len`. Contrastive decoding also crops amateur-model KV caches to the same retained window as the expert model.
 
+KV-cache cropping and beam expansion preserve the absent value-cache entry used by latent-KV attention, for both expert and amateur models.
+
 GPT3 would be approximately the following (but you wouldn't be able to run it anyways)
 
 ```python

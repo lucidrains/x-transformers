@@ -1216,7 +1216,8 @@ def test_beam_search(stochastic):
     assert beams.shape == (4, 2, 10)
     assert scores.shape == (4, 2)
 
-def test_beam_search_kv_cache_parity():
+@param('use_latent_kv', (False, True))
+def test_beam_search_kv_cache_parity(use_latent_kv):
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
 
     torch.manual_seed(0)
@@ -1228,6 +1229,8 @@ def test_beam_search_kv_cache_parity():
             dim = 16,
             depth = 2,
             heads = 2,
+            attn_use_latent_kv = use_latent_kv,
+            attn_dim_latent_kv = 8,
             rotary_pos_emb = True
         )
     )
@@ -1338,7 +1341,8 @@ def test_generate_unrestricted_max_seq_len():
 @param('wrap_amateur', (False, True))
 @param('max_seq_len', (32, 6))
 @param('amateur_uses_latent_kv', (False, True))
-def test_contrastive_decoding(wrap_amateur, max_seq_len, amateur_uses_latent_kv):
+@param('expert_uses_latent_kv', (False, True))
+def test_contrastive_decoding(wrap_amateur, max_seq_len, amateur_uses_latent_kv, expert_uses_latent_kv):
     from x_transformers import AutoregressiveWrapper
 
     def create_model(use_latent_kv = False):
@@ -1355,7 +1359,7 @@ def test_contrastive_decoding(wrap_amateur, max_seq_len, amateur_uses_latent_kv)
             )
         )
 
-    wrapper = AutoregressiveWrapper(create_model())
+    wrapper = AutoregressiveWrapper(create_model(use_latent_kv = expert_uses_latent_kv))
 
     amateur = create_model(use_latent_kv = amateur_uses_latent_kv)
 
