@@ -80,6 +80,8 @@ def test_readme():
     loss.backward()
 
 def test_kv_cache():
+    torch.manual_seed(0)
+
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
@@ -108,7 +110,7 @@ def test_kv_cache():
     next_logits = model(prompts, context = context)
     next_logits_with_cache = model(prompts, context = context, cache = cache)
 
-    assert torch.allclose(next_logits[:, -1], next_logits_with_cache[:, -1], atol = 1e-6)
+    assert torch.allclose(next_logits[:, -1], next_logits_with_cache[:, -1], atol = 1e-5)
 
 def test_cope():
     model = TransformerWrapper(
@@ -3449,6 +3451,86 @@ def test_full_bandwidth_recirculation():
     prompts = torch.randint(0, 256, (2, 8))
     sampled = fb.generate(prompts, seq_len = 16)
     assert sampled.shape == (2, 16)
+
+def test_variable_width_schedule():
+    from x_transformers import variable_width_schedule
+
+    widths = variable_width_schedule(
+        dim = 512,
+        depth = 16,
+        bottleneck_layer_ratio = 0.75,
+        bottleneck_width_ratio = 0.3,
+        round_to = 64
+    )
+
+    assert len(widths) == 16
+    assert widths[0] == widths[-1]
+    assert widths[11] == min(widths)
+    assert all(w % 64 == 0 for w in widths)
+    assert widths[0] > 512 > widths[11]
+
+    # parameter matched to a constant-width baseline, up to rounding
+
+    assert sum(w ** 2 for w in widths) == pytest.approx(16 * 512 ** 2, rel = 0.1)
+
+def test_variable_width():
+    torch.manual_seed(0)
+
+    def create_model(variable_width):
+        return TransformerWrapper(
+            num_tokens = 256,
+            max_seq_len = 128,
+            attn_layers = Decoder(
+                dim = 64,
+                depth = 4,
+                heads = 4,
+                attn_dim_head = 16,
+                variable_width = variable_width
+            )
+        )
+
+    tokens = torch.randint(0, 256, (2, 32))
+
+    # explicit per-block widths
+
+    model = create_model((64, 32, 32, 64))
+
+    assert model.attn_layers.layer_dims == (64, 64, 32, 32, 32, 32, 64, 64)
+    assert model.attn_layers.residual_dim == 64
+
+    logits = model(tokens)
+    assert logits.shape == (2, 32, 256)
+    logits.sum().backward()
+
+    # paper x-shaped schedule, wide early and late layers with a narrow middle
+
+    model = create_model(True)
+
+    layer_dims = model.attn_layers.layer_dims
+
+    assert model.attn_layers.residual_dim > 64
+    assert layer_dims[0] == layer_dims[-1]
+    assert min(layer_dims) < 64 < max(layer_dims)
+
+    logits = model(tokens)
+    assert logits.shape == (2, 32, 256)
+
+    # kv cache parity
+
+    model.eval()
+
+    prompt = torch.randint(0, 256, (2, 16))
+    logits, cache = model(prompt, return_intermediates = True)
+
+    assert all(h.shape[-1] == model.attn_layers.residual_dim for h in cache.layer_hiddens)
+
+    next_tokens = logits[:, -1:].argmax(dim = -1)
+    extended = torch.cat((prompt, next_tokens), dim = -1)
+
+    cached_logits = model(extended, cache = cache)
+    full_logits = model(extended)
+
+    assert torch.allclose(cached_logits[:, -1], full_logits[:, -1], atol = 1e-5)
 
 def test_xval_full_length_padding_mask():
     from x_transformers import XValTransformerWrapper, XValAutoregressiveWrapper

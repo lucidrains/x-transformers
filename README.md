@@ -2871,4 +2871,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{wu2026variablewidthtransformers,
+    title         = {Variable-Width Transformers},
+    author        = {Zhaofeng Wu and Oliver Sieberling and Shawn Tan and Rameswar Panda and Yury Polyanskiy and Yoon Kim},
+    year          = {2026},
+    eprint        = {2606.18246},
+    archivePrefix = {arXiv},
+    primaryClass  = {cs.CL},
+    url           = {https://arxiv.org/abs/2606.18246}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis
