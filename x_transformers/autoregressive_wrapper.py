@@ -267,7 +267,7 @@ class AutoregressiveWrapper(Module):
                 x = x[:, -max_seq_len:]
 
                 if exists(cache):
-                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :])
+                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :] if max_seq_len > 1 else t[..., :0, :])
 
             window_seq_start_pos = seq_start_pos
             if exists(seq_start_pos) and out.shape[-1] != x.shape[-1]:
@@ -472,7 +472,7 @@ class AutoregressiveWrapper(Module):
                 x = out[:, -max_seq_len:]
 
                 if exists(cache):
-                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :])
+                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :] if max_seq_len > 1 else t[..., :0, :])
 
             window_seq_start_pos = seq_start_pos
             if exists(seq_start_pos) and out.shape[-1] != x.shape[-1]:
@@ -497,7 +497,7 @@ class AutoregressiveWrapper(Module):
             if exists(amateur_model):
                 for i, (amateur, amateur_cache, amateur_contrastive_decode_kwargs) in enumerate(zip(amateur_model, amateur_caches, contrastive_decode_kwargs)):
                     if restrict_to_max_seq_len and exists(amateur_cache):
-                        modify_cached_kv(amateur_cache, lambda t: t[..., -(max_seq_len - 1):, :])
+                        modify_cached_kv(amateur_cache, lambda t: t[..., -(max_seq_len - 1):, :] if max_seq_len > 1 else t[..., :0, :])
 
                     amateur_logits, next_amateur_cache = amateur(
                         x,

@@ -64,6 +64,8 @@ When using `AutoregressiveWrapper.generate` or `beam_search` with `prompt_lens`,
 
 KV-cache cropping and beam expansion preserve the absent value-cache entry used by latent-KV attention, for both expert and amateur models.
 
+For a one-token context window, the retained KV cache is empty; it does not retain the full history through Python's `-0` slice.
+
 GPT3 would be approximately the following (but you wouldn't be able to run it anyways)
 
 ```python
