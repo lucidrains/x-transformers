@@ -2893,4 +2893,23 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{harik2022roper,
+    title  = {Rotary Positional Embeddings with Relative distances (RoPER)},
+    author = {Georges Harik and Varuna Jayasiri},
+    year   = {2022},
+    url    = {https://research.labml.ai/RoPER.html}
+}
+```
+
+```bibtex
+@inproceedings{miyato2024gta,
+    title     = {GTA: A Geometry-Aware Attention Mechanism for Multi-View Transformers},
+    author    = {Takeru Miyato and Bernhard Jaeger and Max Welling and Andreas Geiger},
+    booktitle = {International Conference on Learning Representations (ICLR)},
+    year      = {2024},
+    url       = {https://openreview.net/forum?id=uJVHygNeSZ}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

@@ -969,7 +969,7 @@ def rotate_half(x):
     return rearrange(x, '... d r -> ... (d r)')
 
 @disable_autocast
-def apply_rotary_pos_emb(t, freqs, scale = 1):
+def apply_rotary_pos_emb(t, freqs, scale = 1, inverse = False):
     rot_dim, seq_len, orig_dtype = freqs.shape[-1], t.shape[-2], t.dtype
 
     freqs = freqs[:, -seq_len:, :]
@@ -983,7 +983,11 @@ def apply_rotary_pos_emb(t, freqs, scale = 1):
 
     # partial rotary embeddings, Wang et al. GPT-J
     t, t_unrotated = t[..., :rot_dim], t[..., rot_dim:]
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
+
+    cos, sin = freqs.cos() * scale, freqs.sin() * scale
+    sin = -sin if inverse else sin
+
+    t = (t * cos) + (rotate_half(t) * sin)
     out = cat((t, t_unrotated), dim = -1)
 
     return out.type(orig_dtype)
@@ -1993,6 +1997,7 @@ class Attention(Module):
         head_learned_sink_add_gain = False,          # add back the gain on surviving attention
         head_learned_sink_reference_mass = 0.2,      # surviving mass at which gain = 1
         rotate_num_heads = None,
+        qkvo_rope = False,           # rotate values forward, then inverse rotate output (RoPER)
         data_dependent_alibi = False,
         data_dependent_alibi_per_row = False,
         data_dependent_alibi_per_row_dim_head = 8,
@@ -2349,6 +2354,8 @@ class Attention(Module):
 
         self.rotate_num_heads = rotate_num_heads
 
+        self.qkvo_rope = qkvo_rope
+
         # whether parent can kv cache
 
         self.can_cache_kv = not selective
@@ -2421,6 +2428,11 @@ class Attention(Module):
         b, n, h, kv_h, head_scale, num_mem_kv, device, has_context, qkv_receive_diff_residuals, is_multi_latent_attn = x.shape[0], x.shape[1], self.heads, self.kv_heads, self.head_scale, self.num_mem_kv, x.device, exists(context), self.qkv_receive_diff_residuals, self.use_latent_kv
 
         causal = default(causal, self.causal)
+
+        rotate_num_heads = self.rotate_num_heads
+        partial_rotate_heads = rotate_num_heads < h
+
+        assert not (self.qkvo_rope and not has_context and not exists(rotary_pos_emb)), 'qkvo_rope requires rotary_pos_emb'
 
         # an interesting possibility with hyper connections
         # having queries, keys, values be routed from different layers
@@ -2551,29 +2563,38 @@ class Attention(Module):
                 cached_kv = (k[..., mem_len:, :], v[..., mem_len:, :])
 
         if exists(rotary_pos_emb):
-            rotate_num_heads = self.rotate_num_heads
-            partial_rotate_heads = rotate_num_heads < h
-
-            freqs, xpos_scale = rotary_pos_emb
+            q_freqs, xpos_scale = rotary_pos_emb
             q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.) if exists(xpos_scale) else (1., 1.)
 
             if partial_rotate_heads:
                 q_rest, q = q[:, :-rotate_num_heads], q[:, -rotate_num_heads:]
                 k_rest, k = k[:, :-rotate_num_heads], k[:, -rotate_num_heads:]
 
-            q = apply_rotary_pos_emb(q, freqs, q_xpos_scale)
+                if self.qkvo_rope:
+                    v_rest, v = v[:, :-rotate_num_heads], v[:, -rotate_num_heads:]
+
+            q = apply_rotary_pos_emb(q, q_freqs, q_xpos_scale)
+
+            kv_freqs = q_freqs
 
             if has_context:
                 # override with `context_rotary_pos_emb` if provided
 
-                freqs, xpos_scale = context_rotary_pos_emb
+                kv_freqs, xpos_scale = context_rotary_pos_emb
                 _, k_xpos_scale = (xpos_scale, xpos_scale ** -1.) if exists(xpos_scale) else (1., 1.)
 
-            k = apply_rotary_pos_emb(k, freqs, k_xpos_scale)
+            k = apply_rotary_pos_emb(k, kv_freqs, k_xpos_scale)
+
+            if self.qkvo_rope:
+                assert v.shape[-1] >= kv_freqs.shape[-1], 'qkvo rope requires value head dim >= rotary dim'
+                v = apply_rotary_pos_emb(v, kv_freqs)
 
             if partial_rotate_heads:
                 q = cat((q_rest, q), dim = 1)
                 k = cat((k_rest, k), dim = 1)
+
+                if self.qkvo_rope:
+                    v = cat((v_rest, v), dim = 1)
 
         if exists(polar_pos_emb):
             freqs, bias = polar_pos_emb
@@ -2734,6 +2755,13 @@ class Attention(Module):
 
         if self.laser:
             out = log(out)
+
+        if self.qkvo_rope and exists(rotary_pos_emb):
+            if partial_rotate_heads:
+                out_rest, out_rot = out[:, :-rotate_num_heads], out[:, -rotate_num_heads:]
+                out = cat((out_rest, apply_rotary_pos_emb(out_rot, q_freqs, inverse = True)), dim = 1)
+            else:
+                out = apply_rotary_pos_emb(out, q_freqs, inverse = True)
 
         # store the values for resformer
 
@@ -2906,6 +2934,7 @@ class AttentionLayers(Module):
         rotary_xpos_scale_base = 512,
         rotary_base_rescale_factor = 1.,
         rotate_num_heads = None,
+        qkvo_rope = False,           # rotate values forward, then inverse rotate output (RoPER)
         polar_pos_emb = False,
         polar_bias_uniform_init = False,
         weight_tie_layers = False,
@@ -3009,6 +3038,16 @@ class AttentionLayers(Module):
         assert at_most_one_of(rotary_pos_emb, polar_pos_emb), f'either rotary positional embedding or polar positional embedding can be turned on'
         assert not (rotary_xpos and not causal), 'rotary xpos is not compatible with bidirectional attention'
         assert not flash_pack_seq or rotary_pos_emb, 'block masking only tested for rotary positional embeddings'
+
+        # self and cross attention, per-layer kwargs override
+
+        if qkvo_rope:
+            attn_kwargs = {'qkvo_rope': True, **attn_kwargs}
+            cross_attn_kwargs = {'qkvo_rope': True, **cross_attn_kwargs}
+
+        self.qkvo_rope = attn_kwargs.get('qkvo_rope', False) or cross_attn_kwargs.get('qkvo_rope', False)
+        assert not self.qkvo_rope or rotary_pos_emb, 'qkvo_rope requires rotary_pos_emb'
+
         self.rotary_pos_emb = RotaryEmbedding(rotary_emb_dim, use_xpos = rotary_xpos, scale_base = rotary_xpos_scale_base, interpolation_factor = rotary_interpolation_factor, base_rescale_factor = rotary_base_rescale_factor) if rotary_pos_emb else None
 
         # polar positional embedding (PoPE) - https://arxiv.org/abs/2509.10534

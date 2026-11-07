@@ -14,6 +14,8 @@ from x_transformers.x_transformers import (
     AttentionLayers,
     Attention,
     Attend,
+    RotaryEmbedding,
+    apply_rotary_pos_emb,
     disable_autocast
 )
 
@@ -478,6 +480,78 @@ def test_custom_rotary_pos_emb(rotary_xpos):
     logits2 = model(x)
     assert torch.allclose(logits1, logits2)
 
+@param('rot_dim', (16, 8))
+def test_apply_rotary_pos_emb_inverse(rot_dim):
+    rotary = RotaryEmbedding(rot_dim)
+    freqs, _ = rotary(torch.arange(7))
+
+    x = torch.randn(2, 3, 7, 16)
+
+    rotated = apply_rotary_pos_emb(x, freqs)
+    derotated = apply_rotary_pos_emb(rotated, freqs, inverse = True)
+
+    assert torch.allclose(derotated, x, atol = 1e-4)
+    assert torch.allclose(rotated[..., rot_dim:], x[..., rot_dim:])
+
+def test_qkvo_rope_matches_manual():
+    torch.manual_seed(0)
+
+    dim, seq_len = 32, 8
+
+    attn = Attention(
+        dim = dim,
+        dim_head = dim,
+        heads = 1,
+        causal = True,
+        qkvo_rope = True
+    )
+
+    rotary = RotaryEmbedding(dim)
+    freqs, _ = rotary(torch.arange(seq_len))
+
+    x = torch.randn(2, seq_len, dim)
+
+    out = attn(x, rotary_pos_emb = (freqs, None))
+
+    q = attn.split_q_heads(attn.to_q(x))
+    k = attn.split_k_heads(attn.to_k(x))
+    v = attn.split_v_heads(attn.to_v(x))
+
+    q = apply_rotary_pos_emb(q, freqs)
+    k = apply_rotary_pos_emb(k, freqs)
+    v = apply_rotary_pos_emb(v, freqs)
+
+    expected, _ = attn.attend(q, k, v, causal = True)
+    expected = apply_rotary_pos_emb(expected, freqs, inverse = True)
+    expected = attn.merge_heads(expected)
+
+    assert torch.allclose(out, expected, atol = 1e-5)
+
+def test_qkvo_rope_cache():
+    model = TransformerWrapper(
+        num_tokens = 200,
+        max_seq_len = 64,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            rotary_pos_emb = True,
+            qkvo_rope = True
+        )
+    )
+
+    x = torch.randint(0, 200, (2, 5))
+
+    out_parallel = model(x)
+
+    out1, cache = model(x[:, :3], return_intermediates = True)
+    out2, cache = model(x[:, 3:4], cache = cache, return_intermediates = True, input_not_include_cache = True)
+    out3 = model(x[:, 4:5], cache = cache, input_not_include_cache = True)
+
+    out_seq = torch.cat((out1, out2, out3), dim = 1)
+
+    assert torch.allclose(out_parallel, out_seq, atol = 1e-5)
+
 @param('flash', (True, False))
 def test_custom_alibi_across_heads(flash: bool):
     model = Decoder(
@@ -607,9 +681,11 @@ def test_laser():
 
 @param('self_attn_custom_pos', (True, False))
 @param('cross_attn_rotary', (True, False))
+@param('qkvo_rope', (True, False))
 def test_cross_attn_rotary(
     self_attn_custom_pos: bool,
-    cross_attn_rotary: bool
+    cross_attn_rotary: bool,
+    qkvo_rope: bool
 ):
 
     x = torch.randn((1, 64, 256))
@@ -622,6 +698,7 @@ def test_cross_attn_rotary(
         depth = 4,
         heads = 4,
         rotary_pos_emb = True,
+        qkvo_rope = qkvo_rope,
         cross_attend = True,
         cross_attn_dim_context = 512
     )
