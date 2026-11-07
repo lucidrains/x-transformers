@@ -2860,6 +2860,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
+@misc{bytedanceseed2026recycler,
+    title  = {Recycler: Cost-Free Latent Reasoning via Hidden State Recycling},
+    author = {{ByteDance Seed}},
+    month  = {October},
+    year   = {2026},
+    url    = {https://seed.bytedance.com/en/public_papers/recycler-cost-free-latent-reasoning-via-hidden-state-recycling}
+}
+```
+
+```bibtex
 @misc{kimiteam2026kimik3openfrontier,
     title   = {Kimi K3: Open Frontier Intelligence},
     author  = {Kimi Team},

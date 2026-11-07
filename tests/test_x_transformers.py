@@ -3448,7 +3448,8 @@ def test_depth_scale_residual(depth_scale_residual):
     logits = model(x)
     logits.sum().backward()
 
-def test_full_bandwidth():
+@param('transition', ('glu', 'recycler'))
+def test_full_bandwidth(transition):
     from x_transformers.full_bandwidth import FullBandwidth, LossBreakdown
 
     model = TransformerWrapper(
@@ -3464,7 +3465,7 @@ def test_full_bandwidth():
         )
     )
 
-    fb = FullBandwidth(model, temporal_parallel_passes = 2)
+    fb = FullBandwidth(model, temporal_parallel_passes = 2, transition = transition)
 
     tokens = torch.randint(0, 256, (2, 16))
 
