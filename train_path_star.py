@@ -133,6 +133,9 @@ def train(
     num_rollouts: int = 2,
     dynamic_rollout_loss_weight: bool = True,
     dynamic_loss_decay: float = 1.0,
+    use_successive: bool = False,
+    successive_discount_factor: float = 0.9,
+    successive_horizon: int = 20,
     max_grad_norm: float | None = 100.0
 ):
     wandb.init(project = wandb_project, name = wandb_run_name, config = locals())
@@ -158,6 +161,11 @@ def train(
         accelerator.print(f"Next latent is ENABLED (dynamics_type: {dynamics_type})")
     else:
         accelerator.print("Next latent is DISABLED. You can turn it on by passing `--use_nextlat=True`")
+
+    if use_successive:
+        assert use_nextlat, 'successive representations require next latent to be enabled'
+        num_rollouts = 1
+        accelerator.print(f"Successive representations are ENABLED (discount: {successive_discount_factor}, horizon: {successive_horizon}, no rollout)")
 
     # base model
 
@@ -185,7 +193,9 @@ def train(
             ignore_index = PAD_TOKEN,
             pad_value = PAD_TOKEN,
             dynamic_rollout_loss_weight = dynamic_rollout_loss_weight,
-            dynamic_loss_decay = dynamic_loss_decay
+            dynamic_loss_decay = dynamic_loss_decay,
+            successive_discount_factor = successive_discount_factor if use_successive else None,
+            successive_horizon = successive_horizon
         )
     else:
         model = AutoregressiveWrapper(

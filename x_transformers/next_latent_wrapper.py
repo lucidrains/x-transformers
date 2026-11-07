@@ -349,6 +349,30 @@ class NextLatentWrapper(Module):
 
         return torch.trapezoid(err, t, dim = -1).mean()
 
+    @staticmethod
+    def discounted_future_hiddens(
+        hiddens,
+        mask,
+        discount_factor,
+        horizon
+    ):
+        # successor representation target (dayan 1993) - discounted average of future hidden states, no rollout
+
+        target = hiddens.new_zeros(hiddens.shape)
+        weights = mask.new_zeros(mask.shape, dtype = hiddens.dtype)
+
+        for step in range(1, min(horizon, hiddens.shape[1] - 1) + 1):
+            weight = discount_factor ** (step - 1)
+
+            future_mask = pad_right_at_dim(mask[:, step:], step, dim = 1, value = False)
+            future_hiddens = pad_right_at_dim(hiddens[:, step:], step, dim = 1, value = 0.)
+
+            target = target + weight * future_hiddens * rearrange(future_mask, 'b n -> b n 1')
+            weights = weights + weight * future_mask
+
+        target = target / weights.clamp(min = 1e-5).unsqueeze(-1)
+        return target, weights > 0.
+
     def __init__(
         self,
         net,
@@ -365,6 +389,9 @@ class NextLatentWrapper(Module):
         ignore_index = -100,
         pad_value = 0,
         rollout_weights: tuple[float, ...] | None = None,
+        rollout_discount_factor: float | None = None,
+        successive_discount_factor: float | None = None,
+        successive_horizon = 20,
         sigreg_loss_weight = 0.,
         sigreg_loss_kwargs: dict = dict(
             num_slices = 1024,
@@ -391,6 +418,20 @@ class NextLatentWrapper(Module):
 
         assert num_rollouts > 0, 'num_rollouts must be greater than 0'
         self.num_rollouts = num_rollouts
+
+        self.successive_discount_factor = successive_discount_factor
+        self.successive_horizon = successive_horizon
+
+        if exists(successive_discount_factor):
+            assert 0. < successive_discount_factor < 1.
+            assert num_rollouts == 1, 'successive discounted representations do not use rollout'
+
+            # kl is next-token only and does not apply to successor targets
+
+            kl_loss_weight = 0.
+
+        if exists(rollout_discount_factor):
+            assert not exists(successive_discount_factor), 'either use rollout discount or successive discount, not both'
 
         self.loss_type = loss_type
 
@@ -419,6 +460,12 @@ class NextLatentWrapper(Module):
         self.dynamic_loss_decay = dynamic_loss_decay
 
         # rollout weights
+
+        if exists(rollout_discount_factor):
+            assert 0. < rollout_discount_factor <= 1.
+            assert not exists(rollout_weights), 'either supply rollout_weights or rollout_discount_factor, not both'
+
+            rollout_weights = tuple(rollout_discount_factor ** step for step in range(num_rollouts))
 
         if not exists(rollout_weights):
             rollout_weights = (1.,) * num_rollouts
@@ -554,88 +601,116 @@ class NextLatentWrapper(Module):
 
         token_embeds = self.token_emb(inp)
 
-        pad_amt = num_rollouts - 1
-
-        padded_target_hiddens = pad_right_at_dim(hidden_states, pad_amt, dim = 1, value = 0.)
-        padded_mask = pad_right_at_dim(mask, pad_amt, dim = 1, value = False)
-        padded_token_embeds = pad_right_at_dim(token_embeds, pad_amt, dim = 1, value = 0.)
-
-        rollout_target_hiddens = padded_target_hiddens[:, 1:].unfold(1, seq - 1, 1)
-        rollout_target_hiddens = rearrange(rollout_target_hiddens, 'b r d n -> r b n d')
-
-        rollout_masks = padded_mask.unfold(1, seq - 1, 1)
-        rollout_masks = rearrange(rollout_masks, 'b r n -> r b n')
-
-        rollout_next_token_embeds = padded_token_embeds[:, 1:].unfold(1, seq - 1, 1)
-        rollout_next_token_embeds = rearrange(rollout_next_token_embeds, 'b r d n -> r b n d')
-
-        # frozen copy of output head for kl loss
-
-        if self.has_kl_loss:
-            frozen_to_logits = deepcopy(self.net.to_logits)
-            for p in frozen_to_logits.parameters():
-                p.requires_grad_(False)
-
-        curr_latent = hidden_states[:, :-1]
-
-        dynamics_out = self.dynamics_model(
-            rollout_next_token_embeds.detach(),
-            curr_latent
-        )
-
         next_latent_loss = self.zero
         kl_loss = self.zero
 
-        weights = self.rollout_loss_weights[:num_rollouts]
-        step_masks_expanded = rearrange(rollout_masks, '... -> ... 1')
+        # successive discounted representations - single prediction, no rollout
 
-        # compute latent loss
-
-        step_latent_loss_unreduced = self.loss_fn(
-            dynamics_out,
-            rollout_target_hiddens.detach()
-        )
-
-        # dynamic rollout loss weight
-
-        dynamic_weights = 1.
-
-        if self.dynamic_rollout_loss_weight:
-            step_latent_loss = reduce(step_latent_loss_unreduced.detach(), 'r b n d -> r b n', 'mean')
-            dynamic_weights = dynamic_rollout_loss_weights(step_latent_loss, self.dynamic_loss_decay)
-
-        # smooth l1 with stop-gradient on target
-
-        if self.has_next_latent_loss:
-            step_latent_loss_unreduced = einx.multiply('r b n d, r -> r b n d', step_latent_loss_unreduced, weights)
-
-            if self.dynamic_rollout_loss_weight:
-                step_latent_loss_unreduced = einx.multiply('r b n d, r b n -> r b n d', step_latent_loss_unreduced, dynamic_weights)
-
-            next_latent_loss = masked_mean(step_latent_loss_unreduced, step_masks_expanded, dim = (1, 2, 3)).sum()
-
-        # kl divergence
-
-        if self.has_kl_loss:
-            with torch.no_grad():
-                target_log_probs = F.log_softmax(frozen_to_logits(rollout_target_hiddens.detach()), dim = -1)
-
-            pred_log_probs = F.log_softmax(frozen_to_logits(dynamics_out), dim = -1)
-
-            step_kl = F.kl_div(
-                pred_log_probs,
-                target_log_probs,
-                log_target = True,
-                reduction = 'none'
+        if exists(self.successive_discount_factor):
+            target_hiddens, target_mask = self.discounted_future_hiddens(
+                hidden_states,
+                x != ignore_index,
+                self.successive_discount_factor,
+                self.successive_horizon
             )
 
-            step_kl = einx.sum('... c -> ...', step_kl)
-            step_kl = einx.multiply('r b n, r -> r b n', step_kl, weights)
+            target_hiddens = target_hiddens[:, :-1]
+            target_mask = target_mask[:, :-1] & (x[:, :-1] != ignore_index)
+
+            curr_latent = hidden_states[:, :-1]
+            next_token_embeds = token_embeds[:, 1:]
+
+            dynamics_out = self.dynamics_model(next_token_embeds.detach().unsqueeze(0), curr_latent)
+            dynamics_out = rearrange(dynamics_out, '1 b n d -> b n d')
+
+            if self.has_next_latent_loss:
+                next_latent_loss = masked_mean(
+                    self.loss_fn(dynamics_out, target_hiddens.detach()),
+                    target_mask
+                )
+
+            # kl is disabled for successor predictions
+
+        else:
+            pad_amt = num_rollouts - 1
+
+            padded_target_hiddens = pad_right_at_dim(hidden_states, pad_amt, dim = 1, value = 0.)
+            padded_mask = pad_right_at_dim(mask, pad_amt, dim = 1, value = False)
+            padded_token_embeds = pad_right_at_dim(token_embeds, pad_amt, dim = 1, value = 0.)
+
+            rollout_target_hiddens = padded_target_hiddens[:, 1:].unfold(1, seq - 1, 1)
+            rollout_target_hiddens = rearrange(rollout_target_hiddens, 'b r d n -> r b n d')
+
+            rollout_masks = padded_mask.unfold(1, seq - 1, 1)
+            rollout_masks = rearrange(rollout_masks, 'b r n -> r b n')
+
+            rollout_next_token_embeds = padded_token_embeds[:, 1:].unfold(1, seq - 1, 1)
+            rollout_next_token_embeds = rearrange(rollout_next_token_embeds, 'b r d n -> r b n d')
+
+            # frozen copy of output head for kl loss
+
+            if self.has_kl_loss:
+                frozen_to_logits = deepcopy(self.net.to_logits)
+                for p in frozen_to_logits.parameters():
+                    p.requires_grad_(False)
+
+            curr_latent = hidden_states[:, :-1]
+
+            dynamics_out = self.dynamics_model(
+                rollout_next_token_embeds.detach(),
+                curr_latent
+            )
+
+            weights = self.rollout_loss_weights[:num_rollouts]
+            step_masks_expanded = rearrange(rollout_masks, '... -> ... 1')
+
+            # compute latent loss
+
+            step_latent_loss_unreduced = self.loss_fn(
+                dynamics_out,
+                rollout_target_hiddens.detach()
+            )
+
+            # dynamic rollout loss weight
+
+            dynamic_weights = 1.
 
             if self.dynamic_rollout_loss_weight:
-                step_kl = step_kl * dynamic_weights
+                step_latent_loss = reduce(step_latent_loss_unreduced.detach(), 'r b n d -> r b n', 'mean')
+                dynamic_weights = dynamic_rollout_loss_weights(step_latent_loss, self.dynamic_loss_decay)
 
-            kl_loss = masked_mean(step_kl, rollout_masks, dim = (1, 2)).sum()
+            # smooth l1 with stop-gradient on target
+
+            if self.has_next_latent_loss:
+                step_latent_loss_unreduced = einx.multiply('r b n d, r -> r b n d', step_latent_loss_unreduced, weights)
+
+                if self.dynamic_rollout_loss_weight:
+                    step_latent_loss_unreduced = einx.multiply('r b n d, r b n -> r b n d', step_latent_loss_unreduced, dynamic_weights)
+
+                next_latent_loss = masked_mean(step_latent_loss_unreduced, step_masks_expanded, dim = (1, 2, 3)).sum()
+
+            # kl divergence
+
+            if self.has_kl_loss:
+                with torch.no_grad():
+                    target_log_probs = F.log_softmax(frozen_to_logits(rollout_target_hiddens.detach()), dim = -1)
+
+                pred_log_probs = F.log_softmax(frozen_to_logits(dynamics_out), dim = -1)
+
+                step_kl = F.kl_div(
+                    pred_log_probs,
+                    target_log_probs,
+                    log_target = True,
+                    reduction = 'none'
+                )
+
+                step_kl = einx.sum('... c -> ...', step_kl)
+                step_kl = einx.multiply('r b n, r -> r b n', step_kl, weights)
+
+                if self.dynamic_rollout_loss_weight:
+                    step_kl = step_kl * dynamic_weights
+
+                kl_loss = masked_mean(step_kl, rollout_masks, dim = (1, 2)).sum()
 
         # sigreg regularization on embeddings
 
