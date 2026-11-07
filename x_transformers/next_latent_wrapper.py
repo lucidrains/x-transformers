@@ -9,7 +9,16 @@ from torch.nn import Module
 
 import einx
 from einops import rearrange, reduce
-from torch_einops_utils import pad_right_at_dim, masked_mean, exclusive_cumsum, pack_with_inverse, cross_entropy
+from torch_einops_utils import (
+    pad_right_at_dim,
+    pad_at_dim,
+    masked_mean,
+    and_masks,
+    exclusive_cumsum,
+    pack_with_inverse,
+    zero_with_grad,
+    cross_entropy
+)
 
 # helpers
 
@@ -34,7 +43,15 @@ def dynamic_rollout_loss_weights(
 
 # constants
 
-Losses = namedtuple('Losses', ['ce', 'next_latent', 'kl', 'sigreg'])
+Losses = namedtuple('Losses', [
+    'ce',
+    'next_latent',
+    'kl',
+    'sigreg',
+    'light_mtp',
+    'light_mtp_var_reg',
+    'mtp'
+])
 
 # classes
 
@@ -132,6 +149,177 @@ class MSECosineSimLoss(Module):
 
         return mse_loss.lerp(cos_loss, self.weight)
 
+# lightmtp - https://arxiv.org/abs/2610.06031
+# predict future hidden states from the current hidden state alone, in one parallel head call
+
+class LightMTP(Module):
+    def __init__(
+        self,
+        dim,
+        num_steps = 4,
+        variant = 'concat',
+        head_hidden_dim = None,
+        has_var_reg = False
+    ):
+        super().__init__()
+        assert variant in ('single', 'concat')
+        assert num_steps > 0
+
+        self.num_steps = num_steps
+        self.variant = variant
+        self.has_var_reg = has_var_reg
+
+        out_dim = dim * num_steps if variant == 'concat' else dim
+
+        # two layer mlp with gelu, as in the paper
+
+        self.head = MLP(
+            dim_in = dim,
+            dim_out = out_dim,
+            dim_hidden = default(head_hidden_dim, dim),
+            depth = 2
+        )
+
+    def variance_regularization(self, target_hiddens, mask):
+        # penalize a shared mean direction across positions
+        normed = l2norm(target_hiddens)
+        mean_hidden = masked_mean(normed, mask, dim = 1)
+        return mean_hidden.norm(dim = -1).mean()
+
+    def forward(
+        self,
+        hiddens,          # (b n d) final layer
+        target_hiddens,   # (b n d) intermediate layer targets
+        mask              # (b n) valid tokens
+    ):
+        n = hiddens.shape[1]
+        preds = self.head(hiddens)
+
+        # varreg shapes the trunk, so keep its gradient
+
+        if self.has_var_reg:
+            var_reg_loss = self.variance_regularization(target_hiddens, mask)
+        else:
+            var_reg_loss = hiddens.new_zeros(())
+
+        target_hiddens = target_hiddens.detach()
+
+        if self.variant == 'single':
+            preds = rearrange(preds, 'b n d -> b n 1 d')
+            steps = (self.num_steps,)
+        else:
+            preds = rearrange(preds, 'b n (k d) -> b n k d', k = self.num_steps)
+            steps = tuple(range(1, self.num_steps + 1))
+
+        step_losses = []
+
+        for step in steps:
+            if step >= n:
+                continue
+
+            step_index = step - 1 if self.variant == 'concat' else 0
+            pred = preds[:, :n - step, step_index]
+
+            # input and target positions both valid
+
+            step_mask = and_masks((mask[:, :n - step], mask[:, step:]))
+            cos_loss = 1. - F.cosine_similarity(pred, target_hiddens[:, step:], dim = -1)
+            step_losses.append(masked_mean(cos_loss, step_mask))
+
+        if not step_losses:
+            zero = hiddens.new_zeros(())
+            return zero, zero
+
+        return sum(step_losses), var_reg_loss
+
+# token-level mtp
+# standard (hard) and soft-mtp from https://arxiv.org/abs/2610.38331
+
+class TokenMTP(Module):
+    def __init__(
+        self,
+        dim,
+        num_steps = 3,
+        soft = False,
+        head_type = 'linear',
+        soft_loss_weight = 1.0
+    ):
+        super().__init__()
+        assert num_steps > 0
+        assert head_type in ('linear', 'mlp')
+
+        self.num_steps = num_steps
+        self.soft = soft
+        self.soft_loss_weight = soft_loss_weight
+
+        if head_type == 'linear':
+            heads = [nn.Linear(dim, dim) for _ in range(num_steps)]
+        else:
+            heads = [MLP(dim, dim, dim, depth = 2) for _ in range(num_steps)]
+
+        self.heads = nn.ModuleList(heads)
+
+    def forward(
+        self,
+        hiddens,      # (b n d)
+        tokens,       # (b n) token ids
+        to_logits,
+        ignore_index = -100
+    ):
+        n = hiddens.shape[1]
+        steps = tuple(range(1, min(self.num_steps, n - 2) + 1))
+
+        if not steps:
+            return hiddens.new_zeros(()), None
+
+        mtp_losses = []
+        straight_through = []
+
+        # number of valid ntp targets, for undoing the ce mean
+
+        n0 = (tokens[:, 1:] != ignore_index).sum().clamp(min = 1)
+
+        for step in steps:
+            head = self.heads[step - 1]
+
+            num_pred = n - step - 1
+            hk = head(hiddens[:, :num_pred])
+            targets = tokens[:, step + 1:]
+
+            logits = to_logits(hk)
+            mtp_losses.append(cross_entropy(
+                rearrange(logits, 'b n c -> b c n'),
+                targets,
+                ignore_index = ignore_index
+            ))
+
+            if self.soft:
+                # s_k = lambda * N0 / (K * N_k), as in appendix b.5 of the paper
+                nk = (targets != ignore_index).sum().clamp(min = 1)
+                s_k = (self.soft_loss_weight * n0 / (len(steps) * nk)).detach()
+
+                # h0[t + step] += s_k * (hk[t].detach() - hk[t]), numerically zero
+                straight_through.append((step, -s_k * zero_with_grad(hk)))
+
+        mtp_loss = sum(mtp_losses) / len(mtp_losses)
+
+        if not self.soft:
+            return mtp_loss, None
+
+        h0 = hiddens
+
+        for step, delta in straight_through:
+            h0 = h0 + pad_at_dim(delta, (step, 1), dim = 1)
+
+        logits = to_logits(h0[:, :-1])
+        ce_loss = cross_entropy(
+            rearrange(logits, 'b n c -> b c n'),
+            tokens[:, 1:],
+            ignore_index = ignore_index
+        )
+
+        return mtp_loss, ce_loss
+
 # main next latent wrapper
 
 class NextLatentWrapper(Module):
@@ -184,7 +372,17 @@ class NextLatentWrapper(Module):
             num_knots = 17
         ),
         dynamic_rollout_loss_weight = True,
-        dynamic_loss_decay = 1.0
+        dynamic_loss_decay = 1.0,
+        light_mtp_loss_weight = 0.,
+        light_mtp_variant = 'concat',
+        light_mtp_num_steps = 4,
+        light_mtp_target_layer: int | None = None,
+        light_mtp_head_hidden_dim: int | None = None,
+        light_mtp_var_reg_weight = 0.,
+        mtp_loss_weight = 0.,
+        mtp_num_steps = 3,
+        mtp_soft = False,
+        mtp_head_type = 'linear'
     ):
         super().__init__()
         self.net = net
@@ -262,6 +460,36 @@ class NextLatentWrapper(Module):
             assert exists(dynamics_network)
             self.dynamics_model = dynamics_network
 
+        # lightmtp auxiliary loss
+
+        self.has_light_mtp = light_mtp_loss_weight > 0. or light_mtp_var_reg_weight > 0.
+        self.light_mtp_loss_weight = light_mtp_loss_weight
+        self.light_mtp_var_reg_weight = light_mtp_var_reg_weight
+        self.light_mtp_target_layer = light_mtp_target_layer
+
+        if self.has_light_mtp:
+            self.light_mtp = LightMTP(
+                dim = dim,
+                num_steps = light_mtp_num_steps,
+                variant = light_mtp_variant,
+                head_hidden_dim = light_mtp_head_hidden_dim,
+                has_var_reg = light_mtp_var_reg_weight > 0.
+            )
+
+        # token-level mtp, optionally soft-mtp
+
+        self.has_mtp = mtp_loss_weight > 0.
+        self.mtp_loss_weight = mtp_loss_weight
+
+        if self.has_mtp:
+            self.mtp = TokenMTP(
+                dim = dim,
+                num_steps = mtp_num_steps,
+                soft = mtp_soft,
+                head_type = mtp_head_type,
+                soft_loss_weight = mtp_loss_weight
+            )
+
         self.register_buffer('zero', tensor(0.), persistent = False)
 
     def forward(
@@ -271,6 +499,8 @@ class NextLatentWrapper(Module):
         **kwargs
     ):
         seq, ignore_index, num_rollouts = x.shape[1], self.ignore_index, self.num_rollouts
+
+        assert seq > (num_rollouts + 1), f'sequence length ({seq}) must be greater than num_rollouts ({num_rollouts}) + 1'
 
         # prepare input and target
 
@@ -285,21 +515,42 @@ class NextLatentWrapper(Module):
             **kwargs
         )
 
-        # ce loss
-
-        logits = self.net.to_logits(hidden_states[:, :-1])
-
-        ce_loss = cross_entropy(
-            rearrange(logits, 'b n c -> b c n'),
-            target,
-            ignore_index = ignore_index
-        )
-
         mask = target != ignore_index
 
-        # latent dynamics losses
+        # token-level mtp, optionally replacing ce with its soft-mtp version
 
-        assert seq > (num_rollouts + 1), f'sequence length ({seq}) must be greater than num_rollouts ({num_rollouts}) + 1'
+        ce_loss = None
+        mtp_loss = self.zero
+
+        if self.has_mtp:
+            mtp_loss, ce_loss = self.mtp(hidden_states, x, self.net.to_logits, ignore_index)
+
+        if not exists(ce_loss):
+            logits = self.net.to_logits(hidden_states[:, :-1])
+            ce_loss = cross_entropy(
+                rearrange(logits, 'b n c -> b c n'),
+                target,
+                ignore_index = ignore_index
+            )
+
+        # lightmtp auxiliary loss
+
+        light_mtp_loss = self.zero
+        light_mtp_var_reg = self.zero
+
+        if self.has_light_mtp:
+            layer_hiddens = intermediates.layer_hiddens
+            target_layer = default(self.light_mtp_target_layer, round((2 / 3) * (len(layer_hiddens) - 1)))
+
+            assert 0 <= target_layer < len(layer_hiddens), f'target layer {target_layer} is out of range for {len(layer_hiddens)} layer hiddens'
+
+            light_mtp_loss, light_mtp_var_reg = self.light_mtp(
+                hidden_states,
+                layer_hiddens[target_layer],
+                x != ignore_index
+            )
+
+        # latent dynamics losses
 
         token_embeds = self.token_emb(inp)
 
@@ -399,13 +650,24 @@ class NextLatentWrapper(Module):
             ce_loss +
             self.next_latent_loss_weight * next_latent_loss +
             self.kl_loss_weight * kl_loss +
-            self.sigreg_loss_weight * sigreg_loss
+            self.sigreg_loss_weight * sigreg_loss +
+            self.light_mtp_loss_weight * light_mtp_loss +
+            self.light_mtp_var_reg_weight * light_mtp_var_reg +
+            self.mtp_loss_weight * mtp_loss
         )
 
         if not return_loss_breakdown:
             return total_loss
 
-        return total_loss, Losses(ce_loss, next_latent_loss, kl_loss, sigreg_loss)
+        return total_loss, Losses(
+            ce_loss,
+            next_latent_loss,
+            kl_loss,
+            sigreg_loss,
+            light_mtp_loss,
+            light_mtp_var_reg,
+            mtp_loss
+        )
 
 # quick test
 
