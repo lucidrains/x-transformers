@@ -14,6 +14,7 @@ from packaging import version
 from dataclasses import dataclass
 
 from einops import rearrange, repeat, pack, unpack
+from torch_einops_utils.shape import shape
 
 # constants
 
@@ -497,6 +498,7 @@ class Attend(Module):
         prev_attn = None,
         attn_delta = None,
         row_mask = None,
+        sink_logits = None,
         flash_pack_seq_kwargs = None,
         causal = None,
     ):
@@ -606,9 +608,15 @@ class Attend(Module):
         if self.selective:
             sim = selective_attn(sim)
 
-        if self.head_learned_sink:
-            # add learned attention sink
-            attn_sink = repeat(self.head_attn_sink, 'h -> b h i 1', b = sim.shape[0], i = sim.shape[2])
+        has_sink = self.head_learned_sink or exists(sink_logits)
+
+        if has_sink:
+            # add learned or input-dependent attention sink
+            if exists(sink_logits):
+                attn_sink = rearrange(sink_logits, 'b h i -> b h i 1')
+            else:
+                b, _, i, _ = shape(sim, 'b h i j')
+                attn_sink = repeat(self.head_attn_sink, 'h -> b h i 1', b = b, i = i)
 
             if self.cog_signed:
                 attn_sink, attn_sink_sign = attn_sink.abs(), attn_sink.sign()
@@ -640,7 +648,7 @@ class Attend(Module):
 
         post_softmax_attn = attn
 
-        if self.head_learned_sink:
+        if has_sink:
             # remove attention sink
             attn = attn[..., 1:]
 

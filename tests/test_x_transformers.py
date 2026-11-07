@@ -1467,6 +1467,32 @@ def test_learned_head_attn_sink():
 
     logits = model(seq)
 
+@param('add_gain', (False, True))
+def test_input_dependent_learned_head_attn_sink(add_gain):
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 128,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            attn_dim_head = 16,
+            attn_head_learned_sink = True,
+            attn_head_learned_sink_input_dependent = True,
+            attn_head_learned_sink_add_gain = add_gain,
+            attn_head_learned_sink_reference_mass = 0.2
+        )
+    )
+
+    seq = torch.randint(0, 256, (2, 32))
+
+    logits = model(seq)
+
+    assert logits.shape == (2, 32, 256)
+
+    logits.sum().backward()
+
 def test_accept_layer_intermediates():
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
 

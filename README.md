@@ -2883,4 +2883,14 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@inproceedings{scaledsinkattention2027,
+    title     = {Scaled Sink Attention: Measuring and Reducing Attention Sink after Normalization in Large Language Models},
+    author    = {Anonymous},
+    booktitle = {International Conference on Learning Representations (ICLR 2027)},
+    year      = {2027},
+    url       = {https://openreview.net/forum?id=a5yCiLOjGB}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

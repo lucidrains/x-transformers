@@ -1987,7 +1987,11 @@ class Attention(Module):
         value_dim_head = None,
         dim_out = None,
         add_zero_kv = False,         # same as add_zero_attn in pytorch
-        head_learned_sink = False,
+        head_learned_sink = False,   # gpt-oss style learned per-head sink
+        # scaled sink attention - https://openreview.net/forum?id=a5yCiLOjGB
+        head_learned_sink_input_dependent = False,   # per-token sink logit from hidden state
+        head_learned_sink_add_gain = False,          # add back the gain on surviving attention
+        head_learned_sink_reference_mass = 0.2,      # surviving mass at which gain = 1
         rotate_num_heads = None,
         data_dependent_alibi = False,
         data_dependent_alibi_per_row = False,
@@ -2025,6 +2029,24 @@ class Attention(Module):
     ):
         super().__init__()
         dim_kv = default(dim_context, dim)
+
+        # scaled sink attention variants
+
+        assert not (head_learned_sink_input_dependent and not head_learned_sink)
+        assert not (head_learned_sink_add_gain and not head_learned_sink)
+        assert not (head_learned_sink_input_dependent and flash)
+        assert not (head_learned_sink_input_dependent and inverted_attention)
+        assert not (head_learned_sink_input_dependent and (sigmoid or hard or exists(sparse_topk) or gumbel_softmax or exists(custom_attn_fn)))
+
+        self.sink_gain = None
+        if head_learned_sink_add_gain:
+            assert 0. < head_learned_sink_reference_mass <= 1.
+            self.sink_gain = 1. / head_learned_sink_reference_mass
+
+        self.to_sink = None
+        if head_learned_sink_input_dependent:
+            self.to_sink = LinearNoBias(dim, heads)
+            nn.init.zeros_(self.to_sink.weight)
 
         self.scale = dim_head ** -0.5
 
@@ -2234,7 +2256,7 @@ class Attention(Module):
             cog_signed = cog_signed,
             custom_attn_fn = custom_attn_fn,
             add_zero_kv = add_zero_kv,
-            head_learned_sink = head_learned_sink,
+            head_learned_sink = head_learned_sink and not head_learned_sink_input_dependent,
             flash = flash,
             softclamp_logits = softclamp_logits,
             logit_softclamp_value = logit_softclamp_value,
@@ -2683,6 +2705,12 @@ class Attention(Module):
             v = softclamp(v, self.laser_softclamp_value)
             v = v.exp()
 
+        # scaled sink attention
+
+        sink_logits = None
+        if exists(self.to_sink):
+            sink_logits = rearrange(self.to_sink(x), 'b n h -> b h n')
+
         # attention is all we need
 
         out, intermediates = self.attend(
@@ -2692,9 +2720,15 @@ class Attention(Module):
             prev_attn = prev_attn,
             attn_delta = attn_delta,
             row_mask = mask,
+            sink_logits = sink_logits,
             flash_pack_seq_kwargs = flash_pack_seq_kwargs,
             causal = causal,
         )
+
+        # scaled sink gain
+
+        if exists(self.sink_gain):
+            out = out * self.sink_gain
 
         # laser
 
