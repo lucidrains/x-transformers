@@ -3669,3 +3669,20 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+
+def test_lowrank_linear_matches_original_dtype_and_device():
+    from x_transformers.xl_autoregressive_wrapper import LowRankLinear
+
+    for dtype in (torch.float32, torch.float64, torch.float16):
+        linear = nn.Linear(8, 16, dtype=dtype)
+        low_rank = LowRankLinear(linear, low_rank_dim=4)
+        assert low_rank.weight_a.dtype == dtype
+        assert low_rank.weight_b.dtype == dtype
+        if linear.bias is not None:
+            assert low_rank.bias.dtype == dtype
+
+        x = torch.ones(2, 8, dtype=dtype)
+        out = low_rank(x)
+        assert out.dtype == dtype
+        assert out.shape == (2, 16)

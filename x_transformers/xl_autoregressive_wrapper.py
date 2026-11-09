@@ -172,8 +172,8 @@ class LowRankLinear(Module):
         # two low rank matrices, no weight matrix, the memories will be stored in these
         # the memory is initially zero, but one of the matrices is randomly initialized so the gradients can flow into it
 
-        self.weight_a = nn.Parameter(torch.randn(out_dim, low_rank_dim))
-        self.weight_b = nn.Parameter(torch.zeros(low_rank_dim, in_dim))
+        self.weight_a = nn.Parameter(torch.randn(out_dim, low_rank_dim, dtype=module.weight.dtype, device=module.weight.device))
+        self.weight_b = nn.Parameter(torch.zeros(low_rank_dim, in_dim, dtype=module.weight.dtype, device=module.weight.device))
 
         # carry over the bias, if it exists
 
