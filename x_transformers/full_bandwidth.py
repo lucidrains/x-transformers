@@ -241,6 +241,7 @@ class FullBandwidth(Module):
         transitions: dict | None = None,
         feedback_pass_weight = 1.,
         ignore_index = -100,
+        pad_value = 0,
         jitter_noise_delta = 0.02, # paper used sigma = 0.02
         dynamic_rollout_loss_weight = False,
         dynamic_loss_decay = 0.5,
@@ -255,6 +256,7 @@ class FullBandwidth(Module):
         self.net = net
         self.temporal_parallel_passes = temporal_parallel_passes
         self.ignore_index = ignore_index
+        self.pad_value = pad_value
         self.jitter_noise_delta = jitter_noise_delta
         self.feedback_pass_weight = feedback_pass_weight
         self.dynamic_rollout_loss_weight = dynamic_rollout_loss_weight
@@ -440,6 +442,9 @@ class FullBandwidth(Module):
             )
 
         inp, target = (token_ids[:, :-1], token_ids[:, 1:]) if return_loss else (token_ids, None)
+
+        # ignore ids are labels, not vocabulary entries. same replacement as AutoregressiveWrapper
+        inp = torch.where(inp == self.ignore_index, self.pad_value, inp)
 
         # first pass (standard)
 
