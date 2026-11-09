@@ -552,6 +552,70 @@ def test_qkvo_rope_cache():
 
     assert torch.allclose(out_parallel, out_seq, atol = 1e-5)
 
+def test_qkvo_rope_leaves_memory_values_unrotated():
+    torch.manual_seed(0)
+
+    dim, seq_len, num_mem_kv = 16, 5, 2
+
+    attn = Attention(
+        dim = dim,
+        dim_head = dim,
+        heads = 1,
+        causal = True,
+        qkvo_rope = True,
+        num_mem_kv = num_mem_kv
+    )
+
+    for parameter in attn.to_v.parameters():
+        nn.init.zeros_(parameter)
+
+    rotary = RotaryEmbedding(dim)
+    freqs, _ = rotary(torch.arange(seq_len))
+    x = torch.randn(2, seq_len, dim)
+
+    out = attn(x, rotary_pos_emb = (freqs, None))
+
+    q = apply_rotary_pos_emb(attn.split_q_heads(attn.to_q(x)), freqs)
+    k = apply_rotary_pos_emb(attn.split_k_heads(attn.to_k(x)), freqs)
+    v = apply_rotary_pos_emb(attn.split_v_heads(attn.to_v(x)), freqs)
+    k = torch.cat((attn.mem_k.unsqueeze(0).expand(x.shape[0], -1, -1, -1), k), dim = -2)
+    v = torch.cat((attn.mem_v.unsqueeze(0).expand(x.shape[0], -1, -1, -1), v), dim = -2)
+
+    _, intermediates = attn.attend(q, k, v, causal = True)
+    weights = intermediates.post_softmax_attn
+    mem_out = torch.einsum('b h i j, b h j d -> b h i d', weights[..., :num_mem_kv], v[..., :num_mem_kv, :])
+    content_out = torch.einsum('b h i j, b h j d -> b h i d', weights[..., num_mem_kv:], v[..., num_mem_kv:, :])
+    content_out = apply_rotary_pos_emb(content_out, freqs, inverse = True)
+    expected = attn.merge_heads(mem_out + content_out)
+
+    assert mem_out.abs().max() > 0
+    assert torch.allclose(out, expected, atol = 1e-5)
+
+    rotated_memory = attn.merge_heads(apply_rotary_pos_emb(mem_out, freqs, inverse = True) + content_out)
+    assert not torch.allclose(out, rotated_memory, atol = 1e-3)
+
+    model = TransformerWrapper(
+        num_tokens = 40,
+        max_seq_len = 16,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            rotary_pos_emb = True,
+            qkvo_rope = True,
+            attn_num_mem_kv = 2
+        )
+    ).eval()
+
+    tokens = torch.randint(0, 40, (2, 6))
+    full = model(tokens)
+    first, cache = model(tokens[:, :4], return_intermediates = True)
+    second, cache = model(tokens[:, 4:5], cache = cache, return_intermediates = True, input_not_include_cache = True)
+    third = model(tokens[:, 5:], cache = cache, input_not_include_cache = True)
+    cached = torch.cat((first, second, third), dim = 1)
+
+    assert torch.allclose(full, cached, atol = 1e-5)
+
 @param('flash', (True, False))
 def test_custom_alibi_across_heads(flash: bool):
     model = Decoder(
