@@ -443,7 +443,6 @@ class FullBandwidth(Module):
 
         inp, target = (token_ids[:, :-1], token_ids[:, 1:]) if return_loss else (token_ids, None)
 
-        # ignore ids are labels, not vocabulary entries. same replacement as AutoregressiveWrapper
         inp = torch.where(inp == self.ignore_index, self.pad_value, inp)
 
         # first pass (standard)

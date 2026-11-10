@@ -992,6 +992,13 @@ def apply_rotary_pos_emb(t, freqs, scale = 1, inverse = False):
 
     return out.type(orig_dtype)
 
+def apply_rotary_pos_emb_inverse(t, freqs, rotate_num_heads = None):
+    if not exists(rotate_num_heads) or rotate_num_heads == size(t, 'b [h] n d'):
+        return apply_rotary_pos_emb(t, freqs, inverse = True)
+
+    t_rest, t_rot = t[:, :-rotate_num_heads], t[:, -rotate_num_heads:]
+    return cat((t_rest, apply_rotary_pos_emb(t_rot, freqs, inverse = True)), dim = 1)
+
 class PolarEmbedding(Module):
     """ https://arxiv.org/abs/2509.10534 """
 
@@ -2618,10 +2625,7 @@ class Attention(Module):
 
         # i, j determined for relative positional bias, excluding memory key / values
 
-        i, j = tuple(t.shape[-2] for t in (q, k))
-
-        # learned memory and external key / values are concatenated after rotary
-        qkvo_static_prefix = 0
+        i, j = size(q, 'b h [i] d'), size(k, 'b h [j] d')
 
         # maybe append memory key / values
 
@@ -2634,7 +2638,6 @@ class Attention(Module):
 
             k = cat((mem_k, k), dim = -2)
             v = cat((mem_v, v), dim = -2)
-            qkvo_static_prefix += num_mem_kv
 
             if exists(input_mask):
                 input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
@@ -2655,7 +2658,6 @@ class Attention(Module):
 
             k = cat((added_k, k), dim = -2)
             v = cat((added_v, v), dim = -2)
-            qkvo_static_prefix += added_kv_len
 
             if (exists(input_mask) or exists(additional_key_value_mask)):
 
@@ -2739,7 +2741,11 @@ class Attention(Module):
 
         # attention is all we need
 
-        split_qkvo_values = self.qkvo_rope and exists(rotary_pos_emb) and qkvo_static_prefix > 0
+        # memory and external kv are appended after rotary
+
+        is_qkvo = self.qkvo_rope and exists(rotary_pos_emb)
+        num_unrotated_kv = size(k, 'b h [n] d') - j if is_qkvo else 0
+        split_qkvo_values = num_unrotated_kv > 0
 
         out, intermediates = self.attend(
             q, k, v,
@@ -2751,17 +2757,13 @@ class Attention(Module):
             sink_logits = sink_logits,
             flash_pack_seq_kwargs = flash_pack_seq_kwargs,
             causal = causal,
-            static_value_prefix = qkvo_static_prefix if split_qkvo_values else 0,
+            num_unrotated_kv = num_unrotated_kv,
         )
 
         # inverse-rotate only values that were rotated forward
-        if split_qkvo_values:
-            if partial_rotate_heads:
-                content_rest, content_rot = out[:, :-rotate_num_heads], out[:, -rotate_num_heads:]
-                content = cat((content_rest, apply_rotary_pos_emb(content_rot, q_freqs, inverse = True)), dim = 1)
-            else:
-                content = apply_rotary_pos_emb(out, q_freqs, inverse = True)
 
+        if split_qkvo_values:
+            content = apply_rotary_pos_emb_inverse(out, q_freqs, rotate_num_heads)
             out = intermediates.value_prefix_out + content
 
         # scaled sink gain
@@ -2774,12 +2776,8 @@ class Attention(Module):
         if self.laser:
             out = log(out)
 
-        if self.qkvo_rope and exists(rotary_pos_emb) and not split_qkvo_values:
-            if partial_rotate_heads:
-                out_rest, out_rot = out[:, :-rotate_num_heads], out[:, -rotate_num_heads:]
-                out = cat((out_rest, apply_rotary_pos_emb(out_rot, q_freqs, inverse = True)), dim = 1)
-            else:
-                out = apply_rotary_pos_emb(out, q_freqs, inverse = True)
+        if is_qkvo and not split_qkvo_values:
+            out = apply_rotary_pos_emb_inverse(out, q_freqs, rotate_num_heads)
 
         # store the values for resformer
 
