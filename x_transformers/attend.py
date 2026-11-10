@@ -145,7 +145,7 @@ def one_hot_straight_through(logits, temperature = 1., dim = -1):
     one_hot = torch.zeros_like(logits).scatter(dim, one_hot_indices, 1.)
 
     soft_attn = (logits / temperature).softmax(dim = dim)
-    return one_hot + soft_attn - soft_attn.detach()
+    return one_hot + (soft_attn - soft_attn.detach())
 
 # sparse topk attention - only keep topk attn logits for softmax
 # optional straight through with masked out logits by setting `attn_sparse_topk_straight_through = True`
@@ -172,7 +172,7 @@ def sparse_topk_attn(
         return topk_attn
 
     soft_attn = (orig_logits / temperature).softmax(dim = dim)
-    return topk_attn.detach() + soft_attn - soft_attn.detach()
+    return topk_attn.detach() + (soft_attn - soft_attn.detach())
 
 # functions for creating causal mask
 # need a special one for onnx cpu (no support for .triu)
