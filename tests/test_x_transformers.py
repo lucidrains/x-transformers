@@ -3556,6 +3556,38 @@ def test_full_bandwidth_recirculation():
     sampled = fb.generate(prompts, seq_len = 16)
     assert sampled.shape == (2, 16)
 
+def test_full_bandwidth_ignore_index():
+    from x_transformers.full_bandwidth import FullBandwidth
+
+    torch.manual_seed(0)
+
+    model = TransformerWrapper(
+        num_tokens = 32,
+        max_seq_len = 16,
+        tie_embedding = True,
+        post_emb_norm = True,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            depth_scale_residual = True
+        )
+    )
+
+    fb = FullBandwidth(model, temporal_parallel_passes = 2, transition = 'recycler')
+
+    tokens = torch.randint(0, 32, (2, 8))
+    padded = tokens.clone()
+    padded[:, -2:] = -100
+
+    loss = fb(padded)
+    assert torch.isfinite(loss)
+    loss.backward()
+
+    # right-padding must not change the loss on the kept targets
+    unpadded_loss = fb(tokens[:, :-2])
+    assert torch.allclose(loss, unpadded_loss, atol = 1e-5)
+
 def test_variable_width_schedule():
     from x_transformers import variable_width_schedule
 
