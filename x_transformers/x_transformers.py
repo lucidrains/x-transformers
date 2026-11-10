@@ -2620,6 +2620,9 @@ class Attention(Module):
 
         i, j = tuple(t.shape[-2] for t in (q, k))
 
+        # learned memory and external key / values are concatenated after rotary
+        qkvo_static_prefix = 0
+
         # maybe append memory key / values
 
         if num_mem_kv > 0:
@@ -2631,6 +2634,7 @@ class Attention(Module):
 
             k = cat((mem_k, k), dim = -2)
             v = cat((mem_v, v), dim = -2)
+            qkvo_static_prefix += num_mem_kv
 
             if exists(input_mask):
                 input_mask = pad_at_dim(input_mask, (self.num_mem_kv, 0), dim = -1, value = True)
@@ -2651,6 +2655,7 @@ class Attention(Module):
 
             k = cat((added_k, k), dim = -2)
             v = cat((added_v, v), dim = -2)
+            qkvo_static_prefix += added_kv_len
 
             if (exists(input_mask) or exists(additional_key_value_mask)):
 
@@ -2734,6 +2739,8 @@ class Attention(Module):
 
         # attention is all we need
 
+        split_qkvo_values = self.qkvo_rope and exists(rotary_pos_emb) and qkvo_static_prefix > 0
+
         out, intermediates = self.attend(
             q, k, v,
             mask = final_attn_mask,
@@ -2744,7 +2751,18 @@ class Attention(Module):
             sink_logits = sink_logits,
             flash_pack_seq_kwargs = flash_pack_seq_kwargs,
             causal = causal,
+            static_value_prefix = qkvo_static_prefix if split_qkvo_values else 0,
         )
+
+        # inverse-rotate only values that were rotated forward
+        if split_qkvo_values:
+            if partial_rotate_heads:
+                content_rest, content_rot = out[:, :-rotate_num_heads], out[:, -rotate_num_heads:]
+                content = cat((content_rest, apply_rotary_pos_emb(content_rot, q_freqs, inverse = True)), dim = 1)
+            else:
+                content = apply_rotary_pos_emb(out, q_freqs, inverse = True)
+
+            out = intermediates.value_prefix_out + content
 
         # scaled sink gain
 
@@ -2756,7 +2774,7 @@ class Attention(Module):
         if self.laser:
             out = log(out)
 
-        if self.qkvo_rope and exists(rotary_pos_emb):
+        if self.qkvo_rope and exists(rotary_pos_emb) and not split_qkvo_values:
             if partial_rotate_heads:
                 out_rest, out_rot = out[:, :-rotate_num_heads], out[:, -rotate_num_heads:]
                 out = cat((out_rest, apply_rotary_pos_emb(out_rot, q_freqs, inverse = True)), dim = 1)
