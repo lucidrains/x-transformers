@@ -65,9 +65,11 @@ def compact(arr):
 def l1norm(t, dim = -1, eps = 1e-8):
     return F.normalize(t, p = 1, dim = dim, eps = eps)
 
-@torch.jit.script
 def softclamp(t: Tensor, value: float):
     return (t / value).tanh() * value
+
+if hasattr(torch.jit, 'script'): # removed in pytorch 2.16
+    softclamp = torch.jit.script(softclamp)
 
 def pack_one(t, pattern):
     return pack([t], pattern)
