@@ -2364,8 +2364,9 @@ class Attention(Module):
         self.qkvo_rope = qkvo_rope
 
         # whether parent can kv cache
+        # data dependent alibi needs the forget gates of all previous tokens, which are not cached
 
-        self.can_cache_kv = not selective
+        self.can_cache_kv = not selective and not data_dependent_alibi
 
         # init output projection 0
 
@@ -3558,8 +3559,11 @@ class AttentionLayers(Module):
             ]))
 
         # determine whether can cache kv
+        # token shifting needs the previous tokens' features, which are not cached
 
-        self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
+        no_token_shift = all([layer_shift_tokens == 0 for layer_shift_tokens in shift_tokens])
+
+        self.can_cache_kv = no_token_shift and all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
 
     def attn_qk_clip_(
         self,
