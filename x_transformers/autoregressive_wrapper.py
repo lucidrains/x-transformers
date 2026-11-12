@@ -590,9 +590,15 @@ class AutoregressiveWrapper(Module):
 
         # if there are prepended embeds, excise it out
 
+        prepend_len = 0
+
         if exists(prepend_embeds):
             prepend_len = prepend_embeds.shape[1]
             logits = logits[:, prepend_len:]
+
+            if add_next_embed_loss:
+                next_embed_pred = next_embed_pred[:, prepend_len:]
+                init_embeds = init_embeds[:, prepend_len:]
 
         # take all tokens but the last
 
@@ -608,8 +614,8 @@ class AutoregressiveWrapper(Module):
             exit_logits = stack(cache.exit_logits, dim = 1)
             pred_logits = stack(cache.all_pred_logits, dim = 1)
 
-            exit_logits = exit_logits[..., :-1, :]
-            pred_logits = pred_logits[..., :-1, :]
+            exit_logits = exit_logits[..., prepend_len:-1, :]
+            pred_logits = pred_logits[..., prepend_len:-1, :]
 
             exit_logits = rearrange(exit_logits, '... 1 -> ...')
 
