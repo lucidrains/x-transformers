@@ -335,93 +335,91 @@ class ContinuousAutoregressiveWrapper(Module):
         **kwargs
     ):
         assert rollout_steps > 1
-
-        steps = rollout_steps
-
-        device = x.device
-
-        # assert inputs
-
         assert 'prepend_embeds' not in kwargs
 
-        # lens
-
+        steps = rollout_steps
+        batch, seq_len, device = *x.shape[:2], x.device
         lens = kwargs.pop('lens', None)
-
-        if exists(lens):
-            assert 'mask' not in kwargs, 'either `mask` or `lens` passed in, but not both'
-            seq_len, device = inp.shape[1], inp.device
-            seq_arange = arange(seq_len, device = device)
-            mask = einx.less('j, i -> i j', seq_arange, lens)
-            kwargs['mask'] = mask
-
-        if not exists(lens):
-            batch, seq_len = x.shape[:2]
-            lens = torch.full((batch,), seq_len, device = device)
-
-        # handle mask manually
-
         mask = kwargs.pop('mask', None)
 
-        # pick a random range for each batch sample and aligh the sequence to the right for rollout loss
+        assert not (exists(lens) and exists(mask)), 'either `mask` or `lens` passed in, but not both'
+        seq_arange = arange(seq_len, device = device)
 
-        valid_tokens_for_rollout = (lens - steps).clamp(min = 0)
+        if exists(lens):
+            mask = einx.less('j, i -> i j', seq_arange, lens)
+        elif exists(mask):
+            lens = (mask.long() * (seq_arange + 1)).amax(dim = -1)
+        else:
+            lens = torch.full((batch,), seq_len, device = device)
+            mask = torch.ones((batch, seq_len), device = device, dtype = torch.bool)
+
+        # The last prefix query must be valid: masking attention keys does not
+        # remove its residual input. Keep a full horizon and a valid label.
+        if seq_len <= steps:
+            raise ValueError('rollout requires at least one sequence with a nonempty prefix before its targets')
+
+        prefix_positions = arange(seq_len - steps, device = device) + 1
+        has_valid_targets = torch.zeros_like(mask[:, :-steps])
+
+        for offset in range(1, steps + 1):
+            has_valid_targets |= mask[:, offset:seq_len - steps + offset]
+
+        eligible = mask[:, :-steps] & has_valid_targets
+        eligible &= prefix_positions[None, :] + steps <= lens[:, None]
+        valid_tokens_for_rollout = eligible.sum(dim = -1)
         valid_sample = valid_tokens_for_rollout > 0
 
-        x = x[valid_sample] # remove invalid sequence (lens less than rollout steps)
+        if not valid_sample.any():
+            raise ValueError('rollout requires at least one sequence with a nonempty prefix before its targets')
 
-        if exists(mask):
-            mask = mask[valid_sample]
-
+        x = x[valid_sample]
+        mask = mask[valid_sample]
+        eligible = eligible[valid_sample]
+        valid_tokens_for_rollout = valid_tokens_for_rollout[valid_sample]
         batch = x.shape[0]
-        seq_start_pos = (torch.rand((batch,), device = device) * valid_tokens_for_rollout).floor().long()
 
-        batch_arange = torch.arange(batch, device = device)
-        batch_arange = rearrange(batch_arange, 'b -> b 1')
-
-        # crop out sequence to use
-
-        seq_end_pos = seq_start_pos + steps
+        choices = (torch.rand((batch,), device = device) * valid_tokens_for_rollout).floor().long()
+        selected = eligible & (eligible.long().cumsum(dim = -1) == choices[:, None] + 1)
+        prefix_lens = selected.long().argmax(dim = -1) + 1
+        seq_end_pos = prefix_lens + steps
         max_end_pos = seq_end_pos.amax().item()
-        x = x[:, :max_end_pos]
 
-        x = align_right(x, seq_end_pos)
-
-        # get the input
+        x = align_right(x[:, :max_end_pos], seq_end_pos)
+        mask = align_right(mask[:, :max_end_pos], seq_end_pos, pad_id = False)
+        seq_start_pos = max_end_pos - seq_end_pos
 
         inp, targets = x[:, :-steps], x[:, -steps:]
-
-        # maybe rollout
-
-        cache = None
+        inp_mask, target_mask = mask[:, :-steps], mask[:, -steps:]
         preds = []
 
         for _ in range(steps):
-
-            out, cache = self.net(
+            out = self.net(
                 inp,
+                mask = inp_mask,
                 seq_start_pos = seq_start_pos,
-                return_intermediates = True,
                 **kwargs
             )
-
             last_pred = out[..., -1:, :]
 
             if self.probabilistic:
                 mean, var = last_pred
-                inp = sample_from_mean_variance(mean, var)
+                next_input = sample_from_mean_variance(mean, var)
             else:
-                inp = last_pred
+                next_input = last_pred
 
+            # Training must retain the entire prefix and preceding predictions.
+            inp = cat((inp, next_input), dim = 1)
+            inp_mask = F.pad(inp_mask, (0, 1), value = True)
             preds.append(last_pred)
 
-        # stack for predictions
-
         preds = cat(preds, dim = 1)
-
-        # loss
-
         loss = self.loss_fn(preds, targets)
+
+        if not target_mask.all():
+            assert loss.ndim > 1, 'loss should not be reduced if mask is passed in'
+            loss = loss.masked_fill(~target_mask[..., None], 0.)
+            den = target_mask.sum().clamp(min = 1) * loss.shape[-1]
+            return loss.sum() / den
 
         return loss.mean()
 
