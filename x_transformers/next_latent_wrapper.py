@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import namedtuple
 from copy import deepcopy
+from functools import partial
 
 import torch
 import torch.nn.functional as F
@@ -647,12 +648,23 @@ class NextLatentWrapper(Module):
             rollout_next_token_embeds = padded_token_embeds[:, 1:].unfold(1, seq - 1, 1)
             rollout_next_token_embeds = rearrange(rollout_next_token_embeds, 'b r d n -> r b n d')
 
-            # frozen copy of output head for kl loss
+            # frozen output projection for kl loss
 
             if self.has_kl_loss:
-                frozen_to_logits = deepcopy(self.net.to_logits)
-                for p in frozen_to_logits.parameters():
-                    p.requires_grad_(False)
+                output_head = self.net.to_logits
+
+                if type(output_head) is nn.Linear:
+                    weight = output_head.weight.detach()
+                    bias = output_head.bias.detach() if exists(output_head.bias) else None
+                    frozen_to_logits = partial(F.linear, weight = weight, bias = bias)
+                elif not isinstance(output_head, Module) and hasattr(self.net, 'tie_embedding_scale'):
+                    weight = self.net.token_emb.emb.weight.detach()
+                    scale = self.net.tie_embedding_scale
+                    frozen_to_logits = lambda latent: F.linear(latent, weight) * scale
+                else:
+                    frozen_to_logits = deepcopy(output_head)
+                    for p in frozen_to_logits.parameters():
+                        p.requires_grad_(False)
 
             curr_latent = hidden_states[:, :-1]
 
