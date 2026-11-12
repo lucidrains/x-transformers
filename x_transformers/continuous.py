@@ -46,7 +46,7 @@ def batch_masked_mean(t, mask):
     t = einx.where('b n, b n d, -> b n d', mask, t, 0.)
 
     num = reduce(t, 'b n d -> b', 'sum')
-    den = mask.sum(dim = -1)
+    den = mask.sum(dim = -1) * t.shape[-1]
 
     masked_average = num / den.clamp(min = 1.)
     return masked_average
