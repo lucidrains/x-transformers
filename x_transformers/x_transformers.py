@@ -4712,6 +4712,29 @@ class TransformerWrapper(Module):
         def _attn_layers_forward(inp, cache = None, **kwargs):
             return self.attn_layers(inp, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, deep_embeds_and_ids = deep_embed_and_ids, return_hiddens = True, transform_block_inputs = transform_block_inputs, **kwargs)
 
+        def project_logits(hiddens):
+            combine_mixture = None
+
+            if exists(self.to_mixture):
+                combine_mixture = self.combine_mixture(hiddens).softmax(dim = -1)
+                hiddens = self.to_mixture(hiddens)
+
+            if self.has_multiple_heads:
+                logits = tuple(fn(hiddens, **to_logits_kwargs) for fn in self.to_logits)
+            else:
+                logits = self.to_logits(hiddens, **to_logits_kwargs)
+
+            if self.sigsoftmax_logits:
+                logits = logits + logits.sigmoid().log()
+
+            if exists(combine_mixture):
+                with autocast(logits.device.type, enabled = False):
+                    prob = logits.softmax(dim = -1)
+                    mos = einsum('... k d, ... k -> ... d', prob, combine_mixture)
+                    logits = log(mos)
+
+            return logits
+
         # maybe recycling
 
         if not (self.recycling or self.looped):
@@ -4808,7 +4831,7 @@ class TransformerWrapper(Module):
                 # predict the logit for this recurrent step
 
                 if should_pred_logits:
-                    layer_pred_logits = self.to_logits(attended)
+                    layer_pred_logits = project_logits(attended)
                     all_pred_logits.append(layer_pred_logits)
 
                 x = attended
@@ -4909,38 +4932,13 @@ class TransformerWrapper(Module):
 
             intermediates.attn_pooled_tokens = attn_pooled_tokens
 
-        # handle expansion to mixture if needed (for mixture of softmax)
-
-        combine_mixture = None
-
-        if exists(self.to_mixture):
-            combine_mixture = self.combine_mixture(x).softmax(dim = -1)
-            x = self.to_mixture(x)
-
         # projecting to logits
 
-        if not return_embeddings:
-            if self.has_multiple_heads:
-                logits = tuple(fn(x, **to_logits_kwargs) for fn in self.to_logits)
-            else:
-                logits = self.to_logits(x, **to_logits_kwargs)
-
-        # maybe sig softmax
-
-        if self.sigsoftmax_logits:
-            logits = logits + logits.sigmoid().log()
-
-        # handle maybe combine mixture
-
-        if exists(combine_mixture):
-            with autocast(logits.device.type, enabled = False):
-                prob = logits.softmax(dim = -1)
-                mos = einsum('... k d, ... k -> ... d', prob, combine_mixture)
-                logits = log(mos)
+        logits = project_logits(x) if not return_embeddings else None
 
         # maybe squeeze out last dimension of logits
 
-        if self.squeeze_out_last_dim:
+        if self.squeeze_out_last_dim and exists(logits):
             logits = tuple((rearrange(t, '... 1 -> ...') if t.shape[-1] == 1 else t) for t in cast_tuple(logits))
 
             if not self.has_multiple_heads:
