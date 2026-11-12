@@ -522,18 +522,19 @@ class AutoregressiveWrapper(Module):
             if not exists(eos_token):
                 continue
 
-            is_eos_tokens = (out == eos_token)
+            is_eos_tokens = (out[:, t:] == eos_token)
 
             if is_eos_tokens.any(dim = -1).all():
                 break
 
-        if exists(eos_token):
-            # mask out everything after the eos tokens
+        out = out[:, t:]
+
+        if exists(eos_token) and out.shape[-1] > 0:
+            # mask out everything after generated eos tokens
+            is_eos_tokens = (out == eos_token)
             shifted_is_eos_tokens = F.pad(is_eos_tokens, (1, -1))
             mask = shifted_is_eos_tokens.float().cumsum(dim = -1) >= 1
             out = out.masked_fill(mask, self.pad_value)
-
-        out = out[:, t:]
 
         out, = unpack(out, ps, '* n')
 
