@@ -48,6 +48,57 @@ def test_disable_autocast_uses_tensor_device():
 
     assert out.dtype == torch.float32
 
+@param('kv_heads, mask_kind, scale', ((2, 'none', None), (1, 'padding', None), (2, 'causal', None), (2, 'none', -0.125)))
+def test_half_attention_scaled_scores_do_not_overflow(kv_heads, mask_kind, scale):
+    q = torch.full((1, 2, 2, 64), 50., dtype = torch.float16, requires_grad = True)
+    k = torch.full((1, kv_heads, 2, 64), 50., dtype = q.dtype, requires_grad = True)
+    v = torch.tensor([1., 3.], dtype = q.dtype).view(1, 1, 2, 1).expand(1, kv_heads, 2, 64).clone().requires_grad_()
+    mask = torch.tensor([[True, False]]) if mask_kind == 'padding' else None
+    causal = mask_kind == 'causal'
+
+    out, intermediates = Attend(causal = causal, scale = scale)(q, k, v, mask = mask)
+    reference_inputs = tuple(t.detach().double().requires_grad_() for t in (q, k, v))
+    q_ref, k_ref, v_ref = reference_inputs
+    k_ref, v_ref = tuple(t.repeat_interleave(2 // kv_heads, dim = 1) for t in (k_ref, v_ref))
+    reference_mask = mask[:, None, None, :] if exists(mask) else None
+    reference = torch.nn.functional.scaled_dot_product_attention(q_ref, k_ref, v_ref, attn_mask = reference_mask, is_causal = causal, scale = scale)
+
+    assert out.dtype == q.dtype
+    assert intermediates.qk_similarities.dtype == q.dtype
+    assert torch.isfinite(intermediates.qk_similarities).all()
+    torch.testing.assert_close(out, reference.to(q.dtype))
+    grads = torch.autograd.grad(out.sum(), (q, k, v))
+    expected_grads = torch.autograd.grad(reference.sum(), reference_inputs)
+    for actual, expected in zip(grads, expected_grads):
+        torch.testing.assert_close(actual, expected.to(actual.dtype))
+
+
+@param('input_dtype', (torch.float16, torch.float32))
+@param('autocast_dtype', (torch.float16, torch.bfloat16))
+def test_half_attention_scores_under_autocast(input_dtype, autocast_dtype):
+    q = torch.full((1, 2, 2, 64), 50., dtype = input_dtype, requires_grad = True)
+    k = q.detach().clone().requires_grad_()
+    v = torch.tensor([1., 3.], dtype = input_dtype).view(1, 1, 2, 1).expand_as(q).clone().requires_grad_()
+    with torch.autocast('cpu', dtype = autocast_dtype):
+        out, intermediates = Attend()(q, k, v)
+    assert out.dtype == autocast_dtype
+    assert intermediates.qk_similarities.dtype == autocast_dtype
+    torch.testing.assert_close(out, torch.full_like(out, 2.))
+    grads = torch.autograd.grad(out.sum(), (q, k, v))
+    assert all(torch.isfinite(g).all() for g in grads)
+
+
+def test_half_attention_preserves_small_query_scores():
+    q = torch.full((1, 2, 2, 64), 2 ** -24, dtype = torch.float16)
+    k = torch.full_like(q, torch.finfo(q.dtype).max)
+    v = torch.ones_like(q)
+    out, intermediates = Attend()(q, k, v)
+    reference_scores = (q.double() @ k.double().transpose(-1, -2)) / 8
+    # Scaling q in half precision before the dot would incorrectly erase it.
+    torch.testing.assert_close(intermediates.qk_similarities, reference_scores.half())
+    torch.testing.assert_close(out, v)
+
+
 @pytest.mark.skipif(
     not hasattr(torch, 'xpu') or not torch.xpu.is_available(),
     reason = 'XPU is not available'

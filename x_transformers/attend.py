@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
+from contextlib import nullcontext
 from typing import Tuple, Callable
 
 import torch
@@ -555,11 +556,26 @@ class Attend(Module):
         kv_einsum_eq = 'b j d' if k.ndim == 3 else 'b h j d'
 
         if not self.l2_distance:
-            sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k)
-        else:
-            sim = -qk_l2_dist_squared(q, k)
+            autocast_available = torch.amp.autocast_mode.is_autocast_available(device.type)
+            autocast_enabled = autocast_available and torch.is_autocast_enabled(device.type)
+            upcast_qk = q.dtype == k.dtype == torch.float16
 
-        sim = sim * scale
+            if autocast_enabled:
+                autocast_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+                upcast_qk = q.dtype in autocast_dtypes and k.dtype in autocast_dtypes and torch.get_autocast_dtype(device.type) == torch.float16
+
+            if upcast_qk:
+                # The unscaled dot may overflow half precision even when the
+                # scaled score fits. Keep both operations in float32, then
+                # restore the score dtype before the remaining attention ops.
+                context = torch.autocast(device.type, enabled = False) if autocast_available else nullcontext()
+                with context:
+                    sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q.float(), k.float()) * scale
+                sim = sim.to(torch.float16)
+            else:
+                sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k) * scale
+        else:
+            sim = -qk_l2_dist_squared(q, k) * scale
 
         if exists(prev_attn):
             sim = sim + prev_attn
