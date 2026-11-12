@@ -657,11 +657,9 @@ class AutoregressiveWrapper(Module):
 
             # weighted losses
 
-            ignore_mask = targets != ignore_index
-
             losses = losses * exit_probs.detach()
 
-            loss = masked_mean(losses, ignore_mask)
+            loss = masked_mean(losses.sum(dim = 1), target != ignore_index)
 
             # total loss
 
