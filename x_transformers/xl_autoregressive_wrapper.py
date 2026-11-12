@@ -393,6 +393,8 @@ class XLAutoregressiveWrapper(Module):
             for path in self.ttt_low_rank_paths_map.keys()
         )
 
+        self.ttt_paths_map = tuple(dict.fromkeys(self.ttt_paths_map))
+
         # gather all unique wrappers
 
         self.ttt_wrappers = dict()
