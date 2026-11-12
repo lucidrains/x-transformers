@@ -53,9 +53,10 @@ def gumbel_sample(logits, temperature = 1., eps = 1e-6):
 # function for modifying all the cached key / values
 
 def modify_cached_kv(cache, fn):
+    """Transform cached tensors while preserving absent MLA rotary subheads."""
     for inter in cache.attn_intermediates:
         if inter.layer_type == 'a':
-            inter.cached_kv = [fn(t) for t in inter.cached_kv]
+            inter.cached_kv = [fn(t) if exists(t) else None for t in inter.cached_kv]
 
 # for variable lengthed prefixes
 
@@ -468,9 +469,7 @@ class AutoregressiveWrapper(Module):
                 x = out[:, -max_seq_len:]
 
                 if exists(cache):
-                    for inter in cache.attn_intermediates:
-                        if inter.layer_type == 'a':
-                            inter.cached_kv = [t[..., -(max_seq_len - 1):, :] for t in inter.cached_kv]
+                    modify_cached_kv(cache, lambda t: t[..., -(max_seq_len - 1):, :])
 
             logits, new_cache = self.net(
                 x,
