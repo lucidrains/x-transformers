@@ -173,6 +173,16 @@ class ContinuousTransformerWrapper(Module):
         if exists(cache) and input_not_include_cache:
             seq_pos_offset = cache.cache_length
 
+        if exists(seq_start_pos):
+            mask_len = seq + seq_pos_offset
+
+            if exists(cache) and input_not_include_cache:
+                mask_len -= self.memory_tokens.shape[0] if self.has_memory_tokens else 0
+                mask_len -= prepend_embeds.shape[1] if exists(prepend_embeds) else 0
+
+            left_pad_mask = arange(mask_len, device = device) >= seq_start_pos[..., None]
+            mask = left_pad_mask if not exists(mask) else mask & left_pad_mask
+
         # project in + positional embedding
 
         x = self.project_in(x)
@@ -212,6 +222,25 @@ class ContinuousTransformerWrapper(Module):
 
         # attention layers
 
+        if exists(seq_start_pos) and exists(cache):
+            cache_age = kwargs.get('cache_age', 1)
+
+            if cache_age > 0:
+                query_len = min(cache_age, x.shape[1])
+                if mask.shape[-1] > cache.cache_length + query_len:
+                    mask = cat((mask[:, :cache.cache_length], mask[:, -query_len:]), dim = -1)
+            elif input_not_include_cache:
+                prefix_len = x.shape[1] - seq
+                mask = cat((mask[:, :cache.cache_length], mask[:, :prefix_len], mask[:, cache.cache_length:]), dim = -1)
+            else:
+                past_mask = mask[:, :cache.cache_length]
+                mask = cat((past_mask, mask), dim = -1)
+
+        if exists(seq_start_pos) and exists(kwargs.get('self_attn_kv_mask')):
+            key_mask = kwargs['self_attn_kv_mask']
+            memory_len = max(key_mask.shape[-1] - mask.shape[-1], 0)
+            kwargs['self_attn_kv_mask'] = key_mask & pad_at_dim(mask, (memory_len, 0), dim = -1, value = True)
+
         x, intermediates = self.attn_layers(x, mask = mask, mems = mems, mem_masks = mem_masks, cache = cache, input_not_include_cache = input_not_include_cache, seq_pos_offset = seq_pos_offset, return_hiddens = True, **kwargs)
 
         # splice out memory tokens
@@ -221,6 +250,9 @@ class ContinuousTransformerWrapper(Module):
             intermediates.memory_tokens = m
 
         if self.average_pool_embed:
+            if exists(seq_start_pos):
+                orig_mask = mask[..., -x.shape[1]:]
+
             x = masked_mean(x, mask = orig_mask, dim = 1)
 
         # maybe linear project out
