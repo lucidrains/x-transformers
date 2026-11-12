@@ -2680,6 +2680,9 @@ class Attention(Module):
 
         if exists(attn_mask):
             assert 2 <= attn_mask.ndim <= 4, 'attention mask must have greater than 2 dimensions but less than or equal to 4'
+            # Extend token-only masks over learned memory, preserving complete and broadcast masks.
+            if num_mem_kv > 0 and not exists(additional_key_values) and attn_mask.shape[-1] == j and j != 1:
+                attn_mask = pad_at_dim(attn_mask, (num_mem_kv, 0), dim = -1, value = True)
             if attn_mask.ndim == 2:
                 attn_mask = rearrange(attn_mask, 'i j -> 1 1 i j')
             elif attn_mask.ndim == 3:
