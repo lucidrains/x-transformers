@@ -642,7 +642,8 @@ class AutoregressiveWrapper(Module):
 
             exit_loss_mask = (targets[:, 1:] != ignore_index)
 
-            exit_loss = exit_loss[exit_loss_mask].mean()
+            exit_loss = exit_loss[exit_loss_mask]
+            exit_loss = exit_loss.mean() if exit_loss.numel() else exit_loss.sum()
 
             # exit probs for weighting the loss
 
@@ -676,8 +677,10 @@ class AutoregressiveWrapper(Module):
             loss = loss_fn(
                 rearrange(logits, 'b n c -> b c n'),
                 target,
-                ignore_index = ignore_index
+                ignore_index = ignore_index,
+                reduction = 'sum'
             )
+            loss = loss / (target != ignore_index).sum().clamp(min = 1)
 
         if add_attn_z_loss:
             loss = loss + cache.attn_z_loss
@@ -688,7 +691,8 @@ class AutoregressiveWrapper(Module):
             cont_targets = init_embeds[:, 1:].detach()
 
             cont_loss = F.l1_loss(embed_pred, cont_targets, reduction = 'none')
-            cont_loss = cont_loss[mask].mean()
+            cont_loss = cont_loss[mask]
+            cont_loss = cont_loss.mean() if cont_loss.numel() else cont_loss.sum()
 
             loss = loss + cont_loss * self.next_embed_loss_weight
 
