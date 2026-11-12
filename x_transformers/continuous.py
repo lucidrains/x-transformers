@@ -156,7 +156,7 @@ class ContinuousTransformerWrapper(Module):
         seq_start_pos = None,
         **kwargs
     ):
-        batch, seq, orig_mask, device = *x.shape[:2], mask, x.device
+        batch, seq, device = *x.shape[:2], x.device
 
         # maybe seq lengths passed in
 
@@ -165,6 +165,8 @@ class ContinuousTransformerWrapper(Module):
             seq_arange = arange(seq, device = device)
 
             mask = einx.less('j, i -> i j', seq_arange, lens)
+
+        orig_mask = mask
 
         # take care of position embedding offsets in the presence of cache and sequence is less than cache length (not full sequence)
 
