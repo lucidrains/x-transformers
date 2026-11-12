@@ -679,7 +679,7 @@ class XLAutoregressiveWrapper(Module):
 
         split_x = x.split(max_seq_len, dim = -1)
         split_labels = labels.split(max_seq_len, dim = -1)
-        loss_weights = tuple((t.shape[-1] / seq_len) for t in split_x)
+        valid_labels_per_batch = (labels != ignore_index).sum(dim = -1).clamp(min = 1)
 
         # go through each chunk and derive weighted losses
 
@@ -691,7 +691,7 @@ class XLAutoregressiveWrapper(Module):
             # init the ttt batch parameters under grad context, to work even when called within an outer no_grad context
             self.init_ttt(batch)
 
-            for idx, (chunk, chunk_labels, loss_weight) in enumerate(zip(split_x, split_labels, loss_weights)):
+            for idx, (chunk, chunk_labels) in enumerate(zip(split_x, split_labels)):
                 is_last_chunk = (idx == num_chunks - 1)
                 should_detach = divisible_by(idx + 1, self.tbptt_steps)
 
@@ -723,7 +723,8 @@ class XLAutoregressiveWrapper(Module):
                     loss_per_batch = masked_mean(loss, mask, dim = -1)
 
                     if is_last_recurrent_step:
-                        total_loss = total_loss + loss_per_batch.mean() * loss_weight
+                        chunk_weight = mask.sum(dim = -1) / valid_labels_per_batch
+                        total_loss = total_loss + (loss_per_batch * chunk_weight).mean()
 
                     if (is_last_chunk and is_last_recurrent_step) or not self.has_ttt:
                         continue
