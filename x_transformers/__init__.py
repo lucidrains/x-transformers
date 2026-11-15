@@ -13,6 +13,7 @@ from x_transformers.x_transformers import (
     ViTransformerWrapper,
     TransformerBlock,
     layer_schedule,
+    variable_width_schedule,
     default_device
 )
 

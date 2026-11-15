@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # Full-bandwidth Transformer - Xi Wang et al. https://arxiv.org/abs/2608.08888
+# Recycler additive fusion - ByteDance Seed https://seed.bytedance.com/en/public_papers/recycler-cost-free-latent-reasoning-via-hidden-state-recycling
 
 from collections import namedtuple
 from typing import Callable
@@ -10,7 +11,6 @@ from torch import nn, Tensor
 from torch.nn import Module, ModuleDict
 import torch.nn.functional as F
 
-from einops import rearrange
 from torch_einops_utils import (
     maybe_return,
     temp_eval,
@@ -155,6 +155,21 @@ class ResidualGLUTransition(Module):
     def forward(self, latents, stream):
         return self.norm(stream + self.glu(latents, stream) * self.scale)
 
+# 6. Recycler additive fusion from ByteDance Seed
+# a(h) = linear(rmsnorm(h)), fused as stream + a(h); zero init recovers the standard transformer
+
+class RecyclerTransition(Module):
+    def __init__(self, dim, zero_init = True):
+        super().__init__()
+        self.latent_norm = RMSNorm(dim)
+        self.to_state = LinearNoBias(dim, dim)
+
+        if zero_init:
+            nn.init.zeros_(self.to_state.weight)
+
+    def forward(self, latents, stream):
+        return stream + self.to_state(self.latent_norm(latents))
+
 # registry of transition types
 
 TRANSITIONS = dict(
@@ -162,7 +177,8 @@ TRANSITIONS = dict(
     residual = ResidualTransition,
     gru = GRUGatingTransition,
     linear = LinearTransition,
-    residual_glu = ResidualGLUTransition
+    residual_glu = ResidualGLUTransition,
+    recycler = RecyclerTransition
 )
 
 def resolve_transition(spec, dim):
@@ -225,6 +241,7 @@ class FullBandwidth(Module):
         transitions: dict | None = None,
         feedback_pass_weight = 1.,
         ignore_index = -100,
+        pad_value = 0,
         jitter_noise_delta = 0.02, # paper used sigma = 0.02
         dynamic_rollout_loss_weight = False,
         dynamic_loss_decay = 0.5,
@@ -239,6 +256,7 @@ class FullBandwidth(Module):
         self.net = net
         self.temporal_parallel_passes = temporal_parallel_passes
         self.ignore_index = ignore_index
+        self.pad_value = pad_value
         self.jitter_noise_delta = jitter_noise_delta
         self.feedback_pass_weight = feedback_pass_weight
         self.dynamic_rollout_loss_weight = dynamic_rollout_loss_weight
@@ -417,12 +435,15 @@ class FullBandwidth(Module):
 
         def ce_loss(logits, target):
             return cross_entropy(
-                rearrange(logits, 'b n l -> (b n) l'),
-                rearrange(target, 'b n -> (b n)'),
-                ignore_index = self.ignore_index
+                logits,
+                target,
+                ignore_index = self.ignore_index,
+                class_dim = -1
             )
 
         inp, target = (token_ids[:, :-1], token_ids[:, 1:]) if return_loss else (token_ids, None)
+
+        inp = torch.where(inp == self.ignore_index, self.pad_value, inp)
 
         # first pass (standard)
 

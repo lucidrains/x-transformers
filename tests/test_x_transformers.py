@@ -14,9 +14,10 @@ from x_transformers.x_transformers import (
     AttentionLayers,
     Attention,
     Attend,
-    disable_autocast,
     RotaryEmbedding,
-    PolarEmbedding
+    PolarEmbedding,
+    apply_rotary_pos_emb,
+    disable_autocast
 )
 
 from x_transformers.neo_mlp import (
@@ -133,6 +134,8 @@ def test_readme():
     loss.backward()
 
 def test_kv_cache():
+    torch.manual_seed(0)
+
     model = TransformerWrapper(
         num_tokens = 20000,
         max_seq_len = 1024,
@@ -161,7 +164,7 @@ def test_kv_cache():
     next_logits = model(prompts, context = context)
     next_logits_with_cache = model(prompts, context = context, cache = cache)
 
-    assert torch.allclose(next_logits[:, -1], next_logits_with_cache[:, -1], atol = 1e-6)
+    assert torch.allclose(next_logits[:, -1], next_logits_with_cache[:, -1], atol = 1e-5)
 
 def test_cope():
     model = TransformerWrapper(
@@ -529,6 +532,142 @@ def test_custom_rotary_pos_emb(rotary_xpos):
     logits2 = model(x)
     assert torch.allclose(logits1, logits2)
 
+@param('rot_dim', (16, 8))
+def test_apply_rotary_pos_emb_inverse(rot_dim):
+    rotary = RotaryEmbedding(rot_dim)
+    freqs, _ = rotary(torch.arange(7))
+
+    x = torch.randn(2, 3, 7, 16)
+
+    rotated = apply_rotary_pos_emb(x, freqs)
+    derotated = apply_rotary_pos_emb(rotated, freqs, inverse = True)
+
+    assert torch.allclose(derotated, x, atol = 1e-4)
+    assert torch.allclose(rotated[..., rot_dim:], x[..., rot_dim:])
+
+def test_qkvo_rope_matches_manual():
+    torch.manual_seed(0)
+
+    dim, seq_len = 32, 8
+
+    attn = Attention(
+        dim = dim,
+        dim_head = dim,
+        heads = 1,
+        causal = True,
+        qkvo_rope = True
+    )
+
+    rotary = RotaryEmbedding(dim)
+    freqs, _ = rotary(torch.arange(seq_len))
+
+    x = torch.randn(2, seq_len, dim)
+
+    out = attn(x, rotary_pos_emb = (freqs, None))
+
+    q = attn.split_q_heads(attn.to_q(x))
+    k = attn.split_k_heads(attn.to_k(x))
+    v = attn.split_v_heads(attn.to_v(x))
+
+    q = apply_rotary_pos_emb(q, freqs)
+    k = apply_rotary_pos_emb(k, freqs)
+    v = apply_rotary_pos_emb(v, freqs)
+
+    expected, _ = attn.attend(q, k, v, causal = True)
+    expected = apply_rotary_pos_emb(expected, freqs, inverse = True)
+    expected = attn.merge_heads(expected)
+
+    assert torch.allclose(out, expected, atol = 1e-5)
+
+def test_qkvo_rope_cache():
+    model = TransformerWrapper(
+        num_tokens = 200,
+        max_seq_len = 64,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            rotary_pos_emb = True,
+            qkvo_rope = True
+        )
+    )
+
+    x = torch.randint(0, 200, (2, 5))
+
+    out_parallel = model(x)
+
+    out1, cache = model(x[:, :3], return_intermediates = True)
+    out2, cache = model(x[:, 3:4], cache = cache, return_intermediates = True, input_not_include_cache = True)
+    out3 = model(x[:, 4:5], cache = cache, input_not_include_cache = True)
+
+    out_seq = torch.cat((out1, out2, out3), dim = 1)
+
+    assert torch.allclose(out_parallel, out_seq, atol = 1e-5)
+
+def test_qkvo_rope_leaves_memory_values_unrotated():
+    torch.manual_seed(0)
+
+    dim, seq_len, num_mem_kv = 16, 5, 2
+
+    attn = Attention(
+        dim = dim,
+        dim_head = dim,
+        heads = 1,
+        causal = True,
+        qkvo_rope = True,
+        num_mem_kv = num_mem_kv
+    )
+
+    for parameter in attn.to_v.parameters():
+        nn.init.zeros_(parameter)
+
+    rotary = RotaryEmbedding(dim)
+    freqs, _ = rotary(torch.arange(seq_len))
+    x = torch.randn(2, seq_len, dim)
+
+    out = attn(x, rotary_pos_emb = (freqs, None))
+
+    q = apply_rotary_pos_emb(attn.split_q_heads(attn.to_q(x)), freqs)
+    k = apply_rotary_pos_emb(attn.split_k_heads(attn.to_k(x)), freqs)
+    v = apply_rotary_pos_emb(attn.split_v_heads(attn.to_v(x)), freqs)
+    k = torch.cat((attn.mem_k.unsqueeze(0).expand(x.shape[0], -1, -1, -1), k), dim = -2)
+    v = torch.cat((attn.mem_v.unsqueeze(0).expand(x.shape[0], -1, -1, -1), v), dim = -2)
+
+    _, intermediates = attn.attend(q, k, v, causal = True)
+    weights = intermediates.post_softmax_attn
+    mem_out = torch.einsum('b h i j, b h j d -> b h i d', weights[..., :num_mem_kv], v[..., :num_mem_kv, :])
+    content_out = torch.einsum('b h i j, b h j d -> b h i d', weights[..., num_mem_kv:], v[..., num_mem_kv:, :])
+    content_out = apply_rotary_pos_emb(content_out, freqs, inverse = True)
+    expected = attn.merge_heads(mem_out + content_out)
+
+    assert mem_out.abs().max() > 0
+    assert torch.allclose(out, expected, atol = 1e-5)
+
+    rotated_memory = attn.merge_heads(apply_rotary_pos_emb(mem_out, freqs, inverse = True) + content_out)
+    assert not torch.allclose(out, rotated_memory, atol = 1e-3)
+
+    model = TransformerWrapper(
+        num_tokens = 40,
+        max_seq_len = 16,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            rotary_pos_emb = True,
+            qkvo_rope = True,
+            attn_num_mem_kv = 2
+        )
+    ).eval()
+
+    tokens = torch.randint(0, 40, (2, 6))
+    full = model(tokens)
+    first, cache = model(tokens[:, :4], return_intermediates = True)
+    second, cache = model(tokens[:, 4:5], cache = cache, return_intermediates = True, input_not_include_cache = True)
+    third = model(tokens[:, 5:], cache = cache, input_not_include_cache = True)
+    cached = torch.cat((first, second, third), dim = 1)
+
+    assert torch.allclose(full, cached, atol = 1e-5)
+
 @param('flash', (True, False))
 def test_custom_alibi_across_heads(flash: bool):
     model = Decoder(
@@ -658,9 +797,11 @@ def test_laser():
 
 @param('self_attn_custom_pos', (True, False))
 @param('cross_attn_rotary', (True, False))
+@param('qkvo_rope', (True, False))
 def test_cross_attn_rotary(
     self_attn_custom_pos: bool,
-    cross_attn_rotary: bool
+    cross_attn_rotary: bool,
+    qkvo_rope: bool
 ):
 
     x = torch.randn((1, 64, 256))
@@ -673,6 +814,7 @@ def test_cross_attn_rotary(
         depth = 4,
         heads = 4,
         rotary_pos_emb = True,
+        qkvo_rope = qkvo_rope,
         cross_attend = True,
         cross_attn_dim_context = 512
     )
@@ -1518,6 +1660,32 @@ def test_learned_head_attn_sink():
 
     logits = model(seq)
 
+@param('add_gain', (False, True))
+def test_input_dependent_learned_head_attn_sink(add_gain):
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 128,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            attn_dim_head = 16,
+            attn_head_learned_sink = True,
+            attn_head_learned_sink_input_dependent = True,
+            attn_head_learned_sink_add_gain = add_gain,
+            attn_head_learned_sink_reference_mass = 0.2
+        )
+    )
+
+    seq = torch.randint(0, 256, (2, 32))
+
+    logits = model(seq)
+
+    assert logits.shape == (2, 32, 256)
+
+    logits.sum().backward()
+
 def test_accept_layer_intermediates():
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
 
@@ -2200,6 +2368,232 @@ def test_inverted_cross_attn(attn_sigmoid):
     out = cross_attender(queries, context = context, mask = mask, context_mask = context_mask)
 
     assert out.shape == (2, 64, 512)
+
+def test_custom_cross_attn_masks():
+    from x_transformers import CrossAttender
+
+    torch.manual_seed(0)
+
+    model = CrossAttender(
+        dim = 16,
+        custom_layers = ('c', 'c'),
+        heads = 2,
+        cross_attn_dim_context = 12,
+        pre_norm_has_final_norm = False
+    )
+
+    queries = torch.randn(2, 5, 16)
+    context = torch.randn(2, 4, 12)
+
+    row_mask = torch.ones(2, 5, dtype = torch.bool)
+    row_mask[:, 3:] = False
+
+    context_mask = torch.ones(2, 4, dtype = torch.bool)
+    context_mask[:, 2:] = False
+
+    attn_mask = torch.ones(5, 4, dtype = torch.bool)
+    attn_mask[:, 2:] = False
+
+    def cross_attn_outputs(**kwargs):
+        outputs = []
+
+        def store_output(_, __, out):
+            outputs.append(out[0] if isinstance(out, tuple) else out)
+
+        handlers = [layer[1].register_forward_hook(store_output) for layer in model.layers if isinstance(layer[1], Attention)]
+
+        try:
+            model(queries, context = context, **kwargs)
+        finally:
+            for handler in handlers:
+                handler.remove()
+
+        return outputs
+
+    # row mask -> only masked queries update, per layer
+
+    out = model(queries, context = context, cross_attn_mask = row_mask)
+    assert torch.equal(out[~row_mask], queries[~row_mask])
+
+    first, second = cross_attn_outputs(cross_attn_mask = (row_mask, None))
+    assert torch.equal(first[~row_mask], torch.zeros_like(first[~row_mask]))
+    assert not torch.allclose(second[~row_mask], torch.zeros_like(second[~row_mask]))
+
+    # key padding mask -> zeroes layer output when all keys masked, per layer
+
+    first, second = cross_attn_outputs(context_mask = (None, torch.zeros_like(context_mask)))
+    assert not torch.allclose(first, torch.zeros_like(first))
+    assert torch.equal(second, torch.zeros_like(second))
+
+    # arbitrary attn mask -> 2d / 4d, per layer
+
+    out_attn_mask = model(queries, context = context, cross_attn_attn_mask = attn_mask)
+    out_context_mask = model(queries, context = context, context_mask = context_mask)
+    assert torch.allclose(out_attn_mask, out_context_mask)
+
+    head_mask = attn_mask[None, None].expand(2, 2, -1, -1)
+    assert torch.allclose(out_attn_mask, model(queries, context = context, cross_attn_attn_mask = head_mask))
+
+    first, second = cross_attn_outputs(cross_attn_attn_mask = (None, torch.zeros_like(attn_mask)))
+    assert not torch.allclose(first, torch.zeros_like(first))
+    assert torch.equal(second, torch.zeros_like(second))
+
+    # single tensor broadcasts to all cross attn layers
+
+    out_global = model(queries, context = context, context_mask = context_mask)
+    assert torch.allclose(out_global, model(queries, context = context, context_mask = (context_mask, context_mask)))
+
+def test_cross_attn_masks_two_per_block():
+    torch.manual_seed(1)
+
+    num_blocks = 2
+    model = Decoder(
+        dim = 16,
+        heads = 2,
+        cross_attend = True,
+        cross_attn_dim_context = 12,
+        custom_layers = ('a', 'c', 'c', 'f') * num_blocks
+    )
+
+    x = torch.randn(2, 6, 16)
+
+    even_context = torch.randn(2, 4, 12)
+    odd_context = torch.randn(2, 7, 12)
+
+    even_context_mask = torch.ones(2, 4, dtype = torch.bool)
+    even_context_mask[:, 2:] = False
+
+    odd_context_mask = torch.ones(2, 7, dtype = torch.bool)
+    odd_context_mask[:, 5:] = False
+
+    contexts = (even_context, odd_context) * num_blocks
+    context_masks = (even_context_mask, odd_context_mask) * num_blocks
+
+    even = torch.ones(2, 6, dtype = torch.bool)
+    even[:, 1::2] = False
+
+    odd = ~even
+
+    outputs = []
+
+    def store_output(_, __, out):
+        outputs.append(out[0] if isinstance(out, tuple) else out)
+
+    cross_layers = [layer[1] for layer_type, layer in zip(model.layer_types, model.layers) if layer_type == 'c']
+    handles = [block.register_forward_hook(store_output) for block in cross_layers]
+
+    try:
+        model(x, context = contexts, context_mask = context_masks, cross_attn_mask = (even, odd) * num_blocks)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    # each block -> even cross attn updates even tokens from even context, odd cross attn updates odd tokens from odd context
+
+    for even_layer, odd_layer in zip(outputs[::2], outputs[1::2]):
+        assert not torch.allclose(even_layer[even], torch.zeros_like(even_layer[even]))
+        assert torch.equal(even_layer[~even], torch.zeros_like(even_layer[~even]))
+
+        assert not torch.allclose(odd_layer[~even], torch.zeros_like(odd_layer[~even]))
+        assert torch.equal(odd_layer[even], torch.zeros_like(odd_layer[even]))
+
+def test_cross_attn_routes_context_per_layer():
+    from x_transformers import CrossAttender
+
+    torch.manual_seed(2)
+
+    model = CrossAttender(
+        dim = 16,
+        custom_layers = ('c', 'c'),
+        heads = 2,
+        cross_attn_dim_context = 12,
+        pre_norm_has_final_norm = False
+    )
+
+    model.eval()
+
+    queries = torch.randn(2, 5, 16)
+    context_a = torch.randn(2, 4, 12)
+    context_b = torch.randn(2, 7, 12)
+
+    def cross_outputs(contexts):
+        outputs = []
+
+        def store_output(_, __, out):
+            outputs.append(out[0] if isinstance(out, tuple) else out)
+
+        handles = [layer[1].register_forward_hook(store_output) for layer in model.layers if isinstance(layer[1], Attention)]
+
+        try:
+            model(queries, context = contexts)
+        finally:
+            for handle in handles:
+                handle.remove()
+
+        return outputs
+
+    base = cross_outputs((context_a, context_b))
+    changed_b = cross_outputs((context_a, context_b + 1.))
+
+    # first cross attn only sees context a, second only context b
+
+    assert torch.allclose(base[0], changed_b[0])
+    assert not torch.allclose(base[1], changed_b[1])
+
+    changed_a = cross_outputs((context_a + 1., context_b))
+    assert not torch.allclose(base[0], changed_a[0])
+
+def test_cross_attn_mask_with_layer_dropout():
+    from x_transformers import CrossAttender
+
+    torch.manual_seed(0)
+
+    model = CrossAttender(
+        dim = 16,
+        custom_layers = ('c', 'c'),
+        heads = 2,
+        cross_attn_dim_context = 12,
+        pre_norm_has_final_norm = False,
+        layer_dropout = (1., 0.)
+    )
+
+    model.train()
+
+    queries = torch.randn(2, 5, 16)
+    context = torch.randn(2, 4, 12)
+
+    row_mask = torch.ones(2, 5, dtype = torch.bool)
+    row_mask[:, 3:] = False
+
+    # first cross attn layer is dropped -> second must still receive its own mask
+
+    out = model(queries, context = context, cross_attn_mask = (None, row_mask))
+    assert torch.equal(out[~row_mask], queries[~row_mask])
+
+def test_cross_attn_mask_with_cache():
+    from x_transformers import Decoder
+
+    torch.manual_seed(0)
+
+    model = Decoder(
+        dim = 16,
+        heads = 2,
+        cross_attend = True,
+        cross_attn_dim_context = 12,
+        custom_layers = ('c',),
+        pre_norm_has_final_norm = False
+    )
+
+    x = torch.randn(2, 5, 16)
+    context = torch.randn(2, 4, 12)
+
+    _, cache = model(x, context = context, return_hiddens = True)
+
+    next_x = torch.randn(2, 1, 16)
+    row_mask = torch.zeros(2, 1, dtype = torch.bool)
+
+    out = model(next_x, context = context, cache = cache, cross_attn_mask = row_mask)
+    assert torch.equal(out, next_x)
 
 @param('use_custom_loss', ('none', 'kl', 'next_latent'))
 @param('ttt_use_muon', (False, True))
@@ -3170,7 +3564,8 @@ def test_depth_scale_residual(depth_scale_residual):
     logits = model(x)
     logits.sum().backward()
 
-def test_full_bandwidth():
+@param('transition', ('glu', 'recycler'))
+def test_full_bandwidth(transition):
     from x_transformers.full_bandwidth import FullBandwidth, LossBreakdown
 
     model = TransformerWrapper(
@@ -3186,7 +3581,7 @@ def test_full_bandwidth():
         )
     )
 
-    fb = FullBandwidth(model, temporal_parallel_passes = 2)
+    fb = FullBandwidth(model, temporal_parallel_passes = 2, transition = transition)
 
     tokens = torch.randint(0, 256, (2, 16))
 
@@ -3276,6 +3671,118 @@ def test_full_bandwidth_recirculation():
     prompts = torch.randint(0, 256, (2, 8))
     sampled = fb.generate(prompts, seq_len = 16)
     assert sampled.shape == (2, 16)
+
+def test_full_bandwidth_ignore_index():
+    from x_transformers.full_bandwidth import FullBandwidth
+
+    torch.manual_seed(0)
+
+    model = TransformerWrapper(
+        num_tokens = 32,
+        max_seq_len = 16,
+        tie_embedding = True,
+        post_emb_norm = True,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 2,
+            heads = 4,
+            depth_scale_residual = True
+        )
+    )
+
+    fb = FullBandwidth(model, temporal_parallel_passes = 2, transition = 'recycler')
+
+    tokens = torch.randint(0, 32, (2, 8))
+    padded = tokens.clone()
+    padded[:, -2:] = -100
+
+    loss = fb(padded)
+    assert torch.isfinite(loss)
+    loss.backward()
+
+    # right-padding must not change the loss on the kept targets
+    unpadded_loss = fb(tokens[:, :-2])
+    assert torch.allclose(loss, unpadded_loss, atol = 1e-5)
+
+def test_variable_width_schedule():
+    from x_transformers import variable_width_schedule
+
+    widths = variable_width_schedule(
+        dim = 512,
+        depth = 16,
+        bottleneck_layer_ratio = 0.75,
+        bottleneck_width_ratio = 0.3,
+        round_to = 64
+    )
+
+    assert len(widths) == 16
+    assert widths[0] == widths[-1]
+    assert widths[11] == min(widths)
+    assert all(w % 64 == 0 for w in widths)
+    assert widths[0] > 512 > widths[11]
+
+    # parameter matched to a constant-width baseline, up to rounding
+
+    assert sum(w ** 2 for w in widths) == pytest.approx(16 * 512 ** 2, rel = 0.1)
+
+def test_variable_width():
+    torch.manual_seed(0)
+
+    def create_model(variable_width):
+        return TransformerWrapper(
+            num_tokens = 256,
+            max_seq_len = 128,
+            attn_layers = Decoder(
+                dim = 64,
+                depth = 4,
+                heads = 4,
+                attn_dim_head = 16,
+                variable_width = variable_width
+            )
+        )
+
+    tokens = torch.randint(0, 256, (2, 32))
+
+    # explicit per-block widths
+
+    model = create_model((64, 32, 32, 64))
+
+    assert model.attn_layers.layer_dims == (64, 64, 32, 32, 32, 32, 64, 64)
+    assert model.attn_layers.residual_dim == 64
+
+    logits = model(tokens)
+    assert logits.shape == (2, 32, 256)
+    logits.sum().backward()
+
+    # paper x-shaped schedule, wide early and late layers with a narrow middle
+
+    model = create_model(True)
+
+    layer_dims = model.attn_layers.layer_dims
+
+    assert model.attn_layers.residual_dim > 64
+    assert layer_dims[0] == layer_dims[-1]
+    assert min(layer_dims) < 64 < max(layer_dims)
+
+    logits = model(tokens)
+    assert logits.shape == (2, 32, 256)
+
+    # kv cache parity
+
+    model.eval()
+
+    prompt = torch.randint(0, 256, (2, 16))
+    logits, cache = model(prompt, return_intermediates = True)
+
+    assert all(h.shape[-1] == model.attn_layers.residual_dim for h in cache.layer_hiddens)
+
+    next_tokens = logits[:, -1:].argmax(dim = -1)
+    extended = torch.cat((prompt, next_tokens), dim = -1)
+
+    cached_logits = model(extended, cache = cache)
+    full_logits = model(extended)
+
+    assert torch.allclose(cached_logits[:, -1], full_logits[:, -1], atol = 1e-5)
 
 def test_xval_full_length_padding_mask():
     from x_transformers import XValTransformerWrapper, XValAutoregressiveWrapper

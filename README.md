@@ -2860,6 +2860,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 ```
 
 ```bibtex
+@misc{bytedanceseed2026recycler,
+    title  = {Recycler: Cost-Free Latent Reasoning via Hidden State Recycling},
+    author = {{ByteDance Seed}},
+    month  = {October},
+    year   = {2026},
+    url    = {https://seed.bytedance.com/en/public_papers/recycler-cost-free-latent-reasoning-via-hidden-state-recycling}
+}
+```
+
+```bibtex
 @misc{kimiteam2026kimik3openfrontier,
     title   = {Kimi K3: Open Frontier Intelligence},
     author  = {Kimi Team},
@@ -2868,6 +2878,47 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
     archivePrefix = {arXiv},
     primaryClass = {cs.CL},
     url     = {https://arxiv.org/abs/2607.24653},
+}
+```
+
+```bibtex
+@misc{wu2026variablewidthtransformers,
+    title         = {Variable-Width Transformers},
+    author        = {Zhaofeng Wu and Oliver Sieberling and Shawn Tan and Rameswar Panda and Yury Polyanskiy and Yoon Kim},
+    year          = {2026},
+    eprint        = {2606.18246},
+    archivePrefix = {arXiv},
+    primaryClass  = {cs.CL},
+    url           = {https://arxiv.org/abs/2606.18246}
+}
+```
+
+```bibtex
+@inproceedings{scaledsinkattention2027,
+    title     = {Scaled Sink Attention: Measuring and Reducing Attention Sink after Normalization in Large Language Models},
+    author    = {Anonymous},
+    booktitle = {International Conference on Learning Representations (ICLR 2027)},
+    year      = {2027},
+    url       = {https://openreview.net/forum?id=a5yCiLOjGB}
+}
+```
+
+```bibtex
+@misc{harik2022roper,
+    title  = {Rotary Positional Embeddings with Relative distances (RoPER)},
+    author = {Georges Harik and Varuna Jayasiri},
+    year   = {2022},
+    url    = {https://research.labml.ai/RoPER.html}
+}
+```
+
+```bibtex
+@inproceedings{miyato2024gta,
+    title     = {GTA: A Geometry-Aware Attention Mechanism for Multi-View Transformers},
+    author    = {Takeru Miyato and Bernhard Jaeger and Max Welling and Andreas Geiger},
+    booktitle = {International Conference on Learning Representations (ICLR)},
+    year      = {2024},
+    url       = {https://openreview.net/forum?id=uJVHygNeSZ}
 }
 ```
 
