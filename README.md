@@ -2922,4 +2922,16 @@ ids_out, num_out, is_number_mask = model.generate(start_ids, start_nums, 17)
 }
 ```
 
+```bibtex
+@misc{duggal2026latentlatticelanguagemodels,
+    title         = {Latent Lattice Language Models},
+    author        = {Shivam Duggal and Zongze Wu and William T. Freeman and Antonio Torralba and Richard Zhang and Eli Shechtman},
+    year          = {2026},
+    eprint        = {2611.21608},
+    archivePrefix = {arXiv},
+    primaryClass  = {cs.CL},
+    url           = {https://arxiv.org/abs/2611.21608}
+}
+```
+
 *solve intelligence... then use that to solve everything else.* - Demis Hassabis

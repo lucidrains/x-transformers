@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from einops import rearrange, repeat, pack, unpack
 
-from torch_einops_utils import masked_mean, pad_at_dim, lens_to_mask, cross_entropy
+from torch_einops_utils import masked_mean, pad_at_dim, lens_to_mask, cross_entropy, tree_map_tensor
 
 def exists(val):
     return val is not None
@@ -52,10 +52,13 @@ def gumbel_sample(logits, temperature = 1., eps = 1e-6):
 
 # function for modifying all the cached key / values
 
-def modify_cached_kv(cache, fn):
+def modify_cached_kv(cache, fn, modify_seq_cond = False):
     for inter in cache.attn_intermediates:
         if inter.layer_type == 'a':
             inter.cached_kv = [fn(t) for t in inter.cached_kv]
+
+    if modify_seq_cond and exists(cache.seq_cond_caches):
+        cache.seq_cond_caches = tree_map_tensor(fn, cache.seq_cond_caches)
 
 # for variable lengthed prefixes
 
@@ -309,7 +312,7 @@ class AutoregressiveWrapper(Module):
             samples = rearrange(samples, 'b beams -> (b beams) 1')
 
             if should_cache and is_first:
-                modify_cached_kv(cache, lambda t: repeat(t, 'b ... -> (b beams) ...', beams = beams))
+                modify_cached_kv(cache, lambda t: repeat(t, 'b ... -> (b beams) ...', beams = beams), modify_seq_cond = True)
 
             if exists(seq_start_pos) and is_first:
                 seq_start_pos = repeat(seq_start_pos, 'b -> (b beams)', beams = beams)
@@ -338,7 +341,7 @@ class AutoregressiveWrapper(Module):
 
                 if should_cache:
                     parent_beam_indices = flattened_beam_indices // beams
-                    modify_cached_kv(cache, lambda t: t[parent_beam_indices])
+                    modify_cached_kv(cache, lambda t: t[parent_beam_indices], modify_seq_cond = True)
 
             scores = rearrange(scores, 'b beams -> (b beams)')
 

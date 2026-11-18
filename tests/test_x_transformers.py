@@ -3765,3 +3765,131 @@ def test_xval_full_length_padding_mask():
     unpadded_loss = wrapper(ids[:, :6], nums[:, :6])
 
     assert torch.allclose(loss, unpadded_loss, atol = 1e-6)
+
+@param('cond_type', ('dsconv', 'ema'))
+@param('every', (1, 2, 4, (0, 2)))
+@param('ff_glu', (False, True))
+def test_sequence_conditioner(cond_type, every, ff_glu):
+    from torch_einops_utils.shape import shape, size
+    from x_transformers import AutoregressiveWrapper, DSConvConditioner, EMAConditioner
+
+    torch.manual_seed(0)
+
+    cond = DSConvConditioner(32, dim_cond = 16, kernel_size = 4) if cond_type == 'dsconv' else EMAConditioner(32, dim_cond = 16)
+
+    net = TransformerWrapper(
+        num_tokens = 64,
+        max_seq_len = 32,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 4,
+            heads = 4,
+            attn_dim_head = 8,
+            rotary_pos_emb = True,
+            ff_glu = ff_glu,
+            seq_cond = cond,
+            seq_cond_every = every,
+            verbose = False
+        )
+    )
+
+    model = AutoregressiveWrapper(net)
+    optim = torch.optim.AdamW(model.parameters(), lr = 1e-2)
+
+    seq = torch.randint(0, 64, (2, 10))
+    model(seq).backward()
+    optim.step()
+    model.eval()
+
+    # parallel forward vs short-prefill (len 2 < window 3) + step-by-step cached playback
+
+    full_logits = net(seq)
+    prefill, cache = net(seq[:, :2], return_intermediates = True)
+
+    expected_mem_shape = (2, 16, 3) if cond_type == 'dsconv' else (2, 16)
+    assert all(shape(mem, 'b d ...') == expected_mem_shape for mem in cache.seq_cond_caches)
+
+    steps = [prefill]
+    for t in range(2, size(seq, 'b [n]')):
+        step_logit, cache = net(seq[:, :t + 1], cache = cache, return_intermediates = True)
+        steps.append(step_logit)
+
+    assert torch.allclose(full_logits, torch.cat(steps, dim = 1), atol = 1e-5)
+
+    # e2e cached vs uncached generation and beam search parity
+
+    prompt = seq[:, :3]
+    assert torch.equal(
+        model.generate(prompt, seq_len = 5, temperature = 0., cache_kv = True),
+        model.generate(prompt, seq_len = 5, temperature = 0., cache_kv = False)
+    )
+    assert torch.equal(
+        model.beam_search(prompt, seq_len = 4, beams = 2, cache_kv = True),
+        model.beam_search(prompt, seq_len = 4, beams = 2, cache_kv = False)
+    )
+
+def test_split_and_custom_sequence_conditioner():
+    from torch.nn import Module, GRU
+    from einops import rearrange
+    from torch_einops_utils.shape import shape, size
+    from x_transformers import AutoregressiveWrapper, DSConvConditioner, EMAConditioner
+
+    class CustomGRU(Module):
+        def __init__(self, dim, dim_cond):
+            super().__init__()
+            self.gru = GRU(dim, dim_cond, batch_first = True)
+
+        def forward(self, x, mem = None):
+            mem = rearrange(mem, 'b d -> 1 b d') if exists(mem) else None
+            cond, next_mem = self.gru(x, mem)
+            return cond, rearrange(next_mem, '1 b d -> b d')
+
+    torch.manual_seed(0)
+
+    net = TransformerWrapper(
+        num_tokens = 64,
+        max_seq_len = 32,
+        attn_layers = Decoder(
+            dim = 32,
+            depth = 4,
+            heads = 4,
+            attn_dim_head = 8,
+            rotary_pos_emb = True,
+            ff_glu = True,
+            attn_seq_cond = EMAConditioner(32, dt_min = 1e-4),
+            ff_seq_cond = CustomGRU(32, 12),
+            seq_cond_scale_groups = (2, 4),
+            verbose = False
+        )
+    )
+
+    model = AutoregressiveWrapper(net)
+    optim = torch.optim.AdamW(model.parameters(), lr = 1e-2)
+
+    seq = torch.randint(0, 64, (2, 8))
+    model(seq).backward()
+    optim.step()
+    model.eval()
+
+    full_logits = net(seq)
+    prefill, cache = net(seq[:, :2], return_intermediates = True)
+    steps = [prefill]
+
+    for t in range(2, size(seq, 'b [n]')):
+        step_logit, cache = net(seq[:, :t + 1], cache = cache, return_intermediates = True)
+        steps.append(step_logit)
+
+    assert torch.allclose(full_logits, torch.cat(steps, dim = 1), atol = 1e-5)
+    assert torch.equal(
+        model.beam_search(seq[:, :3], seq_len = 3, beams = 2, cache_kv = True),
+        model.beam_search(seq[:, :3], seq_len = 3, beams = 2, cache_kv = False)
+    )
+
+    # cross-attention skipping, bfloat16 weights, and Decoder-only guard
+
+    cross_dec = Decoder(dim = 32, depth = 2, heads = 4, attn_dim_head = 8, cross_attend = True, seq_cond = (EMAConditioner(32), DSConvConditioner(32))).bfloat16()
+    assert shape(cross_dec(torch.randn(2, 6, 32, dtype = torch.bfloat16), context = torch.randn(2, 5, 32, dtype = torch.bfloat16)), 'b n d') == (2, 6, 32)
+
+    with pytest.raises(AssertionError):
+        Encoder(dim = 32, depth = 2, heads = 4, seq_cond = DSConvConditioner(32))
+

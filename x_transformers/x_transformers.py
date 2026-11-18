@@ -21,6 +21,7 @@ from torch.nn import Module, ModuleList, ModuleDict
 from loguru import logger
 
 from x_transformers.attend import Attend, Intermediates, pack_one, unpack_one, log_prob_from_hard_attend, default_device
+from x_transformers.causal_seq_cond import apply_scale_offset, SeqCondRouter
 
 import einx
 from einops.layers.torch import Rearrange
@@ -72,6 +73,7 @@ class LayerIntermediates:
     exit_indices:           Tensor | None = None
     looped_prompt_kv_cache: tuple[Tensor, Tensor] | None = None
     block_hiddens:          list[Tensor] | None = None
+    seq_cond_caches:        list | None = None
     cache_length:           int = 0
 
     def __copy__(self):
@@ -82,6 +84,9 @@ class LayerIntermediates:
 
         if exists(self.block_hiddens):
             out.block_hiddens = copy(self.block_hiddens)
+
+        if exists(self.seq_cond_caches):
+            out.seq_cond_caches = copy(self.seq_cond_caches)
 
         return out
 
@@ -1835,8 +1840,17 @@ class GLU(Module):
         self.proj = nn.Linear(dim_in, dim_out * 2)
         self.mult_bias = nn.Parameter(torch.ones(dim_out)) if mult_bias else 1.
 
-    def forward(self, x):
-        up, gate = self.proj(x).chunk(2, dim = -1)
+    def forward(
+        self,
+        x,
+        scale_offset = None
+    ):
+        proj = self.proj(x)
+
+        if exists(scale_offset):
+            proj = apply_scale_offset(proj, *scale_offset)
+
+        up, gate = proj.chunk(2, dim = -1)
 
         if exists(self.up_softclamp_value):
             up = softclamp(up, self.up_softclamp_value)
@@ -1931,9 +1945,15 @@ class FeedForward(Module):
     def forward(
         self,
         x,
-        deep_embed = None
+        deep_embed = None,
+        cond_scale_offset = None
     ):
-        out = self.ff(x)
+        if not exists(cond_scale_offset):
+            out = self.ff(x)
+        else:
+            proj_in, rest_ff = self.ff[0], self.ff[1:]
+            out = proj_in(x, scale_offset = cond_scale_offset) if isinstance(proj_in, GLU) else proj_in[1:](apply_scale_offset(proj_in[0](x), *cond_scale_offset))
+            out = rest_ff(out)
 
         if exists(deep_embed):
             out = out * deep_embed
@@ -2429,6 +2449,7 @@ class Attention(Module):
         v_delta = None,
         o_delta = None,
         attn_delta = None,
+        cond_scale_offset = None,
         flash_pack_seq_kwargs = None,
         causal = None,
     ):
@@ -2499,6 +2520,10 @@ class Attention(Module):
         q = self.to_q(q_input)
         k = self.to_k(k_input)
         v = self.to_v(v_input)
+
+        if exists(cond_scale_offset):
+            assert not is_multi_latent_attn, 'sequence conditioning is not compatible with multi-latent attention'
+            q, k, v = tuple(apply_scale_offset(t, *scale_offset) for t, scale_offset in zip((q, k, v), cond_scale_offset))
 
         # allow for modulation, https://arxiv.org/abs/2605.12357
 
@@ -2995,6 +3020,9 @@ class AttentionLayers(Module):
         rel_pos_kwargs: dict = dict(),
         residual_fn_kwargs: dict = dict(),
         hyper_conn_sinkhorn_iters = 5,
+        seq_cond: Module | tuple[Module | None, Module | None] | None = None,
+        seq_cond_every = 1,
+        seq_cond_scale_groups = 4,
         verbose = True,
         **kwargs
     ):
@@ -3004,6 +3032,13 @@ class AttentionLayers(Module):
         ff_kwargs, kwargs = groupby_prefix_and_trim('ff_', kwargs)
         attn_kwargs, kwargs = groupby_prefix_and_trim('attn_', kwargs)
         cross_attn_kwargs, kwargs = groupby_prefix_and_trim('cross_attn_', kwargs)
+
+        attn_seq_cond = attn_kwargs.pop('seq_cond', None)
+        ff_seq_cond = ff_kwargs.pop('seq_cond', None)
+        attn_seq_cond_every = attn_kwargs.pop('seq_cond_every', None)
+        ff_seq_cond_every = ff_kwargs.pop('seq_cond_every', None)
+        attn_seq_cond_scale_groups = attn_kwargs.pop('seq_cond_scale_groups', None)
+        ff_seq_cond_scale_groups = ff_kwargs.pop('seq_cond_scale_groups', None)
 
         dim_head = attn_kwargs.get('dim_head', DEFAULT_DIM_HEAD)
         data_dependent_alibi = attn_kwargs.get('data_dependent_alibi', False)
@@ -3557,6 +3592,27 @@ class AttentionLayers(Module):
                 residual
             ]))
 
+        # optional causal sequence conditioners (`x_transformers/causal_seq_cond.py`)
+
+        has_seq_cond = any(map(exists, (seq_cond, attn_seq_cond, ff_seq_cond)))
+        assert not (has_seq_cond and not causal), 'sequence conditioners are only supported for causal `Decoder` layers'
+
+        self.seq_cond_router = SeqCondRouter(
+            layers = self.layers,
+            layer_types = self.layer_types,
+            layer_dims = self.layer_dims,
+            len_default_block = len_default_block,
+            seq_cond = seq_cond,
+            attn_seq_cond = attn_seq_cond,
+            ff_seq_cond = ff_seq_cond,
+            every = seq_cond_every,
+            attn_every = attn_seq_cond_every,
+            ff_every = ff_seq_cond_every,
+            scale_groups = seq_cond_scale_groups,
+            attn_scale_groups = attn_seq_cond_scale_groups,
+            ff_scale_groups = ff_seq_cond_scale_groups
+        ) if has_seq_cond else None
+
         # determine whether can cache kv
 
         self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
@@ -3889,6 +3945,10 @@ class AttentionLayers(Module):
         first_self_attn_inter = None
         first_cross_attn_inter = None
 
+        # sequence conditioner state
+
+        step_seq_cond, next_seq_cond_caches = self.seq_cond_router.init_forward(cache) if exists(self.seq_cond_router) else (None, None)
+
         # go through the attention and feedforward layers
 
         block_hiddens = []
@@ -3915,6 +3975,13 @@ class AttentionLayers(Module):
 
             if exists(skip_combine):
                 x = skip_combine(x, skip_hiddens)
+
+            # maybe create and route causal sequence conditioner scale / offset
+
+            layer_cond_scale_offset = None
+            if exists(step_seq_cond):
+                cond_inp = reduce(x[..., :layer_dim], '(b s) n d -> b n d', 'mean', s = streams) if is_multistream else x[..., :layer_dim]
+                layer_cond_scale_offset = step_seq_cond(layers_execute_order[ind], cond_inp)
 
             # layer dropout
 
@@ -3972,7 +4039,7 @@ class AttentionLayers(Module):
             # forward depending on layer type
 
             if layer_type == 'a':
-                out, inter = block(x_slice, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, flash_pack_seq_kwargs = flash_pack_seq_kwargs, return_intermediates = True, causal = causal)
+                out, inter = block(x_slice, mask = mask, context_mask = self_attn_kv_mask, attn_mask = attn_mask, rel_pos = self.rel_pos, pos = pos, rotary_pos_emb = rotary_pos_emb, polar_pos_emb = polar_pos_emb, additional_key_values = next(iter_self_attn_kv, None), additional_key_value_mask = additional_kv_mask, prev_attn = prev_attn, cache = next(iter_attn_cache, None), mem = layer_mem, mem_mask = layer_mem_mask, attn_bias = attn_bias, kv_input_residual = next(self_attn_kv_residuals_iter, None), value_residual = maybe_self_attn_value_residual, cond_scale_offset = layer_cond_scale_offset, flash_pack_seq_kwargs = flash_pack_seq_kwargs, return_intermediates = True, causal = causal)
             elif layer_type == 'c':
                 layer_ind = layers_execute_order[ind]
 
@@ -3995,7 +4062,7 @@ class AttentionLayers(Module):
             elif layer_type == 'f':
                 deep_embed = next(deep_embeds_iter, None)
                 deep_embed = pad_or_truncate_at_dim(deep_embed, layer_dim) if exists(deep_embed) else None
-                out = block(x_slice, deep_embed = deep_embed)
+                out = block(x_slice, deep_embed = deep_embed, cond_scale_offset = layer_cond_scale_offset)
 
             # store first self or cross attention intermediate for value residual
 
@@ -4074,6 +4141,7 @@ class AttentionLayers(Module):
             attn_intermediates = intermediates,
             layer_hiddens = layer_hiddens,
             block_hiddens = block_hiddens,
+            seq_cond_caches = next_seq_cond_caches,
             cache_length = next_cache_length + prev_cache_length
         )
 
