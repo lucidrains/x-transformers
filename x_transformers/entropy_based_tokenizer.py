@@ -23,8 +23,11 @@ def log(t, eps = 1e-20):
     return t.clamp(min = eps).log()
 
 def calc_entropy_from_logits(logits):
-    prob = logits.softmax(dim = -1)
-    return -(prob * log(prob)).sum(dim = -1)
+    dtype = torch.float32 if logits.dtype in (torch.float16, torch.bfloat16) else logits.dtype
+    log_prob = logits.log_softmax(dim = -1, dtype = dtype)
+    prob = log_prob.exp()
+    log_prob = log_prob.clamp(min = torch.finfo(log_prob.dtype).min)
+    return -(prob * log_prob).sum(dim = -1)
 
 def get_accumulated_threshold_mask(
     entropies,
