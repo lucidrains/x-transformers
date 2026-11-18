@@ -19,6 +19,8 @@ from x_transformers.x_transformers import (
     disable_autocast
 )
 
+from x_transformers.attend import one_hot_straight_through, sparse_topk_attn
+
 from x_transformers.neo_mlp import (
     NeoMLP
 )
@@ -47,6 +49,46 @@ def test_disable_autocast_uses_tensor_device():
         out = matrix_multiply(x, x)
 
     assert out.dtype == torch.float32
+
+@param('dtype', (torch.float16, torch.bfloat16, torch.float32))
+def test_hard_straight_through_exact_forward(dtype):
+    logits = torch.tensor([0., 1., 2., 3.], dtype = dtype, requires_grad = True)
+    weights = torch.tensor([1., 2., 3., 4.], dtype = dtype)
+    out = one_hot_straight_through(logits)
+    expected = torch.tensor([0., 0., 0., 1.], dtype = dtype)
+    assert torch.equal(out, expected)
+    actual_grad = torch.autograd.grad((out * weights).sum(), logits)[0]
+    reference_logits = logits.detach().clone().requires_grad_()
+    reference_loss = (reference_logits.softmax(dim = -1) * weights).sum()
+    expected_grad = torch.autograd.grad(reference_loss, reference_logits)[0]
+    torch.testing.assert_close(actual_grad, expected_grad)
+
+
+@param('dtype', (torch.float16, torch.bfloat16, torch.float32))
+def test_sparse_straight_through_exact_forward(dtype):
+    logits = torch.linspace(-2., 2., 100, dtype = dtype).reshape(10, 10).requires_grad_()
+    expected = sparse_topk_attn(logits, sparse_topk = 3)
+    out = sparse_topk_attn(logits, sparse_topk = 3, straight_through = True)
+    assert torch.equal(out, expected)
+    weights = torch.arange(1, 11, dtype = dtype)
+    actual_grad = torch.autograd.grad((out * weights).sum(), logits)[0]
+    reference_logits = logits.detach().clone().requires_grad_()
+    reference_loss = (reference_logits.softmax(dim = -1) * weights).sum()
+    expected_grad = torch.autograd.grad(reference_loss, reference_logits)[0]
+    torch.testing.assert_close(actual_grad, expected_grad)
+
+
+@param('dtype', (torch.float16, torch.bfloat16, torch.float32))
+def test_hard_attention_selects_value_exactly(dtype):
+    q = torch.ones(1, 1, 1, 1, dtype = dtype)
+    k = torch.arange(4, dtype = dtype).view(1, 1, 4, 1)
+    v = torch.arange(1, 5, dtype = dtype).view(1, 1, 4, 1).requires_grad_()
+    out, _ = Attend(hard = True)(q, k, v)
+    assert torch.equal(out, v[..., -1:, :])
+    gradient = torch.autograd.grad(out.float().square().sum(), v)[0]
+    expected = torch.tensor([0., 0., 0., 8.], dtype = dtype).view_as(v)
+    assert torch.equal(gradient, expected)
+
 
 @pytest.mark.skipif(
     not hasattr(torch, 'xpu') or not torch.xpu.is_available(),
