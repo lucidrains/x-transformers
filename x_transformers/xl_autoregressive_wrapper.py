@@ -428,7 +428,7 @@ class XLAutoregressiveWrapper(Module):
 
         for wrapper in self.ttt_wrappers.values():
             wrapper.batch_params = tree_map_tensor(
-                lambda t: repeat_batch(t, batch),
+                lambda t: repeat_batch(t, batch).requires_grad_(),
                 dict(wrapper.module.named_parameters())
             )
 
