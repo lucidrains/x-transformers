@@ -36,6 +36,22 @@ def with_seed(seed):
         return inner
     return decorator
 
+@param('query_len', (1, 5))
+def test_grouped_attention_matches_repeated_kv(query_len):
+    attend = Attend(causal = True, add_zero_kv = True)
+    q = torch.randn(2, 6, query_len, 8, requires_grad = True)
+    k = torch.randn(2, 2, 9, 8, requires_grad = True)
+    v = torch.randn(2, 2, 9, 4, requires_grad = True)
+    mask = torch.rand(2, 9) > 0.5
+
+    out, intermediate = attend(q, k, v, mask = mask)
+    expected, reference = attend(q, k.repeat(1, 3, 1, 1), v.repeat(1, 3, 1, 1), mask = mask)
+    torch.testing.assert_close(out, expected)
+    torch.testing.assert_close(intermediate.qk_similarities, reference.qk_similarities)
+    grad = torch.randn_like(out)
+    for observed, wanted in zip(torch.autograd.grad(out, (q, k, v), grad), torch.autograd.grad(expected, (q, k, v), grad)):
+        torch.testing.assert_close(observed, wanted)
+
 def test_disable_autocast_uses_tensor_device():
     @disable_autocast
     def matrix_multiply(x, y):
