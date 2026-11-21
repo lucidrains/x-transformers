@@ -72,6 +72,7 @@ def train(
             dim = 512,
             depth = 6,
             heads = 8,
+            attn_flash = True,
             rotary_pos_emb = False,
             polar_pos_emb = True,
             pre_and_post_norm = not (gated_multi_residual or attn_aggregated_residuals),
