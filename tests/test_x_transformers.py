@@ -1359,7 +1359,8 @@ def test_beam_search(stochastic):
     assert beams.shape == (4, 2, 10)
     assert scores.shape == (4, 2)
 
-def test_beam_search_kv_cache_parity():
+@param('use_latent_kv', (False, True))
+def test_beam_search_kv_cache_parity(use_latent_kv):
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
 
     torch.manual_seed(0)
@@ -1371,6 +1372,8 @@ def test_beam_search_kv_cache_parity():
             dim = 16,
             depth = 2,
             heads = 2,
+            attn_use_latent_kv = use_latent_kv,
+            attn_dim_latent_kv = 8,
             rotary_pos_emb = True
         )
     )
@@ -1409,14 +1412,15 @@ def test_beam_search_kv_cache_parity():
     assert torch.allclose(unrestricted_scores, uncached_scores, atol = 1e-5)
 
 @param('cache_kv', (False, True))
-def test_beam_search_variable_prompt_lens(cache_kv):
+@param('max_seq_len', (32, 3, 1))
+def test_beam_search_variable_prompt_lens(cache_kv, max_seq_len):
     from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
 
     torch.manual_seed(0)
 
     model = TransformerWrapper(
         num_tokens = 11,
-        max_seq_len = 32,
+        max_seq_len = max_seq_len,
         attn_layers = Decoder(
             dim = 16,
             depth = 2,
@@ -1477,25 +1481,31 @@ def test_generate_unrestricted_max_seq_len():
 
     assert torch.equal(unrestricted, restricted)
 
+# A sliding multi-layer cache retains older layer context; compare one layer there.
 @param('wrap_amateur', (False, True))
-def test_contrastive_decoding(wrap_amateur):
+@param('max_seq_len, depth', ((32, 2), (6, 1), (1, 2)))
+@param('amateur_uses_latent_kv', (False, True))
+@param('expert_uses_latent_kv', (False, True))
+def test_contrastive_decoding(wrap_amateur, max_seq_len, depth, amateur_uses_latent_kv, expert_uses_latent_kv):
     from x_transformers import AutoregressiveWrapper
 
-    def create_model():
+    def create_model(use_latent_kv = False):
         return TransformerWrapper(
             num_tokens = 11,
-            max_seq_len = 32,
+            max_seq_len = max_seq_len,
             attn_layers = Decoder(
                 dim = 16,
-                depth = 2,
+                depth = depth,
                 heads = 2,
+                attn_use_latent_kv = use_latent_kv,
+                attn_dim_latent_kv = 8,
                 rotary_pos_emb = True
             )
         )
 
-    wrapper = AutoregressiveWrapper(create_model())
+    wrapper = AutoregressiveWrapper(create_model(use_latent_kv = expert_uses_latent_kv))
 
-    amateur = create_model()
+    amateur = create_model(use_latent_kv = amateur_uses_latent_kv)
 
     if wrap_amateur:
         amateur = AutoregressiveWrapper(amateur)
