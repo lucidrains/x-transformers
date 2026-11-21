@@ -320,6 +320,8 @@ class DiscoverDecoder(Module):
             prepend_mask = torch.ones(batch, 1, device = device, dtype = torch.bool)
         )
 
+        outputs = F.pad(outputs, (0, total_len - outputs.shape[-1]), value = self.pad_id)
+
         if exists(eos_id):
             is_eos = outputs == eos_id
             lengths = torch.where(
