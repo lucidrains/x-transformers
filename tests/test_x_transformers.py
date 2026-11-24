@@ -4,6 +4,9 @@ param = pytest.mark.parametrize
 import torch
 from torch import nn
 from torch.nn import Module
+import torch.nn.functional as F
+
+from einops import rearrange
 
 from x_transformers.x_transformers import (
     XTransformer,
@@ -21,6 +24,10 @@ from x_transformers.x_transformers import (
 
 from x_transformers.neo_mlp import (
     NeoMLP
+)
+
+from x_transformers.paged_attention import (
+    PagedAttention
 )
 
 from x_transformers.multi_input import MultiInputTransformerWrapper
@@ -113,6 +120,34 @@ def test_kv_cache():
     next_logits_with_cache = model(prompts, context = context, cache = cache)
 
     assert torch.allclose(next_logits[:, -1], next_logits_with_cache[:, -1], atol = 1e-5)
+
+def test_paged_attention():
+    torch.manual_seed(0)
+
+    dim, dim_head, heads, page_size = 32, 8, 4, 4
+    attn = PagedAttention(dim = dim, dim_head = dim_head, heads = heads, page_size = page_size).eval()
+
+    seq = torch.randn(2, 10, dim)
+
+    out, cache = attn(seq)
+
+    q, k, v = rearrange(attn.to_qkv(seq), 'b n (qkv h d) -> qkv b h n d', qkv = 3, h = heads)
+    expected = attn.to_out(rearrange(F.scaled_dot_product_attention(q, k, v, is_causal = True), 'b h n d -> b n (h d)'))
+
+    assert torch.allclose(out, expected, atol = 1e-5)
+    assert cache.block_table.shape == (2, (10 + page_size - 1) // page_size)
+
+    # incremental decoding across page boundaries
+
+    out, cache = attn(seq[:, :6])
+    outs = [out]
+
+    for i in range(6, 10):
+        out, cache = attn(seq[:, i:(i + 1)], cache = cache)
+        outs.append(out)
+
+    assert torch.allclose(torch.cat(outs, dim = 1), expected, atol = 1e-5)
+    assert cache.seq_len == 10
 
 def test_cope():
     model = TransformerWrapper(
