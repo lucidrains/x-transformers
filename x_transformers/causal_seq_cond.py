@@ -15,8 +15,6 @@ from torch.amp import autocast
 from torch.nn import Module, ModuleList, RMSNorm
 import torch.nn.functional as F
 
-from assoc_scan import AssocScan
-
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
@@ -193,6 +191,7 @@ class EMAConditioner(Module):
         self.a_log = nn.Parameter(torch.empty(dim_cond).uniform_(a_lo, a_hi).log())
         self.init_state = nn.Parameter(torch.randn(dim_cond) * init_state_std)
 
+        from assoc_scan import AssocScan
         self.scan = AssocScan(use_accelerated = use_accelerated_scan)
         self.norm_out = RMSNorm(dim_cond)
 
