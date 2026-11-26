@@ -72,7 +72,8 @@ def newtonschulz5(
         t = transpose(t)
 
     t, inv_pack = pack_one_with_inverse(t, '* i j')
-    t = t / t.norm(dim = (-1, -2), keepdim = True).clamp(min = eps)
+    norm_dtype = torch.float32 if t.dtype == torch.float16 else t.dtype
+    t = (t / t.norm(dim = (-1, -2), keepdim = True, dtype = norm_dtype).clamp(min = eps)).to(t.dtype)
 
     a, b, c = coefs
 
