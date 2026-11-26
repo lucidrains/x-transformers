@@ -203,6 +203,7 @@ class XValAutoregressiveWrapper(nn.Module):
         self.max_seq_len = net.max_seq_len
         self.numerical_loss_weight = numerical_loss_weight
         self.ignore_index = ignore_index
+        self.pad_value = pad_value
 
     @torch.no_grad()
     def generate(
@@ -268,6 +269,7 @@ class XValAutoregressiveWrapper(nn.Module):
         # ignore index
 
         target_mask = target != self.ignore_index
+        inp = inp.masked_fill(inp == self.ignore_index, self.pad_value)
 
         # key padding mask
 
