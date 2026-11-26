@@ -2286,7 +2286,7 @@ def test_mv_split_residual_causal(learned):
 
     assert torch.allclose(logits[:, :-1], logits_changed[:, :-1], atol = 1e-6)
 
-    # generating with and without kv cache should agree
+    # kv cache is disabled for the causal prefix mean, so cached and uncached decoding should agree
 
     wrapper = AutoregressiveWrapper(model)
     prompt = torch.randint(0, 256, (2, 4))

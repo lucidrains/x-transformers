@@ -44,12 +44,6 @@ from x_transformers.neo_mlp import (
     NeoMLP
 )
 
-from x_transformers.paged_attention import (
-    PagedAttention,
-    PagedKVCache,
-    paged_attention
-)
-
 from x_transformers.causal_seq_cond import (
     DSConvConditioner,
     EMAConditioner,

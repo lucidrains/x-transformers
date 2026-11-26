@@ -1371,17 +1371,12 @@ class MVSplitResidualUpdate(Module):
         if not self.causal:
             return masked_mean(t, mask = mask, dim = -2, keepdim = True)
 
-        # for causal layers, each token can only average over itself and the tokens before it
+        # causal prefix mean - each token only averages over itself and the past
 
-        if exists(mask):
-            mask = rearrange(mask, 'b n -> b n 1')
-            t = t * mask
-            count = mask.cumsum(dim = -2)
-        else:
-            count = torch.arange(1, t.shape[-2] + 1, device = t.device)
-            count = rearrange(count, 'n -> n 1')
+        mask = default(mask, lambda: torch.ones(t.shape[:-1], device = t.device, dtype = torch.bool))
+        mask = rearrange(mask, 'b n -> b n 1')
 
-        return t.cumsum(dim = -2) / count.clamp(min = 1)
+        return (t * mask).cumsum(dim = -2) / mask.cumsum(dim = -2).clamp(min = 1)
 
     def forward(self, x, residual, mask = None, **kwargs):
         mean_x = self.seq_mean(x, mask = mask)
@@ -3635,10 +3630,9 @@ class AttentionLayers(Module):
 
         self.can_cache_kv = all([module.can_cache_kv for module in self.modules() if isinstance(module, Attention)])
 
-        # the causal mean of the mv split residual needs the branch outputs of all previous tokens, which are not cached
+        # causal mv split residual needs the prefix mean, which is not part of the kv cache
 
-        if mv_split_residual and causal:
-            self.can_cache_kv = False
+        self.can_cache_kv &= not (mv_split_residual and causal)
 
     def attn_qk_clip_(
         self,
