@@ -115,6 +115,7 @@ class GPTVAE(Module):
         return_mean_log_var = False
     ):
         mask = seq != self.pad_id
+        seq = seq.masked_fill(~mask, 0)
         pooled = self.encoder(seq, mask = mask)
 
         latents_mean, latents_log_var = self.to_latent_mean_log_variance(pooled)
