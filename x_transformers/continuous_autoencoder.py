@@ -186,14 +186,10 @@ class ContinuousTransformerAutoencoder(Module):
         prepend_embeds = self.from_latent_to_prepend_token(latents)
 
         recon = self.decoder(
-            seq,
+            seq[:, :-1],
             prepend_embeds = prepend_embeds,
             seq_start_pos = dropped_latents.long()
         )
-
-        # slice out the prepended latent position
-
-        recon = recon[:, 1:]
 
         # reconstruction loss
 
