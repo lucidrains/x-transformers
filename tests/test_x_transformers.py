@@ -2254,6 +2254,48 @@ def test_mv_split_residual(learned):
     loss = logits.sum()
     loss.backward()
 
+@param('learned', (False, True))
+def test_mv_split_residual_causal(learned):
+    from x_transformers import TransformerWrapper, Decoder, AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 256,
+        max_seq_len = 1024,
+        attn_layers = Decoder(
+            dim = 64,
+            depth = 2,
+            heads = 4,
+            mv_split_residual = True,
+            pre_and_post_norm = True,
+            residual_fn_kwargs = dict(learned = learned)
+        )
+    ).eval()
+
+    x = torch.randint(0, 256, (2, 10))
+    mask = torch.ones((2, 10)).bool()
+    mask[0, :3] = False
+
+    x_changed = x.clone()
+    x_changed[:, -1] = (x[:, -1] + 1) % 256
+
+    with torch.no_grad():
+        logits = model(x, mask = mask)
+        logits_changed = model(x_changed, mask = mask)
+
+    # changing the last token must not affect any earlier position
+
+    assert torch.allclose(logits[:, :-1], logits_changed[:, :-1], atol = 1e-6)
+
+    # generating with and without kv cache should agree
+
+    wrapper = AutoregressiveWrapper(model)
+    prompt = torch.randint(0, 256, (2, 4))
+
+    cached = wrapper.generate(prompt, 8, cache_kv = True, temperature = 0.)
+    uncached = wrapper.generate(prompt, 8, cache_kv = False, temperature = 0.)
+
+    assert torch.equal(cached, uncached)
+
 def test_softclamp_ff():
     from x_transformers import TransformerWrapper, Decoder
 
