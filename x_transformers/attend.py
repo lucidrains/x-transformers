@@ -534,7 +534,7 @@ class Attend(Module):
 
         if kv_heads == 1:
             k, v = tuple(rearrange(t, 'b 1 n d -> b n d') for t in (k, v))
-        elif kv_heads < heads:
+        elif kv_heads < heads and (self.flash or self.l2_distance or num_unrotated_kv > 0):
             k, v = tuple(repeat(t, 'b kvh n d -> b (r kvh) n d', r = heads // kv_heads) for t in (k, v))
 
         # handle zero kv, as means for allowing network to attend to nothing
@@ -554,7 +554,13 @@ class Attend(Module):
 
         kv_einsum_eq = 'b j d' if k.ndim == 3 else 'b h j d'
 
-        if not self.l2_distance:
+        grouped_kv = k.ndim == 4 and k.shape[1] < heads
+
+        if grouped_kv:
+            grouped_q = rearrange(q, 'b (r h) i d -> b r h i d', h = kv_heads)
+            sim = einsum('b r h i d, b h j d -> b r h i j', grouped_q, k)
+            sim = rearrange(sim, 'b r h i j -> b (r h) i j')
+        elif not self.l2_distance:
             sim = einsum(f'b h i d, {kv_einsum_eq} -> b h i j', q, k)
         else:
             sim = -qk_l2_dist_squared(q, k)
@@ -672,6 +678,10 @@ class Attend(Module):
             v_prefix, v_content = v[..., :prefix, :], v[..., prefix:, :]
             value_prefix_out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn_prefix, v_prefix)
             out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn_content, v_content)
+        elif grouped_kv:
+            grouped_attn = rearrange(attn, 'b (r h) i j -> b r h i j', h = kv_heads)
+            out = einsum('b r h i j, b h j d -> b r h i d', grouped_attn, v)
+            out = rearrange(out, 'b r h i d -> b (r h) i d')
         else:
             out = einsum(f'b h i j, {kv_einsum_eq} -> b h i d', attn, v)
 
