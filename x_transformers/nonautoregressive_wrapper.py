@@ -363,7 +363,7 @@ class NonAutoregressiveWrapper(Module):
         generated = torch.where(mask, sampled_ids, orig_seq)
 
         critic_logits = self.token_critic(generated)
-        critic_labels = (sampled_ids != orig_seq).float()
+        critic_labels = (generated != orig_seq).float()
 
         critic_loss = F.binary_cross_entropy_with_logits(
             rearrange(critic_logits, '... 1 -> ...'),
