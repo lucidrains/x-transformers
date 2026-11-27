@@ -1278,6 +1278,27 @@ def test_autoregressive_wrapper(
 
     loss.backward()
 
+def test_autoregressive_wrapper_mask_prob_and_mask_id():
+    from x_transformers import AutoregressiveWrapper
+
+    model = TransformerWrapper(
+        num_tokens = 257,
+        max_seq_len = 64,
+        attn_layers = Decoder(dim = 64, depth = 2, heads = 4, rotary_pos_emb = True)
+    )
+
+    x = torch.randint(0, 256, (2, 32))
+
+    wrapper = AutoregressiveWrapper(model, mask_prob = 0.25, mask_id = 256)
+    wrapper(x).backward()
+
+    # eval mode should not apply mask_prob
+    wrapper.eval()
+    unmasked = AutoregressiveWrapper(model, mask_prob = 0.).eval()
+
+    with torch.no_grad():
+        assert torch.allclose(wrapper(x), unmasked(x), atol = 1e-6)
+
 def test_prepend_embed():
 
     from x_transformers import AutoregressiveWrapper

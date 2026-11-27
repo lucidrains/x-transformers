@@ -166,6 +166,7 @@ class AutoregressiveWrapper(Module):
         ignore_index = -100,
         pad_value = 0,
         mask_prob = 0.,
+        mask_id: int | None = None,
         add_attn_z_loss = False,
         next_embed_loss_weight = 0.1,
         looped_loss_threshold_exit = 0.05,
@@ -183,6 +184,7 @@ class AutoregressiveWrapper(Module):
 
         assert mask_prob < 1.
         self.mask_prob = mask_prob
+        self.mask_id = mask_id
 
         # whether to add router z-loss
 
@@ -566,13 +568,16 @@ class AutoregressiveWrapper(Module):
         inp, target = x, x[:, 1:]
         inp = torch.where(inp == ignore_index, self.pad_value, inp)
 
-        if self.mask_prob > 0.:
+        if self.training and self.mask_prob > 0.:
             rand = torch.randn(inp.shape, device = x.device)
             rand[:, 0] = -torch.finfo(rand.dtype).max # first token should not be masked out
             num_mask = min(int(seq * self.mask_prob), seq - 1)
             indices = rand.topk(num_mask, dim = -1).indices
             mask = ~torch.zeros_like(inp).scatter(1, indices, 1.).bool()
             kwargs.update(self_attn_kv_mask = mask)
+
+            if exists(self.mask_id):
+                inp = inp.masked_fill(~mask, self.mask_id)
 
         out, cache = self.net(
             inp,
